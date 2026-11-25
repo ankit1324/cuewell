@@ -641,12 +641,13 @@
 
         // Split an answer into its prose and its fenced code blocks (``` or ~~~
         // on their own lines, possibly indented inside a list). When a coding
-        // language is set, the main process tags every fence line with it,
-        // closing ones too (enforceProgrammingLanguage in llm.service.js), so a
-        // closing fence may end in one word (```cpp). A fence leaves nothing in
-        // the prose: its lines and the blank lines around it are dropped and the
-        // text on either side is rejoined. A fence that is never closed, as in a
-        // cut-off answer, runs to the end.
+        // language is set, the main process retags only opening fence lines
+        // (enforceProgrammingLanguage in llm.service.js) and leaves closing ones as
+        // written, normally a plain ```. A closing fence that ends in one word
+        // (```cpp) is accepted too. A fence leaves nothing in the prose: its lines
+        // and the blank lines around it are dropped and the text on either side is
+        // rejoined. A fence that is never closed, as in a cut-off answer, runs to
+        // the end.
         // Keep in sync with splitCodeBlocks in chat.html and src/ui/chat-window.js.
         function splitCodeBlocks(text) {
             const prose = [];

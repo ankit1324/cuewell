@@ -593,8 +593,17 @@ class LLMService {
   }
 
   /**
-   * Normalize all triple-backtick code fences to the selected programming language tag.
-   * Does not alter the inner code; only ensures fence language tags are correct.
+   * Retag fenced code blocks with the selected programming language.
+   * Walks the text line by line with CommonMark-style fence state. Outside a
+   * fence, a line starting with 3+ backticks or tildes opens one; the line
+   * that closes it (same character, at least as long, only spaces or tabs
+   * after, indented at most 3 more than the opener) stays a plain fence.
+   * Only an opener indented up to 3 spaces is retagged (~~~ becomes ```).
+   * Deeper ones, as in some nested lists, are tracked but left as written,
+   * so their closing lines are never mistaken for openers. Code inside a
+   * fence and triple backticks inside a line (inline code like
+   * ```solve()```) are never changed. An unclosed fence, as in a cut-off
+   * answer, runs to the end.
    */
   enforceProgrammingLanguage(text, programmingLanguage) {
     try {
@@ -603,18 +612,55 @@ class LLMService {
       const fenceTagMap = { cpp: 'cpp', c: 'c', python: 'python', java: 'java', javascript: 'javascript', js: 'javascript' };
       const fenceTag = fenceTagMap[norm] || norm || 'text';
 
-      // Replace all triple-backtick fences' language token with the selected tag
-      const replacedBackticks = text.replace(/```([^\n]*)\n/g, (match, info) => {
-        const current = (info || '').trim();
-        // If already the desired fenceTag as the first token, keep as is
-        if (current.split(/\s+/)[0].toLowerCase() === fenceTag) return match;
-        return '```' + fenceTag + '\n';
-      });
+      // Lines sit at even indexes and their line breaks at odd ones, so
+      // join('') rebuilds the text with only the fence lines rewritten.
+      const parts = text.split(/(\r\n?|\n)/);
+      const fenceLine = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
+      let fence = null; // the open fence
+      // A retagged ~~~ fence becomes a ``` fence longer than any backtick run
+      // that starts a line inside it, so that line cannot close it early. The
+      // opener is rewritten once the fence ends.
+      const toBackticks = (closeAt, closeIndent) => {
+        const ticks = '`'.repeat(Math.max(fence.size, fence.innerTicks + 1));
+        parts[fence.at] = fence.indent + ticks + fence.tag;
+        if (closeAt >= 0) parts[closeAt] = closeIndent + ticks;
+      };
 
-      // Optionally normalize tildes fences to backticks with correct tag
-      const normalizedTildes = replacedBackticks.replace(/~~~([^\n]*)\n/g, () => '```' + fenceTag + '\n');
+      for (let i = 0; i < parts.length; i += 2) {
+        const m = parts[i].match(fenceLine);
+        if (fence) {
+          if (m && m[2][0] === fence.char && m[2].length >= fence.size &&
+              /^[ \t]*$/.test(m[3]) && m[1].length <= fence.indent.length + 3) {
+            if (fence.convert) toBackticks(i, m[1]);
+            fence = null;
+          } else if (fence.convert) {
+            const run = parts[i].match(/^[ \t]*(`{3,})/);
+            if (run) fence.innerTicks = Math.max(fence.innerTicks, run[1].length);
+          }
+          continue; // code inside a fence is never changed
+        }
+        if (!m) continue;
+        const mark = m[2][0];
+        const info = m[3].trim();
+        // A backtick fence's info string has no backticks, so a line that
+        // starts with inline code such as ```solve()``` is not a fence.
+        if (mark === '`' && info.includes('`')) continue;
+        const retag = /^ {0,3}$/.test(m[1]);
+        const keepTag = info.split(/\s+/)[0].toLowerCase() === fenceTag && !info.includes('`');
+        fence = {
+          char: mark,
+          size: m[2].length,
+          at: i,
+          indent: m[1],
+          tag: keepTag ? info : fenceTag,
+          convert: retag && mark === '~',
+          innerTicks: 0
+        };
+        if (retag && mark === '`' && !keepTag) parts[i] = m[1] + m[2] + fenceTag;
+      }
+      if (fence && fence.convert) toBackticks(-1, '');
 
-      return normalizedTildes;
+      return parts.join('');
     } catch (_) {
       return text;
     }
