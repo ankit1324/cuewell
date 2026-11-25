@@ -103,6 +103,26 @@ process.on("unhandledRejection", (reason) => {
 const captureService = require("./src/services/capture.service");
 const speechService = require("./src/services/speech.service");
 const llmService = require("./src/services/llm.service");
+const { getActiveProviderId, getProviderConfig, listProviders } = require("./src/services/providers");
+
+// AI-provider fields the Settings window edits, mapped to their .env keys.
+// geminiKey (GEMINI_API_KEY) and llmProvider (LLM_PROVIDER) are handled
+// separately in saveSettings().
+const LLM_SETTING_ENV_KEYS = {
+  anthropicKey: "ANTHROPIC_API_KEY",
+  openaiKey: "OPENAI_API_KEY",
+  openrouterKey: "OPENROUTER_API_KEY",
+  groqKey: "GROQ_API_KEY",
+  deepseekKey: "DEEPSEEK_API_KEY",
+  geminiModel: "GEMINI_MODEL",
+  anthropicModel: "ANTHROPIC_MODEL",
+  openaiModel: "OPENAI_MODEL",
+  openrouterModel: "OPENROUTER_MODEL",
+  groqModel: "GROQ_MODEL",
+  deepseekModel: "DEEPSEEK_MODEL",
+  ollamaModel: "OLLAMA_MODEL",
+  ollamaBaseUrl: "OLLAMA_BASE_URL",
+};
 
 // Managers
 const windowManager = require("./src/managers/window.manager");
@@ -1588,6 +1608,11 @@ class ApplicationController {
     // of truth (process.env) so the UI shows exactly what the running app is
     // using. Empty strings are returned rather than skipped so the UI can
     // distinguish "unset" from "stale value from a previous load".
+    const llmSettings = {};
+    for (const [field, envKey] of Object.entries(LLM_SETTING_ENV_KEYS)) {
+      llmSettings[field] = process.env[envKey] || "";
+    }
+
     return {
       codingLanguage: this.codingLanguage || "cpp",
       activeSkill: this.activeSkill || "dsa",
@@ -1607,6 +1632,9 @@ class ApplicationController {
       whisperResponseTarget: process.env.WHISPER_RESPONSE_TARGET || "both",
       whisperSegmentMs: process.env.WHISPER_SEGMENT_MS || "4000",
       geminiKey: process.env.GEMINI_API_KEY || "",
+      llmProvider: getActiveProviderId(),
+      llmProviders: listProviders(),
+      ...llmSettings,
 
       azureConfigured: !!process.env.AZURE_SPEECH_KEY && !!process.env.AZURE_SPEECH_REGION,
       speechAvailable: this.speechAvailable
@@ -1678,6 +1706,17 @@ class ApplicationController {
       if (settings.geminiKey !== undefined) {
         envUpdates.GEMINI_API_KEY = settings.geminiKey;
       }
+      if (settings.llmProvider !== undefined && settings.llmProvider !== null) {
+        const providerId = String(settings.llmProvider).trim().toLowerCase();
+        if (getProviderConfig(providerId)) {
+          envUpdates.LLM_PROVIDER = providerId;
+        }
+      }
+      for (const [field, envKey] of Object.entries(LLM_SETTING_ENV_KEYS)) {
+        if (settings[field] !== undefined && settings[field] !== null) {
+          envUpdates[envKey] = String(settings[field]).trim();
+        }
+      }
 
       // Capture the previous whisper command BEFORE persisting — persistEnvUpdates
       // mutates process.env in place, so comparing afterwards would always read
@@ -1685,19 +1724,28 @@ class ApplicationController {
       // bug the re-init guards against).
       const prevWhisperCommand = process.env.WHISPER_COMMAND || '';
 
+      // Same reason: decide now whether any AI-provider value actually changes.
+      const llmEnvKeys = ["LLM_PROVIDER", "GEMINI_API_KEY", ...Object.values(LLM_SETTING_ENV_KEYS)];
+      const llmSettingsChanged = llmEnvKeys.some((key) =>
+        envUpdates[key] !== undefined && String(envUpdates[key]) !== (process.env[key] || "")
+      );
+
       const persistedKeys = this.persistEnvUpdates(envUpdates);
 
-      // If the Gemini key was just saved, reinitialize the LLM service
-      // so the new client picks up the key. Without this, the test-
+      // Reinitialize the LLM service when the Gemini key was saved (as
+      // before) or any other AI-provider setting changed, so the new client
+      // picks up the provider, key and model. Without this, the test-
       // connection button in the onboarding wizard fails with
       // "Service not initialized" because the client was first created
       // at app startup, before any key was set.
-      if (settings.geminiKey !== undefined && envUpdates.GEMINI_API_KEY !== undefined) {
+      if ((settings.geminiKey !== undefined && envUpdates.GEMINI_API_KEY !== undefined) || llmSettingsChanged) {
         try {
           llmService.initializeClient();
-          logger.info("LLM service reinitialized after Gemini key update");
+          logger.info("LLM service reinitialized after AI provider settings update", {
+            provider: getActiveProviderId()
+          });
         } catch (e) {
-          logger.warn("Failed to reinitialize LLM service after Gemini key update", {
+          logger.warn("Failed to reinitialize LLM service after AI provider settings update", {
             error: e.message
           });
         }
@@ -1739,8 +1787,10 @@ class ApplicationController {
         }
       }
 
+      // Log setting names only: values include API keys (geminiKey,
+      // azureKey, anthropicKey, ...) that must never reach log files.
       logger.info("Settings saved successfully", {
-        ...settings,
+        fields: Object.keys(settings || {}),
         persistedEnvKeys: persistedKeys
       });
       return { success: true, persistedEnvKeys: persistedKeys };
@@ -1753,7 +1803,7 @@ class ApplicationController {
   persistSettings(settings) {
     // You can extend this to save to a file or database
     // For now, we'll just keep them in memory
-    logger.debug("Settings persisted", settings);
+    logger.debug("Settings persisted", { fields: Object.keys(settings || {}) });
   }
 
   /**

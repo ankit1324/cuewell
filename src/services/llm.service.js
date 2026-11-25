@@ -1,7 +1,18 @@
 const { GoogleGenAI } = require('@google/genai');
+const { URL: NodeURL } = require('url');
 const logger = require('../core/logger').createServiceLogger('LLM');
 const config = require('../core/config');
 const { promptLoader } = require('../../prompt-loader');
+const {
+  getActiveProviderId,
+  getProviderConfig,
+  getModel,
+  getBaseURL,
+  isConfigured,
+  createProvider
+} = require('./providers');
+const { fromGeminiRequest } = require('./providers/convert');
+const { MAX_TOKENS_NO_TEXT } = require('./providers/errors');
 
 class LLMService {
   constructor() {
@@ -10,11 +21,33 @@ class LLMService {
     this.isInitialized = false;
     this.requestCount = 0;
     this.errorCount = 0;
+    // Active AI provider (LLM_PROVIDER). Gemini uses this.client; every other
+    // provider uses this.provider from ./providers.
+    this.providerId = null;
+    this.provider = null;
     
     this.initializeClient();
   }
 
   initializeClient() {
+    const providerId = getActiveProviderId();
+    const previousProviderId = this.providerId;
+    this.providerId = providerId;
+
+    if (providerId !== 'gemini') {
+      this._initializeProvider(providerId);
+      return;
+    }
+
+    this.provider = null;
+    if (previousProviderId && previousProviderId !== 'gemini') {
+      // Switching back from another provider: drop its state so a missing
+      // Gemini key leaves the service uninitialized instead of half-wired.
+      this.client = null;
+      this.model = null;
+      this.isInitialized = false;
+    }
+
     const apiKey = config.getApiKey('GEMINI');
     
     if (!apiKey || apiKey === 'your-api-key-here') {
@@ -28,8 +61,8 @@ class LLMService {
     try {
       this.client = new GoogleGenAI({ apiKey });
       
-      // Use the configured model name (default: gemini-3.5-flash)
-      this.model = config.get('llm.gemini.model');
+      // GEMINI_MODEL from .env when set, otherwise the configured default
+      this.model = getModel('gemini');
       this.isInitialized = true;
       
       logger.info('Gemini AI client initialized successfully', {
@@ -38,6 +71,35 @@ class LLMService {
     } catch (error) {
       logger.error('Failed to initialize Gemini client', { 
         error: error.message 
+      });
+    }
+  }
+
+  /** Set up a non-Gemini provider. Never reuses the Gemini client or a stale provider. */
+  _initializeProvider(providerId) {
+    const label = getProviderConfig(providerId).label;
+    this.client = null;
+    this.provider = null;
+    this.isInitialized = false;
+    this.model = getModel(providerId);
+
+    if (!isConfigured(providerId)) {
+      logger.warn(`${label} API key not configured`, { provider: providerId });
+      return;
+    }
+
+    try {
+      this.provider = createProvider(providerId);
+      this.isInitialized = true;
+      logger.info(`${label} client initialized successfully`, {
+        provider: providerId,
+        model: this.model
+      });
+    } catch (error) {
+      this.provider = null;
+      logger.error(`Failed to initialize ${label} client`, {
+        provider: providerId,
+        error: error.message
       });
     }
   }
@@ -123,12 +185,15 @@ class LLMService {
    */
   async processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error(this._providerCopy().notInitialized);
     }
 
     if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
       throw new Error('Invalid image buffer provided to processImageWithSkill');
     }
+
+    // Thrown before the fallback-response handling below so the user sees why.
+    this._assertImagesSupported();
 
     const startTime = Date.now();
     this.requestCount++;
@@ -227,12 +292,14 @@ class LLMService {
 
   async processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error(this._providerCopy().notInitialized);
     }
 
     if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
       throw new Error('Invalid image buffer provided to processImageWithSkillStream');
     }
+
+    this._assertImagesSupported();
 
     const startTime = Date.now();
     this.requestCount++;
@@ -304,7 +371,7 @@ class LLMService {
 
   async processTextWithSkill(text, activeSkill, sessionMemory = [], programmingLanguage = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error(this._providerCopy().notInitialized);
     }
 
     const startTime = Date.now();
@@ -391,7 +458,7 @@ class LLMService {
 
   async processTextWithSkillStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error(this._providerCopy().notInitialized);
     }
 
     const startTime = Date.now();
@@ -439,7 +506,7 @@ class LLMService {
 
   async processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory = [], programmingLanguage = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error(this._providerCopy().notInitialized);
     }
 
     const startTime = Date.now();
@@ -839,6 +906,10 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   }
 
   async executeRequest(geminiRequest) {
+    if (this.providerId !== 'gemini') {
+      return this.executeProviderRequest(geminiRequest, null);
+    }
+
     const maxRetries = config.get('llm.gemini.maxRetries');
     const timeout = config.get('llm.gemini.timeout');
     const primaryModel = this.model;
@@ -980,7 +1051,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
    */
   async processTranscriptionWithIntelligentResponseStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
     if (!this.isInitialized) {
-      throw new Error('LLM service not initialized. Check Gemini API key configuration.');
+      throw new Error(this._providerCopy().notInitialized);
     }
 
     const startTime = Date.now();
@@ -1054,6 +1125,10 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
    * for each chunk.
    */
   async executeStreamingRequest(geminiRequest, onDelta) {
+    if (this.providerId !== 'gemini') {
+      return this.executeProviderRequest(geminiRequest, onDelta);
+    }
+
     const maxRetries = config.get('llm.gemini.maxRetries');
     const apiKey = config.getApiKey('GEMINI');
     const primaryModel = this.model;
@@ -1189,6 +1264,11 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   }
 
   async performPreflightCheck() {
+    // Gemini-only probe; other providers never touch the Gemini endpoint.
+    if (this.providerId !== 'gemini') {
+      return;
+    }
+
     // Quick connectivity check
     try {
       const startTime = Date.now();
@@ -1276,10 +1356,12 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   }
 
   async checkNetworkConnectivity() {
-    const connectivityTests = [
-      { host: 'google.com', port: 443, name: 'Google (HTTPS)' },
-      { host: 'generativelanguage.googleapis.com', port: 443, name: 'Gemini API Endpoint' }
-    ];
+    const connectivityTests = this.providerId !== 'gemini'
+      ? this._providerConnectivityTests()
+      : [
+        { host: 'google.com', port: 443, name: 'Google (HTTPS)' },
+        { host: 'generativelanguage.googleapis.com', port: 443, name: 'Gemini API Endpoint' }
+      ];
 
     const results = await Promise.allSettled(
       connectivityTests.map(test => this.testNetworkConnection(test))
@@ -1296,6 +1378,20 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
 
     logger.info('Network connectivity check completed', connectivity);
     return connectivity;
+  }
+
+  /** Reachability target for the active non-Gemini provider's endpoint. */
+  _providerConnectivityTests() {
+    const label = getProviderConfig(this.providerId).label;
+    try {
+      // Node's URL: speech.service.js may have replaced the global one with a stub.
+      const url = new NodeURL(getBaseURL(this.providerId));
+      const port = Number(url.port) || (url.protocol === 'http:' ? 80 : 443);
+      const host = url.hostname.replace(/^\[(.*)\]$/, '$1');
+      return [{ host, port, name: `${label} API Endpoint` }];
+    } catch (_) {
+      return [];
+    }
   }
 
   async testNetworkConnection({ host, port, name }) {
@@ -1330,7 +1426,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
       'dsa': 'This appears to be a data structures and algorithms problem. Consider breaking it down into smaller components and identifying the appropriate algorithm or data structure to use.',
       'system-design': 'For this system design question, consider scalability, reliability, and the trade-offs between different architectural approaches.',
       'programming': 'This looks like a programming challenge. Focus on understanding the requirements, edge cases, and optimal time/space complexity.',
-      'default': 'I can help analyze this content. Please ensure your Gemini API key is properly configured for detailed analysis.'
+      'default': this._providerCopy().fallbackHint
     };
 
     const response = fallbackResponses[activeSkill] || fallbackResponses.default;
@@ -1392,6 +1488,10 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   async testConnection() {
     if (!this.isInitialized) {
       return { success: false, error: 'Service not initialized' };
+    }
+
+    if (this.providerId !== 'gemini') {
+      return this._testProviderConnection();
     }
 
     try {
@@ -1486,27 +1586,223 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   _friendlyTestError(error, analysis) {
     const type = analysis?.type;
     const raw = (error?.message || '').toLowerCase();
+    const copy = this._providerCopy();
 
     if (type === 'NETWORK_ERROR' || raw.includes('fetch failed') || raw.includes('enotfound')) {
-      return 'Cannot reach Google servers. Check your internet connection, firewall, or VPN settings.';
+      return copy.unreachable;
     }
     if (type === 'AUTH_ERROR' || raw.includes('api key') || raw.includes('401') || raw.includes('403')) {
-      return 'Invalid API key or insufficient permissions. Double-check the key at aistudio.google.com/apikey.';
+      return copy.badKey;
     }
     if (type === 'RATE_LIMIT_ERROR' || raw.includes('429') || raw.includes('quota')) {
-      return 'Rate limit or quota exceeded. Wait a moment or check your Google Cloud billing.';
+      return copy.rateLimited;
     }
     if (type === 'TIMEOUT_ERROR') {
-      return 'Request timed out. The Google API may be slow or unreachable right now.';
+      return copy.timedOut;
     }
     if (type === 'MODEL_ERROR' || raw.includes('model') || raw.includes('404')) {
-      return 'The configured Gemini model is unavailable. Try a different model in Settings.';
+      return copy.modelUnavailable;
     }
     if (raw.includes('503') || raw.includes('unavailable') || raw.includes('high demand')) {
-      return 'Gemini is experiencing high demand. Please wait a moment and try again.';
+      return copy.highDemand;
     }
     // Fall back to a stripped-down raw message (no SDK prefix noise)
     return (error?.message || 'Connection failed').replace(/^\[(GoogleGenerativeAI|GoogleGenAI) Error\]:\s*/i, '');
+  }
+
+  /**
+   * User-facing wording for the active provider. The Gemini strings are the
+   * original ones, so Gemini messages read exactly as before.
+   */
+  _providerCopy() {
+    const providerConfig = this.providerId && this.providerId !== 'gemini'
+      ? getProviderConfig(this.providerId)
+      : null;
+
+    if (!providerConfig) {
+      return {
+        notInitialized: 'LLM service not initialized. Check Gemini API key configuration.',
+        fallbackHint: 'I can help analyze this content. Please ensure your Gemini API key is properly configured for detailed analysis.',
+        unreachable: 'Cannot reach Google servers. Check your internet connection, firewall, or VPN settings.',
+        badKey: 'Invalid API key or insufficient permissions. Double-check the key at aistudio.google.com/apikey.',
+        rateLimited: 'Rate limit or quota exceeded. Wait a moment or check your Google Cloud billing.',
+        timedOut: 'Request timed out. The Google API may be slow or unreachable right now.',
+        modelUnavailable: 'The configured Gemini model is unavailable. Try a different model in Settings.',
+        highDemand: 'Gemini is experiencing high demand. Please wait a moment and try again.'
+      };
+    }
+
+    const label = providerConfig.label;
+    const isOllama = this.providerId === 'ollama';
+    return {
+      notInitialized: isOllama
+        ? `LLM service not initialized. Check the ${label} settings.`
+        : `LLM service not initialized. Check ${label} API key configuration.`,
+      fallbackHint: isOllama
+        ? `I can help analyze this content. Please ensure ${label} is running for detailed analysis.`
+        : `I can help analyze this content. Please ensure your ${label} API key is properly configured for detailed analysis.`,
+      unreachable: isOllama
+        ? `Cannot reach ${label} at ${getBaseURL(this.providerId)}. Make sure it is running.`
+        : `Cannot reach ${label}. Check your internet connection, firewall, or VPN settings.`,
+      badKey: `Invalid API key or insufficient permissions. Double-check your ${label} API key in Settings.`,
+      rateLimited: `Rate limit or quota exceeded. Wait a moment or check your ${label} plan and billing.`,
+      timedOut: `Request timed out. ${label} may be slow or unreachable right now.`,
+      modelUnavailable: isOllama
+        ? `The configured ${label} model is unavailable. Run "ollama pull ${this.model}" or pick another model in Settings.`
+        : `The configured ${label} model is unavailable. Try a different model in Settings.`,
+      highDemand: `${label} is experiencing high demand. Please wait a moment and try again.`
+    };
+  }
+
+  /** Screenshots need a vision-capable provider; fail before any request is made. */
+  _assertImagesSupported() {
+    if (this.providerId === 'gemini') {
+      return;
+    }
+    const providerConfig = getProviderConfig(this.providerId);
+    if (providerConfig && providerConfig.supportsImages === false) {
+      throw new Error(`${providerConfig.label} does not support screenshots. Choose Gemini, Claude, OpenAI, OpenRouter or Ollama in Settings.`);
+    }
+  }
+
+  /**
+   * Send a Gemini-shaped request through the active non-Gemini provider.
+   * Streams when onDelta is a function. Retries network, 429 and 5xx failures
+   * with the same backoff as the Gemini paths; a stream that already showed
+   * text is not replayed, because the caller's non-streaming fallback replaces
+   * the partial answer instead of appending a second copy.
+   */
+  async executeProviderRequest(geminiRequest, onDelta = null, options = {}) {
+    const providerConfig = getProviderConfig(this.providerId);
+    const label = providerConfig ? providerConfig.label : String(this.providerId);
+    const provider = this.provider;
+    const model = this.model;
+
+    if (!provider) {
+      throw new Error(this._providerCopy().notInitialized);
+    }
+
+    const neutral = fromGeminiRequest(geminiRequest);
+    if (neutral.messages.some((message) => message.parts.some((part) => part.type === 'image'))) {
+      this._assertImagesSupported();
+    }
+    if (!neutral.messages.length) {
+      throw new Error(`Nothing to send to ${label}: the request has no user message`);
+    }
+
+    const streaming = typeof onDelta === 'function';
+    const maxAttempts = Math.max(1, Number(options.maxAttempts) || config.get('llm.gemini.maxRetries') || 1);
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let emittedText = false;
+      try {
+        const text = streaming
+          ? await provider.stream(neutral, model, (delta) => {
+            emittedText = true;
+            onDelta(delta);
+          })
+          : await provider.generate(neutral, model);
+
+        const trimmed = typeof text === 'string' ? text.trim() : '';
+        if (!trimmed) {
+          throw new Error(`Empty response from ${label}`);
+        }
+
+        logger.debug(`${label} request successful`, {
+          provider: this.providerId,
+          model,
+          attempt,
+          streaming,
+          responseLength: trimmed.length
+        });
+        return trimmed;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const errorInfo = this.analyzeError(lastError);
+        const status = Number(lastError.status) || 0;
+        const retryable = errorInfo.isNetworkError || errorInfo.type === 'RATE_LIMIT_ERROR' ||
+          status === 429 || status >= 500;
+        const willRetry = retryable && !emittedText && attempt < maxAttempts;
+
+        logger.warn(`${label} attempt ${attempt} failed`, {
+          provider: this.providerId,
+          model,
+          error: lastError.message,
+          errorType: errorInfo.type,
+          status: status || undefined,
+          streaming,
+          willRetry
+        });
+
+        if (!willRetry) {
+          break;
+        }
+
+        const baseDelay = errorInfo.isNetworkError ? 2500 : 1500;
+        await this.delay(baseDelay * attempt + Math.random() * 1000);
+      }
+    }
+
+    throw lastError;
+  }
+
+  /** Connection test for non-Gemini providers; same result shape as the Gemini branch. */
+  async _testProviderConnection() {
+    const startTime = Date.now();
+    const request = {
+      contents: [{ role: 'user', parts: [{ text: 'Reply with OK' }] }],
+      generationConfig: { maxOutputTokens: 64 }
+    };
+
+    try {
+      let text;
+      try {
+        // One attempt: a test should report a failure promptly, not back off.
+        text = await this.executeProviderRequest(request, null, { maxAttempts: 1 });
+      } catch (error) {
+        // Reasoning models can spend the 64-token budget before writing any
+        // text. The API still accepted the key and model, which is what this
+        // test checks.
+        if (!error || error.code !== MAX_TOKENS_NO_TEXT) {
+          throw error;
+        }
+        text = '';
+      }
+
+      const latency = Date.now() - startTime;
+      logger.info('Connection test successful', {
+        provider: this.providerId,
+        model: this.model,
+        response: text,
+        latency
+      });
+
+      return {
+        success: true,
+        response: text,
+        latency,
+        model: this.model,
+        provider: this.providerId,
+        networkConnectivity: null
+      };
+    } catch (error) {
+      const errorAnalysis = this.analyzeError(error);
+      logger.error('Connection test failed', {
+        provider: this.providerId,
+        model: this.model,
+        error: error.message,
+        errorAnalysis
+      });
+
+      return {
+        success: false,
+        error: this._friendlyTestError(error, errorAnalysis),
+        errorType: errorAnalysis?.type || 'UNKNOWN',
+        errorAnalysis,
+        networkConnectivity: null
+      };
+    }
   }
 
   updateApiKey(newApiKey) {
@@ -1518,11 +1814,15 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   }
 
   getStats() {
+    const providerConfig = getProviderConfig(this.providerId);
     return {
       isInitialized: this.isInitialized,
       requestCount: this.requestCount,
       errorCount: this.errorCount,
       successRate: this.requestCount > 0 ? ((this.requestCount - this.errorCount) / this.requestCount) * 100 : 0,
+      provider: this.providerId,
+      providerLabel: providerConfig ? providerConfig.label : null,
+      model: this.model,
       config: config.get('llm.gemini')
     };
   }
@@ -1532,9 +1832,15 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
   }
 
   async executeAlternativeRequest(geminiRequest) {
+    if (this.providerId !== 'gemini') {
+      return this.executeProviderRequest(geminiRequest, null);
+    }
+
     const https = require('https');
     const apiKey = config.getApiKey('GEMINI');
-    const primaryModel = config.get('llm.gemini.model');
+    // Same model as the SDK path (honors GEMINI_MODEL); identical to the
+    // config default when GEMINI_MODEL is unset.
+    const primaryModel = this.model || config.get('llm.gemini.model');
     const fallbackModels = config.get('llm.gemini.fallbackModels') || [];
     const modelsToTry = [primaryModel, ...fallbackModels];
 

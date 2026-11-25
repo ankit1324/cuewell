@@ -17,6 +17,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const whisperResponseTargetSelect = document.getElementById('whisperResponseTarget');
     const whisperSegmentMsInput = document.getElementById('whisperSegmentMs');
     const geminiKeyInput = document.getElementById('geminiKey');
+    const llmProviderSelect = document.getElementById('llmProvider');
+    // AI provider fields. Each element id is also its settings key in main.js
+    // (geminiKey is handled with the other existing fields above).
+    const llmFieldInputs = [
+        'anthropicKey', 'openaiKey', 'openrouterKey', 'groqKey', 'deepseekKey',
+        'geminiModel', 'anthropicModel', 'openaiModel', 'openrouterModel',
+        'groqModel', 'deepseekModel', 'ollamaModel', 'ollamaBaseUrl'
+    ].map((id) => document.getElementById(id)).filter(Boolean);
     const windowGapInput = document.getElementById('windowGap');
     const codingLanguageSelect = document.getElementById('codingLanguage');
     const activeSkillSelect = document.getElementById('activeSkill');
@@ -88,6 +96,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (whisperResponseTargetSelect) whisperResponseTargetSelect.value = settings.whisperResponseTarget || 'both';
         if (whisperSegmentMsInput) whisperSegmentMsInput.value = settings.whisperSegmentMs || '';
         if (geminiKeyInput) geminiKeyInput.value = settings.geminiKey || '';
+        if (settings.llmProvider && llmProviderSelect) llmProviderSelect.value = settings.llmProvider;
+        llmFieldInputs.forEach((input) => {
+            input.value = settings[input.id] || '';
+        });
+        // Show each provider's default model as the placeholder.
+        if (Array.isArray(settings.llmProviders)) {
+            settings.llmProviders.forEach((provider) => {
+                const modelInput = document.getElementById(`${provider.id}Model`);
+                if (modelInput && provider.defaultModel) modelInput.placeholder = provider.defaultModel;
+            });
+        }
         if (windowGapInput) windowGapInput.value = settings.windowGap || '';
 
         // Set C++ as default if no coding language is specified
@@ -111,6 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         updateSpeechFieldStates();
+        updateProviderFieldStates();
     };
 
     // Load settings when window opens
@@ -147,6 +167,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (whisperResponseTargetSelect) settings.whisperResponseTarget = whisperResponseTargetSelect.value;
         if (whisperSegmentMsInput) settings.whisperSegmentMs = whisperSegmentMsInput.value;
         if (geminiKeyInput) settings.geminiKey = geminiKeyInput.value;
+        if (llmProviderSelect) settings.llmProvider = llmProviderSelect.value;
+        llmFieldInputs.forEach((input) => {
+            settings[input.id] = input.value;
+        });
         if (windowGapInput) settings.windowGap = windowGapInput.value;
         if (codingLanguageSelect) settings.codingLanguage = codingLanguageSelect.value;
         if (activeSkillSelect) settings.activeSkill = activeSkillSelect.value;
@@ -184,6 +208,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    // Only the selected AI provider's fields are visible. Hidden fields keep
+    // their values, so switching providers never drops a saved key.
+    const updateProviderFieldStates = () => {
+        const provider = llmProviderSelect ? llmProviderSelect.value : 'gemini';
+        document.querySelectorAll('.provider-fields').forEach((group) => {
+            group.style.display = group.dataset.provider === provider ? '' : 'none';
+        });
+    };
+
     // Add event listeners for all inputs
     const inputs = [
         azureKeyInput,
@@ -196,6 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
         whisperResponseTargetSelect,
         whisperSegmentMsInput,
         geminiKeyInput,
+        ...llmFieldInputs,
         windowGapInput
     ];
 
@@ -209,6 +243,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (speechProviderSelect) {
         speechProviderSelect.addEventListener('change', () => {
             updateSpeechFieldStates();
+            saveSettings();
+        });
+    }
+
+    if (llmProviderSelect) {
+        llmProviderSelect.addEventListener('change', () => {
+            updateProviderFieldStates();
             saveSettings();
         });
     }
@@ -237,6 +278,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     updateSpeechFieldStates();
+    updateProviderFieldStates();
 
     // Initialize icon grid with correct paths
     const initializeIconGrid = () => {
