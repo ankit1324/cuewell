@@ -9,437 +9,241 @@
     <script src="lib/safe-html.js"></script>
     <script src="lib/markdown.js"></script>
     <script src="lib/mathrender.js"></script>
+    <!-- PrismJS core (bundled with markup, css, clike and javascript) and the
+         autoloader, which adds other languages from components/ on demand.
+         Token colors come from theme.css. -->
+    <script src="./node_modules/prismjs/prism.js"></script>
+    <script src="./node_modules/prismjs/plugins/autoloader/prism-autoloader.min.js"></script>
+    <script>
+        // Configure Prism autoloader
+        try { if (window.Prism && Prism.plugins && Prism.plugins.autoloader) { Prism.plugins.autoloader.languages_path = './node_modules/prismjs/components/'; } } catch (_) {}
+    </script>
     <style>
-        .text-white { color: white; }
-        .text-gray-300 { color: #d1d5db; }
-        .text-sm { font-size: 0.875rem; }
-        .font-medium { font-weight: 500; }
-        .mr-2 { margin-right: 0.5rem; }
-
+        html,
         body {
-            background: linear-gradient(135deg, rgba(0, 0, 0, 0.4) 0%, rgba(20, 20, 20, 0.5) 100%);;
-            -webkit-app-region: no-drag;
-            color: white;
             margin: 0;
             padding: 0;
-            overflow: hidden;
-            height: 100vh;
             width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: transparent;
         }
-        .content-area {
+        body {
             -webkit-app-region: no-drag;
         }
-        .markdown-content {
-            line-height: 1.6;
-            color: white;
-            font-size: 0.875rem;
+
+        .hidden { display: none !important; }
+
+        /* ---------- Window surface ---------- */
+
+        .main-container {
+            display: flex;
+            flex-direction: column;
         }
-        .markdown-content h1, .markdown-content h2, .markdown-content h3 {
-            margin-top: 1.2rem;
-            margin-bottom: 0.8rem;
-            font-weight: bold;
-            color: white;
+
+        /* Header: the drag region */
+        .window-header {
+            -webkit-app-region: drag;
+            user-select: none;
         }
-        .markdown-content h1 { font-size: 1.2rem; }
-        .markdown-content h2 { font-size: 1.1rem; }
-        .markdown-content h3 { font-size: 1rem; }
-        .markdown-content p { margin-bottom: 0.8rem; color: white; font-size: 0.875rem; }
-        .markdown-content ul, .markdown-content ol { margin-bottom: 0.8rem; padding-left: 1.2rem; font-size: 0.875rem; }
-        .markdown-content li { margin-bottom: 0.4rem; color: white; font-size: 0.875rem; }
-        .markdown-content code { 
-            background-color: rgba(0, 0, 0, 0.4); 
-            padding: 0.2rem 0.4rem; 
-            border-radius: 0.25rem; 
-            font-family: 'Courier New', monospace;
-            color: #e5e7eb;
+        .window-title {
+            pointer-events: none;
+            user-select: none;
         }
-        .markdown-content pre { 
-            background-color: rgba(0, 0, 0, 0.4); 
-            padding: 1rem; 
-            border-radius: 0.5rem; 
-            margin: 1rem 0;
-            overflow-x: auto;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+        .window-header .answer-spacer { flex: 1; }
+        .answer-status.oc-label {
+            color: var(--oc-accent);
+            pointer-events: none;
         }
-        .markdown-content pre code { 
-            background-color: transparent; 
-            padding: 0; 
-            color: #e5e7eb;
+        .window-controls {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            -webkit-app-region: no-drag;
         }
-        .markdown-content blockquote {
-            border-left: 4px solid #6b7280;
-            padding-left: 1rem;
-            margin: 1rem 0;
-            font-style: italic;
-            color: #d1d5db;
+        .window-controls svg { display: block; }
+
+        /* ---------- Loading ---------- */
+
+        .loading {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
         }
-        .math {
-            font-family: 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', Georgia, serif;
-            white-space: nowrap;
+        .loading-text {
+            padding: 14px 20px;
+            font-size: var(--oc-fs-md);
+            font-weight: 600;
         }
-        .markdown-content sup, .markdown-content sub {
+
+        /* ---------- Content ---------- */
+
+        .content-area {
+            -webkit-app-region: no-drag;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .split-layout {
+            flex: 1;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            overflow: hidden;
+        }
+
+        .text-panel,
+        .code-panel {
+            position: relative;
+            min-height: 0;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .code-panel {
+            background: var(--oc-sunken);
+            border-left: 1px solid var(--oc-line);
+        }
+
+        .panel-content,
+        .full-content-inner {
+            height: 100%;
+            box-sizing: border-box;
+            overflow: auto;
+            outline: none;
+        }
+        .text-panel .panel-content { padding: 16px 20px 20px; }
+        .code-panel .panel-content { padding: 14px 16px; }
+
+        .full-content {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+            overflow: hidden;
+        }
+        .full-content-inner { padding: 16px 20px 20px; }
+        #full-markdown { max-width: 80ch; }
+
+        /* Each panel scrolls on its own; theme.css draws the thin scrollbars. */
+
+        .panel-content:focus-visible,
+        .full-content-inner:focus-visible {
+            outline: none;
+            box-shadow: inset 0 0 0 1px var(--oc-accent-line);
+        }
+
+        .interactive-scrolling .panel-content,
+        .interactive-scrolling .full-content-inner { cursor: grab; }
+        .interactive-scrolling .panel-content:active,
+        .interactive-scrolling .full-content-inner:active { cursor: grabbing; }
+
+        /* Markdown: .oc-prose does the typography; these are page extras. */
+        .markdown-content sup,
+        .markdown-content sub {
             font-size: 0.72em;
             line-height: 0;
         }
-
-        /* Main container - ensures full viewport usage */
-        .main-container {
-            height: 100vh;
-            width: 100vw;
-            overflow: hidden;
-            position: relative;
-            background: transparent;
+        .math {
+            font-family: 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', serif;
+            white-space: nowrap;
         }
 
-        /* Split layout improvements */
-        .split-layout {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.75rem;
-            height: 100vh;
-            padding: 0;
-            box-sizing: border-box;
-            overflow: hidden;
+        /* Error callout (e.g. "Screen capture failed...") */
+        .answer-error {
+            padding: 10px 14px;
+            color: var(--oc-text);
+            background: var(--oc-error-soft);
+            border-left: 2px solid var(--oc-error);
+            border-radius: 0 var(--oc-r-sm) var(--oc-r-sm) 0;
         }
 
-        /* Panel improvements with proper scrolling */
-        .text-panel, .code-panel {
-            background: transparent;
-            overflow: hidden;
-            position: relative;
-            min-height: 0; /* Important for grid items */
-        }
+        /* ---------- Code panel ---------- */
 
-        .panel-content {
-            height: 100%;
-            overflow-y: auto;
-            overflow-x: auto;
-            padding: 1rem;
-            box-sizing: border-box;
-            scroll-behavior: smooth;
-        }
-
-        /* Full content layout */
-        .full-content {
-            height: 100vh;
-            padding: 0;
-            box-sizing: border-box;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .full-content-inner {
-            height: 100%;
-            background-color: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(10px);
-            border-radius: 0.5rem;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            overflow-y: auto;
-            overflow-x: auto;
-            padding: 1rem;
-            box-sizing: border-box;
-            scroll-behavior: smooth;
-        }
-
-        /* Hide scrollbars completely while maintaining scrollability */
-        .panel-content::-webkit-scrollbar, 
-        .full-content-inner::-webkit-scrollbar {
-            width: 0px;
-            height: 0px;
-            display: none;
-        }
-        
-        /* For Firefox and other browsers */
-        .panel-content, 
-        .full-content-inner {
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-        }
-
-        /* Code block styling */
-        .code-block {
-            background-color: rgba(0, 0, 0, 0.3); 
-            margin-bottom: 1rem;
-            border-radius: 0.5rem;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+        .code-block + .code-block {
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid var(--oc-line);
         }
         .code-header {
-            background-color: rgba(0, 0, 0, 0.4);
-            padding: 0.5rem 0.75rem;
-            border-radius: 0.5rem 0.5rem 0 0;
-            font-family: 'Courier New', monospace;
-            font-size: 0.75rem;
-            color: #d1d5db;
-            font-weight: bold;
-        }
-        .code-content {
-            padding: 1rem;
-            overflow-x: auto;
-            background-color: rgba(0, 0, 0, 0.2);
-            border-radius: 0 0 0.5rem 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            min-height: 22px;
+            margin-bottom: 8px;
         }
         .code-content pre {
-            background-color: transparent;
-            border: none;
             margin: 0;
             padding: 0;
+            overflow-x: auto;
+            background: none;
+            border: 0;
         }
-        .code-content code {
-            background-color: transparent;
-            color: #e5e7eb;
+        .code-content code,
+        .code-content pre[class*="language-"] {
+            font-family: var(--oc-mono);
+            font-size: 12.5px;
+            line-height: 1.6;
+            font-variant-ligatures: none;
+            font-feature-settings: "calt" 0;
+            white-space: pre;
+            color: #e6e4dd;
+            background: none;
         }
         .no-code {
             display: flex;
             align-items: center;
             justify-content: center;
             height: 100%;
-            color: #9ca3af;
-            font-style: italic;
+            color: var(--oc-text-3);
+            font-size: var(--oc-fs-sm);
         }
 
-        /* Loading state */
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            background-color: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(8px);
-        }
-        
-        .loading-compact {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 200px;
-            height: 60px;
-            background: transparent;
-        }
-        
-        .dots-container {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.3rem;
-        }
-        
-        .bouncing-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background-color: #4CAF50;
-            animation: bounce 1.4s infinite ease-in-out;
-        }
-        
-        .bouncing-dot:nth-child(1) { animation-delay: -0.32s; }
-        .bouncing-dot:nth-child(2) { animation-delay: -0.16s; }
-        .bouncing-dot:nth-child(3) { animation-delay: 0s; }
-        
-        @keyframes bounce {
-            0%, 80%, 100% {
-                transform: scale(0);
-                opacity: 0.5;
-            }
-            40% {
-                transform: scale(1);
-                opacity: 1;
-            }
-        }
-
-        /* Interactive scrolling enhancements */
-        .interactive-scrolling .panel-content,
-        .interactive-scrolling .full-content-inner {
-            cursor: grab;
-        }
-
-        .interactive-scrolling .panel-content:active,
-        .interactive-scrolling .full-content-inner:active {
-            cursor: grabbing;
-        }
-
-        /* Remove hover effects for clean content appearance */
-
-        /* Override Prism theme for better visibility */
-        .token.comment,
-        .token.prolog,
-        .token.doctype,
-        .token.cdata {
-            color: #6a737d;
-        }
-        
-        .token.punctuation {
-            color: #e1e4e8;
-        }
-        
-        .token.property,
-        .token.tag,
-        .token.boolean,
-        .token.number,
-        .token.constant,
-        .token.symbol,
-        .token.deleted {
-            color: #79b8ff;
-        }
-        
-        .token.selector,
-        .token.attr-name,
-        .token.string,
-        .token.char,
-        .token.builtin,
-        .token.inserted {
-            color: #85e89d;
-        }
-        
-        .token.operator,
-        .token.entity,
-        .token.url,
-        .language-css .token.string,
-        .style .token.string {
-            color: #f97583;
-        }
-        
-        .token.atrule,
-        .token.attr-value,
-        .token.keyword {
-            color: #f97583;
-        }
-        
-        .token.function,
-        .token.class-name {
-            color: #b392f0;
-        }
-        
-        .token.regex,
-        .token.important,
-        .token.variable {
-            color: #ffab70;
-        }
-        
-        .token.important,
-        .token.bold {
-            font-weight: bold;
-        }
-        
-        .token.italic {
-            font-style: italic;
-        }
-        
-        .token.entity {
-            cursor: help;
-        }
-
-        /* Ensure content is always visible */
-        .hidden { display: none !important; }
-        .visible { display: block !important; }
-
-        /* Draggable header bar */
-        .window-header {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 32px;
-            -webkit-app-region: drag;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 10px;
-            box-sizing: border-box;
-            background: linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 100%);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(255,255,255,0.12);
-            z-index: 50;
-            color: #e5e7eb;
-            font-size: 12px;
-            letter-spacing: 0.3px;
-        }
-        .window-title {
-            pointer-events: none;
-            user-select: none;
-            opacity: 0.9;
-        }
-        .window-controls {
-            display: flex;
-            gap: 6px;
+        /* Copy buttons (class names are used by the script) */
+        .copy-btn.oc-btn {
+            height: 22px;
+            padding: 0 8px;
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-2xs);
+            font-weight: 500;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
             -webkit-app-region: no-drag;
         }
-        .window-btn {
-            width: 22px;
-            height: 22px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 4px;
-            background: rgba(255,255,255,0.06);
-            color: #e5e7eb;
-            border: 1px solid rgba(255,255,255,0.12);
-            cursor: pointer;
-            transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-            font-weight: 600;
-            line-height: 1;
+        .copy-btn.copied,
+        .copy-btn.copied:hover { color: var(--oc-accent); }
+        .oc-prose pre .copy-btn {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            background: var(--oc-glass-pop);
+            border-color: var(--oc-line);
         }
-        .window-btn:hover {
-            background: rgba(255,255,255,0.12);
-            border-color: rgba(255,255,255,0.2);
-        }
-        .window-btn-close:hover {
-            background: rgba(239, 68, 68, 0.25);
-            border-color: rgba(239, 68, 68, 0.45);
-            color: #fff;
-        }
-        
-        /* Push content below header */
-        .has-header #response-content,
-        .has-header #loading {
-            margin-top: 32px;
-        }
-        .has-header .split-layout,
-        .has-header .full-content,
-        .has-header .loading {
-            height: calc(100vh - 32px);
-        }
-
-        .copy-btn { 
-            position: absolute; 
-            top: 6px; 
-            right: 6px; 
-            background: rgba(0,0,0,0.5); 
-            color: rgba(255,255,255,0.9); 
-            border: 1px solid rgba(255,255,255,0.2); 
-            padding: 4px 8px; 
-            font-size: 11px; 
-            border-radius: 4px; 
-            cursor: pointer; 
-            -webkit-app-region: no-drag; 
-            transition: background 0.2s ease, border-color 0.2s ease, transform 0.12s ease;
-        }
-        .copy-btn:hover { background: rgba(0,0,0,0.7); }
-        .copy-btn.copied { 
-            background: rgba(76,175,80,0.85); 
-            border-color: rgba(76,175,80,0.95); 
-            transform: scale(0.98);
-        }
+        .oc-prose pre .copy-btn:hover { background: var(--oc-raised-3); }
     </style>
+    <link rel="stylesheet" href="./src/styles/theme.css">
 </head>
-<body class="text-white">
-    <div class="main-container has-header">
+<body>
+    <div class="main-container oc-window oc-window--native has-header">
         <!-- Draggable Header -->
-        <div class="window-header">
-            <div class="window-title">AI Response</div>
+        <div class="window-header oc-titlebar">
+            <span class="oc-mark" aria-hidden="true"></span>
+            <div class="window-title oc-title">Answer</div>
+            <div class="answer-spacer"></div>
+            <span id="answer-status" class="answer-status oc-label" role="status">Thinking</span>
             <div class="window-controls">
-                <button id="close-window-btn" class="window-btn window-btn-close" title="Close">×</button>
+                <button id="close-window-btn" class="oc-btn oc-btn--ghost oc-icon-btn" type="button" aria-label="Close" title="Close">
+                    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                </button>
             </div>
         </div>
 
         <!-- Loading State -->
         <div id="loading" class="loading">
-            <div class="loading-compact">
-                <span class="text-gray-300 text-sm font-medium mr-2">Analyzing</span>
-                <div class="dots-container">
-                    <div class="bouncing-dot"></div>
-                    <div class="bouncing-dot"></div>
-                    <div class="bouncing-dot"></div>
-                </div>
-            </div>
+            <div class="oc-progress" aria-hidden="true"></div>
+            <div class="loading-text"><span class="oc-shimmer">Thinking…</span></div>
         </div>
 
         <!-- Response Content -->
@@ -449,7 +253,7 @@
                 <!-- Text Panel -->
                 <div class="text-panel">
                     <div class="panel-content" tabindex="0">
-                        <div id="text-content" class="markdown-content"></div>
+                        <div id="text-content" class="markdown-content oc-prose"></div>
                     </div>
                 </div>
 
@@ -464,7 +268,7 @@
             <!-- Full Content (when no code detected) -->
             <div id="full-content" class="full-content hidden">
                 <div class="full-content-inner" tabindex="0">
-                    <div id="full-markdown" class="markdown-content"></div>
+                    <div id="full-markdown" class="markdown-content oc-prose"></div>
                 </div>
             </div>
         </div>
@@ -478,6 +282,13 @@
         let isInteractive = false;
         let scrollableElements = [];
         let initialized = false;
+
+        // Syntax highlighting is throttled so repeated renders stay smooth:
+        // at most once every HIGHLIGHT_INTERVAL_MS, plus a trailing run after
+        // the last render.
+        const HIGHLIGHT_INTERVAL_MS = 250;
+        let highlightTimer = null;
+        let lastHighlightAt = 0;
         
         // Immediate logging to verify script execution
         console.log('[LLM-RESPONSE] Script tag executed');
@@ -590,8 +401,9 @@
             if (responseElement) {
                 responseElement.classList.add('hidden');
             }
-            
-            console.log('Loading state shown - should see Analyzing...');
+
+            setThinkingStatus(true);
+            console.log('Loading state shown - should see Thinking...');
         }
 
         function hideLoadingState() {
@@ -603,6 +415,61 @@
             } else {
                 console.error('Loading element not found!');
             }
+            setThinkingStatus(false);
+        }
+
+        // Header "THINKING" label, shown only while #loading is.
+        function setThinkingStatus(isThinking) {
+            const status = document.getElementById('answer-status');
+            if (status) status.classList.toggle('hidden', !isThinking);
+        }
+
+        // One gentle rise-in when an answer first appears (not on re-renders).
+        function playRise(element) {
+            if (!element) return;
+            element.classList.remove('oc-rise');
+            void element.offsetWidth; // restart the animation
+            element.classList.add('oc-rise');
+        }
+
+        function scheduleHighlight() {
+            if (typeof Prism === 'undefined') return;
+            const wait = HIGHLIGHT_INTERVAL_MS - (Date.now() - lastHighlightAt);
+            if (wait <= 0) {
+                runHighlight();
+            } else if (!highlightTimer) {
+                highlightTimer = setTimeout(runHighlight, wait);
+            }
+        }
+
+        function runHighlight() {
+            if (highlightTimer) {
+                clearTimeout(highlightTimer);
+                highlightTimer = null;
+            }
+            lastHighlightAt = Date.now();
+            const root = document.getElementById('response-content');
+            if (!root || typeof Prism === 'undefined' || !Prism.highlightElement) return;
+            // Only blocks that name a language; Prism would otherwise rewrite
+            // plain blocks for no visual gain.
+            root.querySelectorAll('pre code[class*="language-"]').forEach(codeEl => {
+                try { Prism.highlightElement(codeEl); } catch (_) {}
+            });
+        }
+
+        // Normalize a fence info string into a Prism language id.
+        function normalizeLanguage(lang) {
+            const l = String(lang || 'text').toLowerCase();
+            const aliases = { 'c++': 'cpp', 'golang': 'go', 'py3': 'python', 'python3': 'python', 'node': 'javascript' };
+            return aliases[l] || l.replace(/[^\w-]/g, '') || 'text';
+        }
+
+        // Display name for the code panel header; "CODE" when no language is given.
+        function languageLabel(lang) {
+            const l = String(lang || '').toLowerCase();
+            if (!l || l === 'text' || l === 'plain' || l === 'plaintext' || l === 'txt') return 'Code';
+            const names = { 'cpp': 'C++', 'c++': 'C++', 'cs': 'C#', 'csharp': 'C#', 'js': 'JavaScript', 'ts': 'TypeScript', 'py': 'Python' };
+            return names[l] || l;
         }
 
         function renderMarkdown(text) {
@@ -646,9 +513,11 @@
         function displayResponse(data) {
             // Show content
             const responseElement = document.getElementById('response-content');
+            const firstAppearance = !!responseElement && responseElement.classList.contains('hidden');
             
             if (responseElement) {
                 responseElement.classList.remove('hidden');
+                if (firstAppearance) playRise(responseElement);
             }
 
             // Parse the response - check both content and response properties for compatibility
@@ -677,6 +546,17 @@
                 // Full layout: all content in one panel
                 displayFullLayout(response);
             }
+
+            // Errors (e.g. screen capture failures) render as a callout.
+            const isError = !!(data.metadata && data.metadata.isError);
+            const errorTarget = document.getElementById(hasCode ? 'text-content' : 'full-markdown');
+            ['text-content', 'full-markdown'].forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const on = isError && el === errorTarget;
+                el.classList.toggle('answer-error', on);
+                if (on) el.setAttribute('role', 'alert'); else el.removeAttribute('role');
+            });
             
             // Request dynamic window sizing based on content
             setTimeout(() => {
@@ -813,8 +693,10 @@
                 const code = pre.querySelector('code');
                 const text = code ? code.textContent : pre.textContent;
                 const btn = document.createElement('button');
-                btn.className = 'copy-btn';
+                btn.type = 'button';
+                btn.className = 'copy-btn oc-btn oc-btn--ghost';
                 btn.textContent = 'Copy';
+                btn.setAttribute('aria-label', 'Copy code');
                 attachCopy(btn, text || '');
                 pre.style.position = 'relative';
                 pre.appendChild(btn);
@@ -851,27 +733,25 @@
                     const codeBlock = document.createElement('div');
                     codeBlock.className = 'code-block';
                     codeBlock.innerHTML = `
-                        <div class="code-header">${escapeHtml(block.language.toUpperCase())}</div>
+                        <div class="code-header"><span class="oc-label">${escapeHtml(languageLabel(block.language))}</span></div>
                         <div class="code-content">
-                            <pre><code class="language-${escapeHtml(block.language)}">${escapeHtml(block.code)}</code></pre>
+                            <pre><code class="language-${escapeHtml(normalizeLanguage(block.language))}">${escapeHtml(block.code)}</code></pre>
                         </div>
                     `;
-                    const pre = codeBlock.querySelector('pre');
-                    pre.style.position = 'relative';
                     const btn = document.createElement('button');
-                    btn.className = 'copy-btn';
+                    btn.type = 'button';
+                    btn.className = 'copy-btn oc-btn oc-btn--ghost';
                     btn.textContent = 'Copy';
+                    btn.setAttribute('aria-label', 'Copy code');
                     attachCopy(btn, block.code || '');
-                    pre.appendChild(btn);
+                    codeBlock.querySelector('.code-header').appendChild(btn);
 
                     codeContainer.appendChild(codeBlock);
                 });
             }
 
-            // Highlight code if Prism is available
-            if (typeof Prism !== 'undefined') {
-                Prism.highlightAll();
-            }
+            // Highlight code if Prism is available (throttled)
+            scheduleHighlight();
         }
 
         function displayFullLayout(response) {
@@ -885,10 +765,8 @@
             full.innerHTML = html;
             if (window.renderMathInElement) window.renderMathInElement(full);
 
-            // Highlight any code if Prism is available
-            if (typeof Prism !== 'undefined') {
-                Prism.highlightAll();
-            }
+            // Highlight any code if Prism is available (throttled)
+            scheduleHighlight();
 
             // Add copy buttons to code blocks in full view
             const pres = full.querySelectorAll('pre');
@@ -897,8 +775,10 @@
                 const code = pre.querySelector('code');
                 const text = code ? code.textContent : pre.textContent;
                 const btn = document.createElement('button');
-                btn.className = 'copy-btn';
+                btn.type = 'button';
+                btn.className = 'copy-btn oc-btn oc-btn--ghost';
                 btn.textContent = 'Copy';
+                btn.setAttribute('aria-label', 'Copy code');
                 attachCopy(btn, text || '');
                 pre.style.position = 'relative';
                 pre.appendChild(btn);
@@ -1007,6 +887,7 @@
                 if (responseElement) {
                     responseElement.classList.remove('hidden');
                 }
+                setThinkingStatus(false);
             }
         }
 
