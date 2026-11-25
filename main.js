@@ -1,7 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const { fileURLToPath } = require("url");
-const { app, BrowserWindow, globalShortcut, session, ipcMain } = require("electron");
+const { app, BrowserWindow, globalShortcut, session, ipcMain, nativeTheme } = require("electron");
 
 // ── Resolve a stable .env location ──
 // In packaged builds process.cwd() is unstable and frequently read-only
@@ -258,6 +258,13 @@ class ApplicationController {
       return;
     }
     this.starting = true;
+
+    // The UI is dark-only: make native materials (vibrancy) render dark.
+    try {
+      nativeTheme.themeSource = "dark";
+    } catch (e) {
+      logger.warn("Failed to set dark native theme", { error: e.message });
+    }
 
     // Force stealth mode IMMEDIATELY when app is ready
     app.setName("Terminal ");

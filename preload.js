@@ -1,5 +1,33 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+// Platform hook for CSS: html[data-platform="darwin" | "win32" | "linux"].
+// The DOM is shared with the page under contextIsolation, so this needs no
+// contextBridge exposure. process.platform is available in sandboxed preloads.
+;(() => {
+  let applied = false
+  const apply = () => {
+    if (applied) return true
+    try {
+      const root = document.documentElement
+      if (!root) return false
+      const platform = typeof process !== 'undefined' && process.platform
+      if (typeof platform === 'string' && platform) root.dataset.platform = platform
+      applied = true
+    } catch (_) {}
+    return applied
+  }
+  try {
+    if (apply()) return
+    const onReady = () => {
+      if (!apply()) return
+      document.removeEventListener('readystatechange', onReady)
+      document.removeEventListener('DOMContentLoaded', onReady)
+    }
+    document.addEventListener('readystatechange', onReady)
+    document.addEventListener('DOMContentLoaded', onReady)
+  } catch (_) {}
+})()
+
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {

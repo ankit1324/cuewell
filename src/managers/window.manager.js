@@ -465,6 +465,21 @@ class WindowManager {
       };
     }
 
+    // macOS native glass for the panel windows. The 'main' toolbar is left
+    // out on purpose: its window has transparent gaps around the pill and the
+    // shortcuts popover, which vibrancy would fill with blur.
+    if (process.platform === 'darwin' &&
+        ['llmResponse', 'chat', 'settings', 'onboarding'].includes(type)) {
+      browserWindowOptions = {
+        ...browserWindowOptions,
+        vibrancy: 'hud',
+        visualEffectState: 'active',
+        backgroundColor: '#00000000',
+        hasShadow: true,
+        roundedCorners: true,
+      };
+    }
+
     // Windows-specific settings
     if (process.platform === 'win32') {
       browserWindowOptions = {
