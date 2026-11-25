@@ -425,6 +425,7 @@ class SpeechService extends EventEmitter {
     this.pendingFinal = false;
     this.audioProgram = null;
     this.whisperCommand = null;
+    this.envDir = null;
     this.whisperWorker = new WhisperWorkerService();
     this.isProcessingAudio = false;
     this.manualStopRequested = false;
@@ -1249,14 +1250,31 @@ class SpeechService extends EventEmitter {
 
   _getWhisperModelDir() {
     const configured = this._getSetting('whisperModelDir') || process.env.WHISPER_MODEL_DIR || '';
-    // Honor an absolute configured dir. Empty or relative values (the old
-    // `.whisper-models` default resolved against an unstable cwd) are replaced
-    // with the stable userData location the installer downloads weights into,
-    // so --model_dir and download_root always agree.
-    if (configured && path.isAbsolute(configured)) {
-      return configured;
+    // Honor an absolute configured dir. A relative one (setup.sh writes
+    // `.whisper-models`) is resolved against the folder of the loaded .env,
+    // not the unstable cwd, so weights setup.sh already downloaded there are
+    // reused. Unset falls back to the stable userData location the
+    // installer downloads weights into, so --model_dir and download_root agree.
+    if (configured) {
+      return path.isAbsolute(configured)
+        ? configured
+        : path.resolve(this.envDir || process.cwd(), configured);
     }
-    return this._getUserDataModelDir() || configured;
+    return this._getUserDataModelDir();
+  }
+
+  /**
+   * Record which .env file the app loaded; relative paths in it are resolved
+   * against its folder. Without this (e.g. scripts/test-speech.js), relative
+   * paths resolve against process.cwd().
+   */
+  setEnvPath(envPath) {
+    this.envDir = envPath ? path.dirname(envPath) : null;
+  }
+
+  /** Folder Whisper loads model weights from (and downloads them into). */
+  getWhisperModelDir() {
+    return this._getWhisperModelDir();
   }
 
   /**

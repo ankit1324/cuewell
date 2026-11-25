@@ -55,7 +55,7 @@ class FirstRunManager {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(this.envPath, template, 'utf8');
+      fs.writeFileSync(this.envPath, template, { encoding: 'utf8', mode: 0o600 });
       try {
         fs.chmodSync(this.envPath, 0o600);
       } catch (_) { /* best effort */ }

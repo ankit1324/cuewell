@@ -1513,9 +1513,9 @@ class WindowManager {
       windowCount: this.windows.size,
       windowStates,
       dataKeys: data ? Object.keys(data) : [],
-      // Fixed: Check for 'content' instead of 'response' to match actual data structure
-      dataPreview: data && data.content ? data.content.substring(0, 50) + '...' : 
-                   data && data.response ? data.response.substring(0, 50) + '...' : 'No response'
+      // Length only: content/response carry the AI answer, which must not reach log files.
+      contentLength: data && typeof data.content === 'string' ? data.content.length :
+                     data && typeof data.response === 'string' ? data.response.length : 0
     });
   }
 

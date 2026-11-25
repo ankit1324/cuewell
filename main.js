@@ -33,6 +33,17 @@ function resolveEnvPath() {
 const ENV_PATH = resolveEnvPath();
 require("dotenv").config({ path: ENV_PATH });
 
+// .env holds API keys, so only the current user may read it. Files made by
+// `cp env.example .env` or by older builds are 0644; tighten them once here.
+// Windows has no POSIX modes, and a failure here must never block startup.
+if (process.platform !== "win32") {
+  try {
+    if (fs.existsSync(ENV_PATH) && (fs.statSync(ENV_PATH).mode & 0o077) !== 0) {
+      fs.chmodSync(ENV_PATH, 0o600);
+    }
+  } catch (_) { /* best effort */ }
+}
+
 // Format a value for a single .env line. Newlines are collapsed to spaces and
 // backslashes are kept verbatim (doubling them corrupts Windows paths on the
 // next load). Values containing whitespace, a double-quote, or a leading '#'
@@ -102,6 +113,9 @@ process.on("unhandledRejection", (reason) => {
 // Screen capture (image-based)
 const captureService = require("./src/services/capture.service");
 const speechService = require("./src/services/speech.service");
+// A relative WHISPER_MODEL_DIR (setup.sh writes `.whisper-models`) is
+// resolved against the folder of the .env loaded above.
+speechService.setEnvPath(ENV_PATH);
 const llmService = require("./src/services/llm.service");
 const { getActiveProviderId, getProviderConfig, listProviders } = require("./src/services/providers");
 
@@ -259,7 +273,6 @@ class ApplicationController {
 
     try {
       this.setupPermissions();
-      this.setupNetworkConfiguration();
 
       // Small delay to ensure desktop/space detection is accurate
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -323,33 +336,6 @@ class ApplicationController {
       });
       app.quit();
     }
-  }
-
-  setupNetworkConfiguration() {
-    // Configure session to handle network requests better
-    const ses = session.defaultSession;
-    
-    // Allow HTTPS requests to Google APIs
-    ses.webRequest.onBeforeSendHeaders((details, callback) => {
-      if (details.url.includes('generativelanguage.googleapis.com')) {
-        const platformUA = process.platform === 'darwin'
-          ? 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.156 Safari/537.36'
-          : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.156 Safari/537.36';
-        details.requestHeaders['User-Agent'] = platformUA;
-      }
-      callback({ requestHeaders: details.requestHeaders });
-    });
-    
-    // Handle certificate errors for Google APIs
-    ses.setCertificateVerifyProc((request, callback) => {
-      if (request.hostname === 'generativelanguage.googleapis.com') {
-        callback(0); // Trust Google's certificates
-      } else {
-        callback(-2); // Use default verification
-      }
-    });
-    
-    logger.debug('Network configuration applied for Gemini API');
   }
 
   setupPermissions() {
@@ -653,7 +639,7 @@ class ApplicationController {
         } catch (error) {
           logger.error("Failed to process chat message with LLM", {
             error: error.message,
-            text: text.substring(0, 100)
+            textLength: text.length
           });
         }
       })();
@@ -1099,7 +1085,7 @@ class ApplicationController {
   const capture = await captureService.captureAndProcess();
 
       if (!capture.imageBuffer || !capture.imageBuffer.length) {
-        windowManager.hideLLMResponse();
+        this.showScreenshotError("Failed to capture screenshot image");
         this.broadcastOCRError("Failed to capture screenshot image");
         return;
       }
@@ -1153,7 +1139,11 @@ class ApplicationController {
         duration: Date.now() - startTime,
       });
 
-      windowManager.hideLLMResponse();
+      // A capture that is already running will update the response window
+      // itself, so a second press must not cover it with an error.
+      if (error.message !== "Capture already in progress") {
+        this.showScreenshotError(error.message);
+      }
       this.broadcastOCRError(error.message);
       
       sessionManager.addConversationEvent({
@@ -1167,10 +1157,27 @@ class ApplicationController {
     }
   }
 
+  /**
+   * Replace the response window's "Analyzing" state with a short error. That
+   * window only listens for display-llm-response, so the message is sent as
+   * a regular response.
+   */
+  showScreenshotError(errorMessage) {
+    // capture.service throws this when desktopCapturer returns no screens,
+    // which on macOS means Screen Recording permission is missing.
+    const message = process.platform === "darwin" && errorMessage === "No screen sources available for capture"
+      ? "Screen capture failed. Allow Screen Recording for the app that launched OpenCluely (System Settings > Privacy & Security > Screen & System Audio Recording), then restart it."
+      : errorMessage || "Screenshot failed.";
+    windowManager.showLLMResponse(message, {
+      skill: this.activeSkill,
+      isImageAnalysis: true,
+      isError: true,
+    });
+  }
+
   async processWithLLM(text, sessionHistory) {
     try {
-      // Add user input to session memory
-      sessionManager.addUserInput(text, 'llm_input');
+      // The send-chat-message handler has already stored `text` in session memory.
 
       // Check if current skill needs programming language context
       const skillsRequiringProgrammingLanguage = ['dsa'];
@@ -1203,7 +1210,6 @@ class ApplicationController {
         skill: this.activeSkill,
         programmingLanguage: needsProgrammingLanguage ? this.codingLanguage : 'not applicable',
         processingTime: llmResult.metadata.processingTime,
-        responsePreview: llmResult.response.substring(0, 200) + "...",
       });
 
       // Add LLM response to session memory
@@ -1254,7 +1260,7 @@ class ApplicationController {
     }
 
     // Route speech UI events according to the user's response-target setting.
-    sessionManager.addUserInput(fragment, 'speech');
+    // Session memory gets the coalesced utterance once, when it is sent.
     this.sendToVoiceResponseWindows("transcription-received", { text: fragment });
 
     this._utteranceBuffer = this._utteranceBuffer
@@ -1296,12 +1302,16 @@ class ApplicationController {
     this._utteranceDispatchInFlight = true;
 
     try {
+      // Stored here rather than per fragment: the history then holds what was
+      // actually asked, once, after any answer that was still streaming, and
+      // the request builder can drop it as the trailing copy of this message.
+      sessionManager.addUserInput(combined, 'speech');
       const sessionHistory = sessionManager.getOptimizedHistory();
       await this.processTranscriptionWithLLM(combined, sessionHistory);
     } catch (error) {
       logger.error("Failed to process transcription with LLM", {
         error: error.message,
-        text: combined.substring(0, 100)
+        textLength: combined.length
       });
     } finally {
       this._utteranceDispatchInFlight = false;
@@ -1330,15 +1340,14 @@ class ApplicationController {
       const cleanText = text.trim();
       if (cleanText.length < 2) {
         logger.debug("Skipping LLM processing for very short transcription", {
-          text: cleanText
+          textLength: cleanText.length
         });
         return;
       }
 
       logger.info("Processing transcription with intelligent LLM response", {
         skill: this.activeSkill,
-        textLength: cleanText.length,
-        textPreview: cleanText.substring(0, 100) + "..."
+        textLength: cleanText.length
       });
 
       // Check if current skill needs programming language context
@@ -1401,7 +1410,7 @@ class ApplicationController {
         error: error.message,
         errorStack: error.stack,
         skill: this.activeSkill,
-        text: text ? text.substring(0, 100) : 'undefined'
+        textLength: typeof text === 'string' ? text.length : 0
       });
 
       // Try to provide a fallback response
@@ -1432,7 +1441,7 @@ class ApplicationController {
         }
         logger.info("Used fallback response for transcription", {
           skill: this.activeSkill,
-          fallbackResponse: fallbackResult.response
+          fallbackResponseLength: fallbackResult.response.length
         });
         
       } catch (fallbackError) {
@@ -1478,7 +1487,6 @@ class ApplicationController {
       responseLength: llmResult.response.length,
       skill: this.activeSkill,
       dataKeys: Object.keys(broadcastData),
-      responsePreview: llmResult.response.substring(0, 100) + "...",
     });
 
     windowManager.broadcastToAllWindows("llm-response", broadcastData);
@@ -1502,8 +1510,7 @@ class ApplicationController {
 
     logger.info("Broadcasting transcription LLM response to all windows", {
       responseLength: llmResult.response.length,
-      skill: this.activeSkill,
-      responsePreview: llmResult.response.substring(0, 100) + "..."
+      skill: this.activeSkill
     });
 
     windowManager.broadcastToAllWindows("transcription-llm-response", broadcastData);
@@ -1598,6 +1605,8 @@ class ApplicationController {
         cwd: process.cwd(),
         dataDir: app.getPath("userData"),
         platform: process.platform,
+        // Download weights into the folder transcription reads them from.
+        getModelDir: () => speechService.getWhisperModelDir(),
       });
     }
     return this._whisperInstaller;
@@ -1867,7 +1876,11 @@ class ApplicationController {
     const newContent = outLines.join("\n");
     try {
       const tmpPath = envPath + ".tmp";
-      fs.writeFileSync(tmpPath, newContent, "utf8");
+      // 0600 because .env holds API keys. `mode` only applies when the file
+      // is created, so a temp file left over from an interrupted write (which
+      // keeps its old mode) is removed first.
+      try { fs.unlinkSync(tmpPath); } catch (_) { /* normally absent */ }
+      fs.writeFileSync(tmpPath, newContent, { encoding: "utf8", mode: 0o600 });
       fs.renameSync(tmpPath, envPath);
     } catch (e) {
       logger.error("Failed to persist .env updates", {
@@ -1875,6 +1888,11 @@ class ApplicationController {
         keys
       });
       return [];
+    }
+    try {
+      fs.chmodSync(envPath, 0o600);
+    } catch (e) {
+      logger.warn("Could not restrict .env permissions", { error: e.message });
     }
 
     logger.info("Persisted .env updates", { keys: Array.from(updated) });

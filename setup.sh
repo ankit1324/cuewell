@@ -122,6 +122,8 @@ ensure_env_file() {
       exit 1
     fi
   fi
+  # .env holds API keys; keep it readable by the current user only.
+  chmod 600 .env 2>/dev/null || true
 }
 
 upsert_env() {

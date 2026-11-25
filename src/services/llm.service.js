@@ -666,6 +666,22 @@ class LLMService {
     return request;
   }
 
+  /**
+   * History contents ({ role, parts }) without trailing user turns identical
+   * to `currentText`. Callers store the message in session memory before the
+   * request is built and the builders append it after the history, so
+   * without this the current message would be sent twice.
+   */
+  _withoutTrailingCopies(contents, currentText) {
+    const target = typeof currentText === 'string' ? currentText.trim() : '';
+    let end = contents.length;
+    while (target && end > 0 && contents[end - 1].role === 'user' &&
+           contents[end - 1].parts.map((part) => part.text).join('') === target) {
+      end--;
+    }
+    return contents.slice(0, end);
+  }
+
   buildGeminiRequestWithHistory(text, activeSkill, conversationHistory, skillContext, programmingLanguage) {
     const request = {
       contents: []
@@ -704,8 +720,9 @@ class LLMService {
         };
       });
 
-    // Add the conversation history
-    request.contents.push(...conversationContents);
+    // Add the conversation history, minus trailing copies of the current
+    // message (callers store it in session memory before building the request)
+    request.contents.push(...this._withoutTrailingCopies(conversationContents, text));
 
     // Format and validate the current user input
     const formattedMessage = this.formatUserMessage(text, activeSkill);
@@ -790,8 +807,8 @@ class LLMService {
   const intelligentPrompt = this.getIntelligentTranscriptionPrompt(activeSkill, programmingLanguage);
   request.systemInstruction = { parts: [{ text: intelligentPrompt }] };
 
-    // Add recent conversation history (excluding system messages) with validation
-    const conversationContents = conversationHistory
+    // Recent conversation history (excluding system messages) with validation
+    const historyContents = conversationHistory
       .filter(event => {
         // Filter out system messages and ensure content exists and is valid
         return event.role !== 'system' && 
@@ -799,7 +816,6 @@ class LLMService {
                typeof event.content === 'string' && 
                event.content.trim().length > 0;
       })
-      .slice(-8) // Keep last 8 exchanges for context
       .map(event => {
         const content = event.content.trim();
         if (!content) {
@@ -812,6 +828,10 @@ class LLMService {
         };
       })
       .filter(content => content !== null); // Remove any null entries
+
+    // Keep last 8 exchanges for context, not counting the transcript itself
+    // (dispatch stores it in session memory before the request is built)
+    const conversationContents = this._withoutTrailingCopies(historyContents, text).slice(-8);
 
     // Add the conversation history
     request.contents.push(...conversationContents);
@@ -1936,7 +1956,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
           } catch (parseError) {
             logger.error('Failed to parse alternative response', {
               error: parseError.message,
-              rawResponse: data.substring(0, 500),
+              rawResponseLength: data.length,
               statusCode: res.statusCode
             });
             reject(new Error(`Failed to parse response: ${parseError.message}`));

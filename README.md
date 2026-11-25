@@ -24,12 +24,12 @@ It is free and open source. Processing stays on your machine, and the only thing
 
 ## Highlights
 
-- **Invisible overlay.** Windows stay out of Zoom, Google Meet, Microsoft Teams, Discord, and OBS captures. You see the answer, the call does not.
-- **Hidden during screen share.** When a share starts, the app can hide every window on its own.
+- **Invisible overlay.** On macOS and Windows the windows are excluded from screen capture by apps that use the OS capture APIs (macOS ScreenCaptureKit, Windows Graphics Capture). Some older capture paths, for example Chromium 122-era screen sharing, still capture them on macOS, and Linux has no protection.
 - **Flexible local voice.** Choose manual start/stop capture or automatic voice-activity detection without fixed-timer sentence cuts.
 - **Configurable streamed answers.** Route voice replies to chat, the floating overlay, or both.
-- **Direct image analysis.** Screenshots go straight to Gemini for visual reasoning, with no slow OCR step in between.
-- **Session memory.** The whole conversation is remembered, so follow-ups, edge cases, and optimizations keep their context.
+- **Your choice of AI provider.** Gemini, Claude, OpenAI, OpenRouter, Groq, DeepSeek or Ollama, chosen in Settings. Groq and DeepSeek do not accept screenshots.
+- **Direct image analysis.** Screenshots go straight to the AI provider for visual reasoning, with no slow OCR step in between.
+- **Session memory.** Typed and voice questions include recent conversation history (up to the last 15 events), so follow-ups keep their context. Screenshots are sent without history, and that history is cleared when the app restarts.
 - **Language aware.** Tailored answers for C++, C, Python, Java, and JavaScript.
 - **Stealthy by design.** Runs under ordinary system names, ships with no telemetry, and keeps your session local.
 - **Cross platform.** Runs on macOS, Windows and Linux. Build from source with `./setup.sh`.
@@ -59,7 +59,7 @@ If you would rather build from source, three steps are all it takes.
 
 3. Add your Gemini key.
 
-   On first launch the Settings window opens automatically. Get a free key from [Google AI Studio](https://aistudio.google.com/) and paste it in, or edit `.env` directly. Both work, and changes are picked up without a restart.
+   On first launch the Settings window opens automatically. Get a free key from [Google AI Studio](https://aistudio.google.com/) and paste it in, or edit `.env` directly. Both work: keys saved in Settings take effect right away, and direct edits to `.env` apply the next time the app starts. Gemini is the default; to use another AI provider, pick it in Settings and enter its key there.
 
 ### Platform notes
 
@@ -80,10 +80,10 @@ If you would rather build from source, three steps are all it takes.
 
 ## Configuration
 
-The setup script writes sensible defaults. The only required value is a Gemini API key.
+The setup script writes sensible defaults. The only required value is the API key for your AI provider: `GEMINI_API_KEY` for the default, Gemini. Ollama runs locally and needs no key.
 
 ```bash
-# Required
+# Required for the default AI provider (Gemini)
 GEMINI_API_KEY=your_gemini_api_key_here
 
 # Optional speech provider. Pick one.
@@ -119,14 +119,14 @@ For Azure Speech, create a Speech resource in the [Azure Portal](https://portal.
 ## How it works
 
 1. **Ask.** Use automatic pause detection, choose manual start/stop capture in Settings, or use the screenshot shortcut.
-2. **Reason.** Gemini reads the audio or image with full conversation context and works toward a precise answer.
+2. **Reason.** Audio is transcribed locally by Whisper, or in the cloud by Azure Speech if you select it. The AI provider receives only text (your typed question or the transcript) and screenshots, plus recent conversation history for typed and voice questions, and works toward a precise answer.
 3. **Answer.** Voice responses stream to chat, the overlay, or both, according to Settings.
 
 ## Keyboard shortcuts
 
 | Action | Shortcut | Description |
 |---|---|---|
-| Screenshot capture | `Cmd/Ctrl + Shift + S` | Capture the screen and analyze it with Gemini |
+| Screenshot capture | `Cmd/Ctrl + Shift + S` | Capture the screen and analyze it with the AI provider |
 | Toggle speech | `Alt + R` | Start or stop voice recognition, if configured |
 | Toggle visibility | `Cmd/Ctrl + Shift + V` | Show or hide all windows |
 | Toggle interaction | `Cmd/Ctrl + Shift + I` or `Alt + A` | Enable or disable click through |
@@ -140,8 +140,8 @@ OpenCluely is under active development. The core is stable and improvements ship
 ### Done
 
 - Stealth overlay with a draggable command bar and a click through toggle
-- Hidden during screen share, with automatic hiding when a share begins
-- Screenshot capture with direct Gemini analysis, no OCR step
+- Screenshot capture with direct analysis by the AI provider, no OCR step
+- AI provider picker: Gemini, Claude, OpenAI, OpenRouter, Groq, DeepSeek or Ollama
 - Configurable manual or VAD-driven voice capture
 - Persistent local Whisper worker with optional CUDA acceleration and idle GPU release
 - Configurable chat/overlay routing for streamed voice answers
@@ -157,7 +157,6 @@ OpenCluely is under active development. The core is stable and improvements ship
 
 ### Planned
 
-- Multiple model backends alongside Gemini (OpenAI, Anthropic, local)
 - Auto typing of code snippets into editors and IDEs
 - Export of conversation history to markdown or PDF
 - Deeper stealth, including process name randomization

@@ -2,6 +2,36 @@ const OpenAI = require('openai');
 const { normalizeSdkError, noTextAtLimitError } = require('./errors');
 const { resolveIdleTimeoutMs, startIdleTimeout } = require('./idle-timeout');
 
+// Per-request fetch option that hands a stream's idle-timer reset to the
+// client fetch below. A symbol, so it cannot clash with a RequestInit field.
+const ON_RESPONSE_DATA = Symbol('onResponseData');
+
+/**
+ * Client fetch that calls the request's ON_RESPONSE_DATA callback when the
+ * response headers and each body chunk arrive. The SDK drops SSE comment
+ * lines (OpenRouter's ": OPENROUTER PROCESSING", DeepSeek's ": keep-alive")
+ * before the stream iterator sees them, so reading the body is the only way
+ * to count those keepalives as activity. Other requests pass straight through.
+ */
+function activityFetch(baseFetch) {
+  return async (url, init) => {
+    const onData = init && init[ON_RESPONSE_DATA];
+    if (typeof onData !== 'function') return baseFetch(url, init);
+    const fetchInit = { ...init };
+    delete fetchInit[ON_RESPONSE_DATA];
+    const response = await baseFetch(url, fetchInit);
+    onData();
+    if (!response.body) return response;
+    const body = response.body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        onData();
+        controller.enqueue(chunk);
+      }
+    }));
+    return new Response(body, response);
+  };
+}
+
 function toChatMessages(neutral) {
   const messages = [];
   if (neutral.system) {
@@ -31,6 +61,7 @@ class OpenAICompatibleProvider {
   constructor({ apiKey, baseURL, headers, tokenParam = 'max_tokens', label = 'OpenAI', timeout, idleTimeoutMs, clientOptions } = {}) {
     // LLMService owns retries, so the SDK must not retry on its own.
     const options = { ...(clientOptions || {}), apiKey, baseURL, maxRetries: 0 };
+    options.fetch = activityFetch(options.fetch || globalThis.fetch);
     if (headers) options.defaultHeaders = { ...headers };
     if (timeout) options.timeout = timeout;
     this.client = new OpenAI(options);
@@ -78,7 +109,7 @@ class OpenAICompatibleProvider {
       await idle.run(async () => {
         const stream = await this.client.chat.completions.create(
           { ...this._params(neutral, model), stream: true },
-          { signal: idle.signal }
+          { signal: idle.signal, fetchOptions: { [ON_RESPONSE_DATA]: idle.reset } }
         );
         idle.reset();
         for await (const chunk of stream) {

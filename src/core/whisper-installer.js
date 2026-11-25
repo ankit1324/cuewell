@@ -132,6 +132,9 @@ class WhisperInstaller {
     this.dataDir = options.dataDir || this.cwd;
     this.platform = options.platform || process.platform;
     this.runExec = options.runExec || runExec;
+    // Optional () => string: the folder transcription loads weights from, so
+    // downloads land there too (see speech.service _getWhisperModelDir()).
+    this.getModelDir = options.getModelDir || null;
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -143,14 +146,16 @@ class WhisperInstaller {
   }
 
   /**
-   * Stable, absolute directory for downloaded model weights. Lives alongside
-   * the venv under the persistent data dir (userData in packaged builds) so
-   * the download location and the transcription `--model_dir` always agree.
-   * A relative WHISPER_MODEL_DIR resolved against an unstable cwd was the
-   * cause of models being "downloaded" but not found at transcribe time.
+   * Stable, absolute directory for downloaded model weights: the folder
+   * transcription passes as `--model_dir` when `getModelDir` is provided,
+   * otherwise alongside the venv under the persistent data dir (userData in
+   * packaged builds). The download location and the transcription
+   * `--model_dir` must agree, or models are "downloaded" but not found (and
+   * fetched again) at transcribe time.
    */
   get modelDir() {
-    return path.join(this.dataDir, '.whisper-models');
+    const configured = this.getModelDir ? this.getModelDir() : '';
+    return configured || path.join(this.dataDir, '.whisper-models');
   }
 
   /**

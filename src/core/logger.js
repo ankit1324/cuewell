@@ -1,12 +1,24 @@
 const winston = require('winston');
 const DailyRotateFile = require('winston-daily-rotate-file');
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
 class Logger {
   constructor() {
     this.logDir = path.join(os.homedir(), '.OpenCluely', 'logs');
+    this.ensurePrivateLogDir();
     this.setupLogger();
+  }
+
+  // Logs describe the user's session, so only the current user may read
+  // them. mkdirSync's mode only applies to folders it creates; an existing
+  // folder is tightened with chmod. Never block startup on this.
+  ensurePrivateLogDir() {
+    try {
+      fs.mkdirSync(this.logDir, { recursive: true, mode: 0o700 });
+      fs.chmodSync(this.logDir, 0o700);
+    } catch (_) { /* best effort */ }
   }
 
   setupLogger() {
