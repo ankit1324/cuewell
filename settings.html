@@ -6,197 +6,169 @@
     <title>Settings</title>
     <link href="./src/styles/common.css" rel="stylesheet">
     <style>
-        * {
+        *,
+        *::before,
+        *::after {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
 
+        html,
         body {
-            margin: 0;
-            padding: 0;
             width: 100vw;
             height: 100vh;
+            margin: 0;
             background: transparent;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: var(--oc-font);
             overflow: hidden;
         }
 
+        /* ---------- Window ---------- */
+
         .settings-container {
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(135deg, rgba(0, 0, 0, 0.3) 0%, rgba(20, 20, 20, 0.4) 100%);
-            backdrop-filter: blur(25px);
-            border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            box-shadow: 0 4px 25px rgba(0, 0, 0, 0.15);
             display: flex;
             flex-direction: column;
         }
 
-        .settings-header {
-            padding: 16px 20px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            display: flex;
-            align-items: center;
+        .settings-container .settings-header {
             justify-content: space-between;
-            background: rgba(0, 0, 0, 0.2);
-            backdrop-filter: blur(10px);
-            -webkit-app-region: drag;
-            flex-shrink: 0;
+            padding: 0 6px 0 14px;
         }
 
         .header-title {
-            color: rgba(255, 255, 255, 0.95);
-            font-size: 14px;
-            font-weight: 600;
             display: flex;
             align-items: center;
-            gap: 8px;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+            gap: 9px;
         }
 
         .header-actions {
             display: flex;
-            gap: 8px;
-            -webkit-app-region: no-drag;
+            align-items: center;
+            gap: 4px;
         }
 
         .settings-content {
             flex: 1;
-            padding: 20px;
+            min-height: 0;
+            padding: 14px 16px 18px;
             overflow-y: auto;
-            color: rgba(255, 255, 255, 0.9);
-            max-height: calc(100vh - 70px);
+            color: var(--oc-text);
         }
 
-        .settings-section {
-            margin-bottom: 24px;
+        /* ---------- Sections ---------- */
+
+        .settings-section + .settings-section {
+            margin-top: 18px;
         }
 
-        .settings-section:last-child {
-            margin-bottom: 0;
-        }
-
-        .settings-section-title {
-            font-size: 13px;
-            font-weight: 600;
-            color: rgba(255, 255, 255, 0.95);
-            margin-bottom: 12px;
+        .section-head {
             display: flex;
             align-items: center;
             gap: 8px;
+            margin-bottom: 10px;
         }
 
-        .settings-section-content {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            padding: 16px;
+        .section-head::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--oc-line);
         }
 
-        .settings-item {
+        .settings-stack,
+        .settings-group,
+        .provider-fields {
             display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 12px;
-            padding: 8px;
-            border-radius: 6px;
-            transition: all 0.2s ease;
+            flex-direction: column;
+            gap: 12px;
         }
 
-        .settings-item:last-child {
-            margin-bottom: 0;
+        .settings-stack > .settings-group,
+        .settings-stack > .provider-fields {
+            margin: 0;
         }
 
-        .settings-item:hover {
-            background: rgba(255, 255, 255, 0.05);
+        .field-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
         }
 
-        .settings-item-label {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.9);
+        .field {
+            min-width: 0;
         }
 
-        .settings-item-description {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.6);
-            margin-top: 4px;
+        .field-label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: var(--oc-fs-xs);
+            font-weight: 600;
+            color: var(--oc-text-2);
         }
 
-        .btn {
-            background: rgba(255, 255, 255, 0.15);
-            border: none;
-            border-radius: 6px;
-            padding: 6px 12px;
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+        .field-help,
+        .settings-note {
+            font-size: var(--oc-fs-xs);
+            line-height: 1.45;
+            color: var(--oc-text-3);
+        }
+
+        .field-help {
+            margin-top: 5px;
+        }
+
+        .field-help code,
+        .settings-note code {
+            padding: 0 4px;
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-2xs);
+            color: var(--oc-text-2);
+            background: var(--oc-sunken);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-xs);
+        }
+
+        .settings-note--warn {
             display: flex;
             align-items: center;
             gap: 6px;
+            color: var(--oc-warn);
         }
 
-        .btn:hover {
-            background: rgba(255, 255, 255, 0.25);
+        .settings-note--warn i {
+            font-size: 10px;
         }
 
-        .btn.btn-danger {
-            background: rgba(244, 67, 54, 0.8);
+        /* Compact controls for a 400px panel */
+        .settings-content .oc-input {
+            height: 32px;
+            font-size: var(--oc-fs-sm);
         }
 
-        .btn.btn-danger:hover {
-            background: rgba(244, 67, 54, 1);
+        .settings-content .oc-input:disabled {
+            opacity: 0.5;
+            cursor: default;
         }
 
-        .btn.btn-quit {
-            background: rgba(255, 71, 87, 0.8);
+        .settings-content input[type="password"].oc-input,
+        .settings-content .oc-input--mono {
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-xs);
+            letter-spacing: 0.02em;
         }
 
-        .btn.btn-quit:hover {
-            background: rgba(255, 71, 87, 1);
+        select.oc-input option {
+            color: var(--oc-text);
+            background: #16171b;
         }
 
-        .input-field {
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 6px;
-            padding: 8px 12px;
-            color: rgba(255, 255, 255, 0.95);
-            font-size: 13px;
-            width: 100%;
-            max-width: 300px;
+        input[type="number"].oc-input::-webkit-inner-spin-button {
+            opacity: 0.4;
         }
 
-        .input-field:focus {
-            outline: none;
-            border-color: rgba(255, 255, 255, 0.3);
-        }
+        /* ---------- App icon tiles ---------- */
 
-        /* Stealth scrollbar */
-        ::-webkit-scrollbar {
-            width: 2px;
-        }
-
-        ::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 1px;
-        }
-
-        /* Feedback notification styling */
-        #tempFeedback {
-            font-size: 10px !important;
-            padding: 6px 10px !important;
-            background: rgba(0, 0, 0, 0.8) !important;
-            border: 1px solid rgba(255, 255, 255, 0.2) !important;
-            backdrop-filter: blur(5px) !important;
-        }
-
-        /* Additional styles for new sections */
         .icon-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -204,250 +176,309 @@
         }
 
         .icon-option {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 6px;
-            padding: 12px 8px;
+            position: relative;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            gap: 6px;
+            padding: 12px 8px 10px;
+            background: var(--oc-raised);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-lg);
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition:
+                background var(--oc-t-fast) var(--oc-ease),
+                border-color var(--oc-t-fast) var(--oc-ease),
+                transform var(--oc-t-fast) var(--oc-ease);
         }
 
         .icon-option:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: rgba(255, 255, 255, 0.2);
+            background: var(--oc-raised-2);
+            border-color: var(--oc-line-2);
         }
 
         .icon-option.selected {
-            background: rgba(255, 255, 255, 0.15);
-            border-color: rgba(255, 255, 255, 0.3);
+            background: var(--oc-accent-soft);
+            border-color: var(--oc-accent-line);
+        }
+
+        /* Lime check on the selected tile */
+        .icon-option.selected::after {
+            content: '';
+            position: absolute;
+            top: 7px;
+            right: 7px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--oc-accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23141a08' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center;
         }
 
         .icon-option img {
-            width: 32px;
-            height: 32px;
-            margin-bottom: 8px;
+            width: 28px;
+            height: 28px;
             object-fit: contain;
         }
 
         .icon-option div {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.8);
+            font-size: var(--oc-fs-xs);
+            font-weight: 600;
+            color: var(--oc-text-2);
         }
 
-        select.input-field {
-            cursor: pointer;
-            padding-right: 30px;
-            appearance: none;
-            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(255, 255, 255, 0.5)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
-            background-repeat: no-repeat;
-            background-position: right 8px center;
-            background-size: 16px;
+        .icon-option.selected div {
+            color: var(--oc-text);
         }
 
-        select.input-field option {
-            background: #1a1a1a;
-            color: #ffffff;
-            padding: 8px;
-        }
-
-        .settings-stack {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            width: 100%;
-        }
-
-        .settings-note {
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.65);
-            line-height: 1.4;
-        }
-
-        .settings-note code {
-            color: rgba(255, 255, 255, 0.9);
-        }
+        /* ---------- Footer ---------- */
 
         .settings-footer {
-            text-align: center;
+            display: flex;
+            flex: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            height: 36px;
+            padding: 0 8px 0 14px;
+            border-top: 1px solid var(--oc-line);
+        }
+
+        .footer-brand {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: var(--oc-fs-xs);
+            color: var(--oc-text-3);
+        }
+
+        .footer-brand .oc-mark {
+            --s: 10px;
+        }
+
+        .settings-footer .oc-btn {
+            height: 24px;
+            padding: 0 9px;
+            font-size: var(--oc-fs-xs);
+            -webkit-app-region: no-drag;
+        }
+
+        .settings-footer .oc-btn--danger:hover {
+            background: rgba(255, 122, 114, 0.22);
+        }
+
+        .settings-footer .oc-btn i {
+            font-size: 10px;
         }
     </style>
+    <link rel="stylesheet" href="./src/styles/theme.css">
 </head>
 <body>
-    <div class="settings-container">
-        <div class="settings-header">
+    <div class="settings-container oc-window oc-window--native">
+        <div class="settings-header oc-titlebar oc-drag">
             <div class="header-title">
-                <i class="fas fa-cog"></i>
-                Settings
+                <span class="oc-mark" aria-hidden="true"></span>
+                <span class="oc-title">Settings</span>
             </div>
-            <div class="header-actions">
-                <button class="btn btn-quit" id="quitButton">
-                    <i class="fas fa-power-off"></i>
-                    Quit
-                </button>
-                <button class="btn" id="closeButton">
-                    <i class="fas fa-times"></i>
-                    Close
+            <div class="header-actions oc-no-drag">
+                <button class="oc-btn oc-btn--ghost oc-icon-btn" id="closeButton" type="button" aria-label="Close" title="Close (Esc)">
+                    <i class="fas fa-times" aria-hidden="true"></i>
                 </button>
             </div>
         </div>
-        
+
         <div class="settings-content">
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-code"></i>
-                    Language & Skills
-                </div>
-                <div class="settings-section-content">
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Coding Language</div>
-                            <div class="settings-item-description">Select your preferred programming language</div>
-                        </div>
-                        <select class="input-field" id="codingLanguage">
-                            <option value="cpp">C++</option>
-                            <option value="c">C</option>
-                            <option value="python">Python</option>
-                            <option value="java">Java</option>
-                            <option value="javascript">JavaScript</option>
+            <section class="settings-section">
+                <div class="section-head"><h2 class="oc-label">AI Provider</h2></div>
+                <div class="settings-stack">
+                    <div class="field">
+                        <label class="field-label" for="llmProvider">Provider</label>
+                        <select class="oc-input" id="llmProvider">
+                            <option value="gemini">Google Gemini</option>
+                            <option value="anthropic">Anthropic Claude</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="groq">Groq</option>
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="ollama">Ollama (local)</option>
                         </select>
+                        <div class="field-help">The AI service that answers your questions</div>
                     </div>
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Active Skill</div>
-                            <div class="settings-item-description">Choose your current focus area</div>
-                        </div>
-                        <select class="input-field" id="activeSkill">
-                            <option value="dsa">Data Structures & Algorithms</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
 
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-icons"></i>
-                    App Icon
-                </div>
-                <div class="settings-section-content">
-                    <div class="icon-grid" id="iconGrid">
-                        <div class="icon-option" data-icon="terminal">
-                            <img src="./assests/icons/terminal.png" alt="Terminal">
-                            <div>Terminal</div>
+                    <!-- One group per provider; only the selected one is shown -->
+                    <div class="provider-fields" data-provider="gemini">
+                        <div class="field">
+                            <label class="field-label" for="geminiKey">Google API key</label>
+                            <input type="password" class="oc-input" id="geminiKey" placeholder="Enter your Google API key" autocomplete="off" spellcheck="false">
+                            <div class="field-help">Your Google API key for Gemini models</div>
                         </div>
-                        <div class="icon-option" data-icon="activity">
-                            <img src="./assests/icons/activity.png" alt="Activity">
-                            <div>Activity</div>
-                        </div>
-                        <div class="icon-option" data-icon="settings">
-                            <img src="./assests/icons/settings.png" alt="Settings">
-                            <div>Settings</div>
+                        <div class="field">
+                            <label class="field-label" for="geminiModel">Model</label>
+                            <input type="text" class="oc-input oc-input--mono" id="geminiModel" placeholder="gemini-3.1-flash-lite" spellcheck="false">
+                            <div class="field-help">Leave empty to use the default</div>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-microphone"></i>
-                    Speech Recognition
-                </div>
-                <div class="settings-section-content">
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Speech Provider</div>
-                            <div class="settings-item-description">Choose Azure Speech or a local OpenAI Whisper CLI</div>
+                    <div class="provider-fields" data-provider="anthropic">
+                        <div class="field">
+                            <label class="field-label" for="anthropicKey">Anthropic API key</label>
+                            <input type="password" class="oc-input" id="anthropicKey" placeholder="Enter your Anthropic API key" autocomplete="off" spellcheck="false">
+                            <div class="field-help">Your API key from console.anthropic.com</div>
                         </div>
-                        <select class="input-field" id="speechProvider">
+                        <div class="field">
+                            <label class="field-label" for="anthropicModel">Model</label>
+                            <input type="text" class="oc-input oc-input--mono" id="anthropicModel" placeholder="claude-opus-5-5" spellcheck="false">
+                            <div class="field-help">Leave empty to use the default</div>
+                        </div>
+                    </div>
+
+                    <div class="provider-fields" data-provider="openai">
+                        <div class="field">
+                            <label class="field-label" for="openaiKey">OpenAI API key</label>
+                            <input type="password" class="oc-input" id="openaiKey" placeholder="Enter your OpenAI API key" autocomplete="off" spellcheck="false">
+                            <div class="field-help">Your API key from platform.openai.com</div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="openaiModel">Model</label>
+                            <input type="text" class="oc-input oc-input--mono" id="openaiModel" placeholder="gpt-5-mini" spellcheck="false">
+                            <div class="field-help">Leave empty to use the default</div>
+                        </div>
+                    </div>
+
+                    <div class="provider-fields" data-provider="openrouter">
+                        <div class="field">
+                            <label class="field-label" for="openrouterKey">OpenRouter API key</label>
+                            <input type="password" class="oc-input" id="openrouterKey" placeholder="Enter your OpenRouter API key" autocomplete="off" spellcheck="false">
+                            <div class="field-help">Your API key from openrouter.ai</div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="openrouterModel">Model</label>
+                            <input type="text" class="oc-input oc-input--mono" id="openrouterModel" placeholder="openrouter/auto" spellcheck="false">
+                            <div class="field-help">Leave empty to use the default</div>
+                        </div>
+                    </div>
+
+                    <div class="provider-fields" data-provider="groq">
+                        <div class="field">
+                            <label class="field-label" for="groqKey">Groq API key</label>
+                            <input type="password" class="oc-input" id="groqKey" placeholder="Enter your Groq API key" autocomplete="off" spellcheck="false">
+                            <div class="field-help">Your API key from console.groq.com</div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="groqModel">Model</label>
+                            <input type="text" class="oc-input oc-input--mono" id="groqModel" placeholder="llama-3.3-70b-versatile" spellcheck="false">
+                            <div class="field-help">Leave empty to use the default</div>
+                        </div>
+                        <div class="settings-note settings-note--warn"><i class="fas fa-circle-info" aria-hidden="true"></i>Text only. Screenshots need a vision model.</div>
+                    </div>
+
+                    <div class="provider-fields" data-provider="deepseek">
+                        <div class="field">
+                            <label class="field-label" for="deepseekKey">DeepSeek API key</label>
+                            <input type="password" class="oc-input" id="deepseekKey" placeholder="Enter your DeepSeek API key" autocomplete="off" spellcheck="false">
+                            <div class="field-help">Your API key from platform.deepseek.com</div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="deepseekModel">Model</label>
+                            <input type="text" class="oc-input oc-input--mono" id="deepseekModel" placeholder="deepseek-chat" spellcheck="false">
+                            <div class="field-help">Leave empty to use the default</div>
+                        </div>
+                        <div class="settings-note settings-note--warn"><i class="fas fa-circle-info" aria-hidden="true"></i>Text only. Screenshots need a vision model.</div>
+                    </div>
+
+                    <div class="provider-fields" data-provider="ollama">
+                        <div class="field">
+                            <label class="field-label" for="ollamaModel">Model</label>
+                            <input type="text" class="oc-input oc-input--mono" id="ollamaModel" placeholder="llama3.2-vision" spellcheck="false">
+                            <div class="field-help">A model you have pulled with <code>ollama pull</code></div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="ollamaBaseUrl">Server URL</label>
+                            <input type="text" class="oc-input oc-input--mono" id="ollamaBaseUrl" placeholder="http://localhost:11434/v1" spellcheck="false">
+                            <div class="field-help">OpenAI-compatible endpoint of your Ollama server</div>
+                        </div>
+                    </div>
+
+                    <div class="settings-note">
+                        Provider settings apply immediately and are also written back to <code>.env</code> so they persist across restarts.
+                    </div>
+                </div>
+            </section>
+
+            <section class="settings-section">
+                <div class="section-head"><h2 class="oc-label">Voice</h2></div>
+                <div class="settings-stack">
+                    <div class="field">
+                        <label class="field-label" for="speechProvider">Speech provider</label>
+                        <select class="oc-input" id="speechProvider">
                             <option value="azure">Azure Speech</option>
                             <option value="whisper">Local Whisper</option>
                         </select>
+                        <div class="field-help">Choose Azure Speech or a local OpenAI Whisper CLI</div>
                     </div>
 
                     <!-- Azure fields (shown only when Azure is selected) -->
                     <div id="azureFields" class="settings-group">
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Azure Speech Key</div>
-                                <div class="settings-item-description">Your Azure Cognitive Services API key</div>
-                            </div>
-                            <input type="password" class="input-field" id="azureKey" placeholder="Enter your Azure key">
+                        <div class="field">
+                            <label class="field-label" for="azureKey">Azure Speech key</label>
+                            <input type="password" class="oc-input" id="azureKey" placeholder="Enter your Azure key" autocomplete="off" spellcheck="false">
+                            <div class="field-help">Your Azure Cognitive Services API key</div>
                         </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Azure Region</div>
-                                <div class="settings-item-description">Your Azure service region</div>
-                            </div>
-                            <input type="text" class="input-field" id="azureRegion" placeholder="e.g. eastus">
+                        <div class="field">
+                            <label class="field-label" for="azureRegion">Azure region</label>
+                            <input type="text" class="oc-input oc-input--mono" id="azureRegion" placeholder="e.g. eastus" spellcheck="false">
+                            <div class="field-help">Your Azure service region</div>
                         </div>
                     </div>
 
                     <!-- Whisper fields (shown only when Whisper is selected) -->
                     <div id="whisperFields" class="settings-group">
-                        <div class="settings-item">
-                            <div class="settings-stack">
-                                <div>
-                                    <div class="settings-item-label">Whisper Command</div>
-                                    <div class="settings-item-description">CLI command for local Whisper, such as <code>whisper</code> or <code>python3 -m whisper</code></div>
-                                </div>
-                                <input type="text" class="input-field" id="whisperCommand" placeholder="whisper" style="max-width: 100%;">
+                        <div class="field">
+                            <label class="field-label" for="whisperCommand">Whisper command</label>
+                            <input type="text" class="oc-input oc-input--mono" id="whisperCommand" placeholder="whisper" spellcheck="false">
+                            <div class="field-help">CLI command for local Whisper, such as <code>whisper</code> or <code>python3 -m whisper</code></div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field">
+                                <label class="field-label" for="whisperModel">Model</label>
+                                <input type="text" class="oc-input oc-input--mono" id="whisperModel" placeholder="small" spellcheck="false">
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="whisperLanguage">Language</label>
+                                <input type="text" class="oc-input oc-input--mono" id="whisperLanguage" placeholder="auto" spellcheck="false">
                             </div>
                         </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Whisper Model</div>
-                                <div class="settings-item-description">Local model name used by the Whisper CLI</div>
-                            </div>
-                            <input type="text" class="input-field" id="whisperModel" placeholder="small">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Whisper Language</div>
-                                <div class="settings-item-description">Language code or auto-detection for local transcription</div>
-                            </div>
-                            <input type="text" class="input-field" id="whisperLanguage" placeholder="auto">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Compute Device</div>
-                                <div class="settings-item-description">Automatically use CUDA when available, or force CPU/GPU</div>
-                            </div>
-                            <select class="input-field" id="whisperDevice">
+                        <div class="field-help" style="margin-top: -6px;">Local model name, and a language code or <code>auto</code> for detection</div>
+                        <div class="field">
+                            <label class="field-label" for="whisperDevice">Compute device</label>
+                            <select class="oc-input" id="whisperDevice">
                                 <option value="auto">Auto</option>
                                 <option value="cpu">CPU</option>
                                 <option value="cuda">CUDA</option>
                             </select>
+                            <div class="field-help">Automatically use CUDA when available, or force CPU/GPU</div>
                         </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Capture Mode</div>
-                                <div class="settings-item-description">Manual records until you press stop; VAD detects natural pauses</div>
-                            </div>
-                            <select class="input-field" id="whisperCaptureMode">
+                        <div class="field">
+                            <label class="field-label" for="whisperCaptureMode">Capture mode</label>
+                            <select class="oc-input" id="whisperCaptureMode">
                                 <option value="vad">Automatic (VAD)</option>
                                 <option value="manual">Manual start/stop</option>
                             </select>
+                            <div class="field-help">Manual records until you press stop; VAD detects natural pauses</div>
                         </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Voice Response Target</div>
-                                <div class="settings-item-description">Choose where answers generated from speech are displayed</div>
-                            </div>
-                            <select class="input-field" id="whisperResponseTarget">
+                        <div class="field">
+                            <label class="field-label" for="whisperResponseTarget">Voice response target</label>
+                            <select class="oc-input" id="whisperResponseTarget">
                                 <option value="both">Chat and overlay</option>
                                 <option value="chat">Chat only</option>
                                 <option value="overlay">Overlay only</option>
                             </select>
+                            <div class="field-help">Choose where answers generated from speech are displayed</div>
                         </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Whisper Segment Length</div>
-                                <div class="settings-item-description">Chunk size in milliseconds for local transcription</div>
-                            </div>
-                            <input type="number" class="input-field" id="whisperSegmentMs" placeholder="4000" min="2000" step="500">
+                        <div class="field">
+                            <label class="field-label" for="whisperSegmentMs">Segment length (ms)</label>
+                            <input type="number" class="oc-input oc-input--mono" id="whisperSegmentMs" placeholder="4000" min="2000" step="500">
+                            <div class="field-help">Chunk size in milliseconds for local transcription</div>
                         </div>
                         <div class="settings-note">
                             Local Whisper runs on this machine and needs a Whisper CLI installed. These settings apply immediately for the current app session and are also written back to <code>.env</code> so they persist across restarts.
@@ -458,175 +489,70 @@
                         Azure credentials apply immediately and are also written back to <code>.env</code> so they persist across restarts.
                     </div>
                 </div>
+            </section>
+
+            <section class="settings-section">
+                <div class="section-head"><h2 class="oc-label">Language &amp; Skills</h2></div>
+                <div class="settings-stack">
+                    <div class="field-row">
+                        <div class="field">
+                            <label class="field-label" for="codingLanguage">Coding language</label>
+                            <select class="oc-input" id="codingLanguage">
+                                <option value="cpp">C++</option>
+                                <option value="c">C</option>
+                                <option value="python">Python</option>
+                                <option value="java">Java</option>
+                                <option value="javascript">JavaScript</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="activeSkill">Active skill</label>
+                            <select class="oc-input" id="activeSkill">
+                                <option value="dsa">Data Structures &amp; Algorithms</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-help" style="margin-top: -6px;">Your preferred programming language and current focus area</div>
+                </div>
+            </section>
+
+            <section class="settings-section">
+                <div class="section-head"><h2 class="oc-label">App Icon</h2></div>
+                <div class="icon-grid" id="iconGrid">
+                    <div class="icon-option" data-icon="terminal">
+                        <img src="./assests/icons/terminal.png" alt="Terminal">
+                        <div>Terminal</div>
+                    </div>
+                    <div class="icon-option" data-icon="activity">
+                        <img src="./assests/icons/activity.png" alt="Activity">
+                        <div>Activity</div>
+                    </div>
+                    <div class="icon-option" data-icon="settings">
+                        <img src="./assests/icons/settings.png" alt="Settings">
+                        <div>Settings</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="settings-section">
+                <div class="section-head"><h2 class="oc-label">Window</h2></div>
+                <div class="field">
+                    <label class="field-label" for="windowGap">Window gap (px)</label>
+                    <input type="number" class="oc-input oc-input--mono" id="windowGap" placeholder="20" min="0" max="100">
+                    <div class="field-help">Gap between bound windows, in pixels</div>
+                </div>
+            </section>
+        </div>
+
+        <div class="settings-footer">
+            <div class="footer-brand">
+                <span class="oc-mark" aria-hidden="true"></span>
+                <span>OpenCluely · by Ankit Chaudhry</span>
             </div>
-            
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-robot"></i>
-                    AI Provider
-                </div>
-                <div class="settings-section-content">
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Provider</div>
-                            <div class="settings-item-description">The AI service that answers your questions</div>
-                        </div>
-                        <select class="input-field" id="llmProvider">
-                            <option value="gemini">Google Gemini</option>
-                            <option value="anthropic">Anthropic Claude</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="openrouter">OpenRouter</option>
-                            <option value="groq">Groq</option>
-                            <option value="deepseek">DeepSeek</option>
-                            <option value="ollama">Ollama (local)</option>
-                        </select>
-                    </div>
-
-                    <!-- One group per provider; only the selected one is shown -->
-                    <div class="provider-fields" data-provider="gemini">
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Google API Key</div>
-                                <div class="settings-item-description">Your Google API key for Gemini models</div>
-                            </div>
-                            <input type="password" class="input-field" id="geminiKey" placeholder="Enter your Google API key">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Model</div>
-                                <div class="settings-item-description">Leave empty to use the default</div>
-                            </div>
-                            <input type="text" class="input-field" id="geminiModel" placeholder="gemini-3.1-flash-lite">
-                        </div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="anthropic">
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Anthropic API Key</div>
-                                <div class="settings-item-description">Your API key from console.anthropic.com</div>
-                            </div>
-                            <input type="password" class="input-field" id="anthropicKey" placeholder="Enter your Anthropic API key">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Model</div>
-                                <div class="settings-item-description">Leave empty to use the default</div>
-                            </div>
-                            <input type="text" class="input-field" id="anthropicModel" placeholder="claude-opus-5-5">
-                        </div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="openai">
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">OpenAI API Key</div>
-                                <div class="settings-item-description">Your API key from platform.openai.com</div>
-                            </div>
-                            <input type="password" class="input-field" id="openaiKey" placeholder="Enter your OpenAI API key">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Model</div>
-                                <div class="settings-item-description">Leave empty to use the default</div>
-                            </div>
-                            <input type="text" class="input-field" id="openaiModel" placeholder="gpt-5-mini">
-                        </div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="openrouter">
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">OpenRouter API Key</div>
-                                <div class="settings-item-description">Your API key from openrouter.ai</div>
-                            </div>
-                            <input type="password" class="input-field" id="openrouterKey" placeholder="Enter your OpenRouter API key">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Model</div>
-                                <div class="settings-item-description">Leave empty to use the default</div>
-                            </div>
-                            <input type="text" class="input-field" id="openrouterModel" placeholder="openrouter/auto">
-                        </div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="groq">
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Groq API Key</div>
-                                <div class="settings-item-description">Your API key from console.groq.com</div>
-                            </div>
-                            <input type="password" class="input-field" id="groqKey" placeholder="Enter your Groq API key">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Model</div>
-                                <div class="settings-item-description">Leave empty to use the default</div>
-                            </div>
-                            <input type="text" class="input-field" id="groqModel" placeholder="llama-3.3-70b-versatile">
-                        </div>
-                        <div class="settings-note">Text only — screenshots need a vision model.</div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="deepseek">
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">DeepSeek API Key</div>
-                                <div class="settings-item-description">Your API key from platform.deepseek.com</div>
-                            </div>
-                            <input type="password" class="input-field" id="deepseekKey" placeholder="Enter your DeepSeek API key">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Model</div>
-                                <div class="settings-item-description">Leave empty to use the default</div>
-                            </div>
-                            <input type="text" class="input-field" id="deepseekModel" placeholder="deepseek-chat">
-                        </div>
-                        <div class="settings-note">Text only — screenshots need a vision model.</div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="ollama">
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Model</div>
-                                <div class="settings-item-description">A model you have pulled with <code>ollama pull</code></div>
-                            </div>
-                            <input type="text" class="input-field" id="ollamaModel" placeholder="llama3.2-vision">
-                        </div>
-                        <div class="settings-item">
-                            <div>
-                                <div class="settings-item-label">Server URL</div>
-                                <div class="settings-item-description">OpenAI-compatible endpoint of your Ollama server</div>
-                            </div>
-                            <input type="text" class="input-field" id="ollamaBaseUrl" placeholder="http://localhost:11434/v1">
-                        </div>
-                    </div>
-
-                    <div class="settings-note">
-                        Provider settings apply immediately and are also written back to <code>.env</code> so they persist across restarts.
-                    </div>
-                </div>
-            </div>
-            
-            <div class="settings-section">
-                <div class="settings-section-title">
-                    <i class="fas fa-window-maximize"></i>
-                    Window Settings
-                </div>
-                <div class="settings-section-content">
-                    <div class="settings-item">
-                        <div>
-                            <div class="settings-item-label">Window Gap</div>
-                            <div class="settings-item-description">Gap between bound windows (in pixels)</div>
-                        </div>
-                        <input type="number" class="input-field" id="windowGap" placeholder="20" min="0" max="100">
-                    </div>
-                </div>
-            </div>
-
-            <div class="settings-note settings-footer">OpenCluely · Made by Ankit Chaudhry</div>
+            <button class="oc-btn oc-btn--danger" id="quitButton" type="button" title="Quit OpenCluely">
+                <i class="fas fa-power-off" aria-hidden="true"></i>
+                Quit
+            </button>
         </div>
     </div>
 
