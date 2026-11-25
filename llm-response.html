@@ -532,8 +532,8 @@
                 return;
             }
             
-            // Check if response contains code blocks
-            const codeBlocks = extractCodeBlocks(response);
+            // Split the response into its prose and its code blocks
+            const { text: prose, blocks: codeBlocks } = splitCodeBlocks(response);
             hasCode = codeBlocks.length > 0;
 
             // Calculate content metrics for dynamic sizing
@@ -541,10 +541,10 @@
 
             if (hasCode) {
                 // Split layout: text on left, code on right
-                displaySplitLayout(response, codeBlocks);
+                displaySplitLayout(prose, codeBlocks);
             } else {
                 // Full layout: all content in one panel
-                displayFullLayout(response);
+                displayFullLayout(prose);
             }
 
             // Errors (e.g. screen capture failures) render as a callout.
@@ -639,17 +639,67 @@
             console.log('Wheel scroll detected on element');
         }
 
-        function extractCodeBlocks(text) {
+        // Split an answer into its prose and its fenced code blocks (``` or ~~~
+        // on their own lines, possibly indented inside a list). When a coding
+        // language is set, the main process tags every fence line with it,
+        // closing ones too (enforceProgrammingLanguage in llm.service.js), so a
+        // closing fence may end in one word (```cpp). A fence leaves nothing in
+        // the prose: its lines and the blank lines around it are dropped and the
+        // text on either side is rejoined. A fence that is never closed, as in a
+        // cut-off answer, runs to the end.
+        // Keep in sync with splitCodeBlocks in chat.html and src/ui/chat-window.js.
+        function splitCodeBlocks(text) {
+            const prose = [];
             const blocks = [];
-            if (!text) return blocks;
-            const regex = /(```|~~~)([^\n]*)\n([\s\S]*?)\1/g; // supports ```lang and ~~~lang
-            let match;
-            while ((match = regex.exec(text)) !== null) {
-                const info = (match[2] || '').trim();
-                const langToken = info.split(/\s+/)[0] || 'text';
-                blocks.push({ language: langToken, code: match[3], fullMatch: match[0] });
-            }
-            return blocks;
+            const listLine = /^(?:[ \t]|[-*+][ \t]|\d+[.)][ \t])/; // list item or indented line
+            let fence = null; // the block being read
+            let cut = false;  // a block was removed after the last prose line
+            const endBlock = () => {
+                const lines = fence.lines;
+                while (lines.length && !lines[0].trim()) lines.shift();
+                while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+                if (lines.length) blocks.push({ language: fence.language, code: lines.join('\n') });
+                fence = null;
+                cut = true;
+            };
+            String(text || '').split(/\r\n?|\n/).forEach(line => {
+                if (fence) {
+                    const close = line.match(/^[ \t]*(`{3,}|~{3,})[ \t]*(\S*)[ \t]*$/);
+                    if (close && close[1][0] === fence.char && close[1].length >= fence.size &&
+                        !close[2].includes(fence.char)) {
+                        endBlock();
+                    } else {
+                        // Drop the fence's own indentation, keep the code's.
+                        const lead = line.match(/^[ \t]*/)[0].length;
+                        fence.lines.push(line.slice(Math.min(lead, fence.indent)));
+                    }
+                    return;
+                }
+                const open = line.match(/^([ \t]*)(`{3,}|~{3,})(.*)$/);
+                // A backtick fence's info string has no backticks, so ```x``` stays inline code.
+                if (open && !(open[2][0] === '`' && open[3].includes('`'))) {
+                    while (prose.length && !prose[prose.length - 1].trim()) prose.pop();
+                    fence = {
+                        char: open[2][0],
+                        size: open[2].length,
+                        indent: open[1].length,
+                        language: open[3].trim().split(/\s+/)[0] || 'text',
+                        lines: []
+                    };
+                    return;
+                }
+                if (cut) {
+                    if (!line.trim()) return;
+                    cut = false;
+                    // A blank line keeps paragraphs apart; inside a list the two sides
+                    // are joined directly so the list stays tight.
+                    const before = prose[prose.length - 1];
+                    if (before !== undefined && !(listLine.test(before) && listLine.test(line))) prose.push('');
+                }
+                prose.push(line);
+            });
+            if (fence) endBlock();
+            return { text: prose.join('\n').replace(/\n\s*\n\s*\n/g, '\n\n').trim(), blocks };
         }
 
         function attachCopy(btn, text) {
@@ -703,21 +753,12 @@
             });
         }
 
-        function displaySplitLayout(response, codeBlocks) {
+        function displaySplitLayout(textContent, codeBlocks) {
             // Show split layout, hide full layout
             document.getElementById('split-layout').classList.remove('hidden');
             document.getElementById('full-content').classList.add('hidden');
 
-            // Remove code blocks from text content
-            let textContent = response;
-            codeBlocks.forEach(block => {
-                textContent = textContent.replace(block.fullMatch, '');
-            });
-
-            // Clean up text content
-            textContent = textContent.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
-
-            // Render text content
+            // Render text content (the prose from splitCodeBlocks, fences already removed)
             const textHtml = sanitizeHtml(renderMarkdown(textContent));
             document.getElementById('text-content').innerHTML = textHtml;
             if (window.renderMathInElement) window.renderMathInElement(document.getElementById('text-content'));
@@ -754,13 +795,14 @@
             scheduleHighlight();
         }
 
-        function displayFullLayout(response) {
+        function displayFullLayout(text) {
             // Show full layout, hide split layout
             document.getElementById('split-layout').classList.add('hidden');
             document.getElementById('full-content').classList.remove('hidden');
 
-            // Render full markdown
-            const html = sanitizeHtml(renderMarkdown(response));
+            // Render full markdown (the prose from splitCodeBlocks, so an empty
+            // fence leaves no stray language word here either)
+            const html = sanitizeHtml(renderMarkdown(text));
             const full = document.getElementById('full-markdown');
             full.innerHTML = html;
             if (window.renderMathInElement) window.renderMathInElement(full);

@@ -487,7 +487,7 @@ class ChatWindowUI {
     // the prose: its lines and the blank lines around it are dropped and the
     // text on either side is rejoined. A fence that is never closed, as in a
     // cut-off answer, runs to the end.
-    // Keep in sync with splitCodeBlocks in chat.html.
+    // Keep in sync with splitCodeBlocks in chat.html and llm-response.html.
     splitCodeBlocks(text) {
         const prose = [];
         const blocks = [];
