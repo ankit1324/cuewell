@@ -270,6 +270,42 @@ class MainWindowUI {
         }, 100);
     }
 
+    // A <select> is as wide as its longest option ("JavaScript"), which leaves a
+    // gap before the chevron when a short one like "C++" is selected. Size it to
+    // the selected option's text in the select's own font, plus its padding
+    // (the right padding holds the chevron).
+    fitLanguageSelect() {
+        const select = this.languageSelect;
+        if (!select) return;
+        const option = select.options[select.selectedIndex];
+        if (!option) {
+            // Nothing selected: fall back to the natural width.
+            select.style.width = '';
+            return;
+        }
+
+        if (!this._measureContext) {
+            this._measureContext = document.createElement('canvas').getContext('2d');
+        }
+        const ctx = this._measureContext;
+        const style = getComputedStyle(select);
+        ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+
+        let width = ctx.measureText(option.text).width;
+        // <select> is border-box by default, so its width includes padding and border.
+        if (style.boxSizing === 'border-box') {
+            width += parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) +
+                parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+        }
+        select.style.width = `${Math.ceil(width)}px`;
+    }
+
+    // Refit the language select, then resize the window so it follows the bar.
+    updateLanguageSelectWidth() {
+        this.fitLanguageSelect();
+        this.resizeWindowToContent();
+    }
+
     setupElements() {
         this.statusDot = document.getElementById('statusDot');
         this.skillIndicator = document.getElementById('skillIndicator');
@@ -345,6 +381,13 @@ class MainWindowUI {
         if (this.languageSelect) {
             // Set default to C++ if no value is set
             this.languageSelect.value = 'cpp';
+            this.fitLanguageSelect();
+
+            // Manrope is a bundled web font (font-display: swap), so that first
+            // measurement can use fallback metrics. Measure again once it loads.
+            if (document.fonts && document.fonts.ready) {
+                document.fonts.ready.then(() => this.updateLanguageSelectWidth());
+            }
             
             // Initialize with current setting
             if (window.electronAPI && window.electronAPI.getSettings) {
@@ -359,7 +402,7 @@ class MainWindowUI {
                 }).catch(() => {
                     // Fallback to C++ on error
                     this.languageSelect.value = 'cpp';
-                });
+                }).then(() => this.updateLanguageSelectWidth());
             }
 
             this.languageSelect.addEventListener('change', (e) => {
@@ -367,14 +410,8 @@ class MainWindowUI {
                 if (window.electronAPI && window.electronAPI.saveSettings) {
                     window.electronAPI.saveSettings({ codingLanguage: lang });
                 }
-                // Resize for any width change
-                setTimeout(() => {
-                    const commandTab = document.querySelector('.command-tab');
-                    if (commandTab && window.electronAPI && window.electronAPI.resizeWindow) {
-                        const rect = commandTab.getBoundingClientRect();
-                        window.electronAPI.resizeWindow(Math.ceil(rect.width), Math.ceil(rect.height));
-                    }
-                }, 50);
+                // Hug the new option, then resize the window to the new bar width
+                this.updateLanguageSelectWidth();
             });
         }
 
@@ -455,6 +492,7 @@ class MainWindowUI {
                     // avoid clobbering if same value
                     if (this.languageSelect.value !== data.language) {
                         this.languageSelect.value = data.language;
+                        this.updateLanguageSelectWidth();
                     }
                     logger.debug('Language updated from other window', {
                         component: 'MainWindowUI',

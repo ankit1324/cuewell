@@ -2,14 +2,18 @@
 /**
  * Onboarding wizard controller.
  *
- * Drives the 5-step flow rendered in onboarding.html and persists
- * everything via the electronAPI bridge exposed by preload.js:
+ * Drives the flow rendered in onboarding.html and persists everything
+ * via the electronAPI bridge exposed by preload.js. computeScreenOrder()
+ * decides which screens the current path shows:
  *
  *   1. Welcome
  *   2. Gemini API key entry + live connection test
  *   3. Speech provider choice (Whisper / Azure / Skip)
- *   4. Whisper detect + (optional) install — only shown when whisper
- *   5. Summary
+ *   4. Whisper detect + (optional) install (Whisper only)
+ *   5. Whisper model download (Whisper only)
+ *   6. Summary
+ *
+ * The Whisper path has 6 steps; the others have 4.
  */
 
 (function () {
@@ -32,7 +36,7 @@
   }
 
   const screens = $$('.screen');
-  const stepperDots = $$('.step-dot');
+  const stepper = $('#stepper');
   const stepBadge = $('#stepBadge');
   const backBtn = $('#backBtn');
   const nextBtn = $('#nextBtn');
@@ -56,23 +60,28 @@
     finished: false,
   };
 
-  // Screens are: welcome → apikey → speech → whisper? → finish
-  // The whisper screen is only visited if state.speechProvider === 'whisper'
-  const stepScreens = ['welcome', 'apikey', 'speech'];
-
   // ── Step rendering ────────────────────────────────────────────────
-  function totalSteps() {
-    return stepScreens.length + (state.speechProvider === 'whisper' ? 1 : 0) + 1;
-  }
-
+  // The "Step n of total" label and the progress bars both follow
+  // computeScreenOrder(), the sequence navigation walks, so they always
+  // match the screens on the current path. Welcome counts as step 1.
   function refreshStepper() {
-    const total = totalSteps();
-    const current = state.step + 1;
-    stepBadge.textContent = `Step ${current} of ${total}`;
-    stepperDots.forEach((dot, i) => {
-      dot.classList.remove('active', 'done');
-      if (i < state.step) dot.classList.add('done');
-      else if (i === state.step) dot.classList.add('active');
+    const order = computeScreenOrder();
+    const total = order.length;
+    const index = Math.max(0, order.indexOf(currentScreenName()));
+    stepBadge.textContent = `Step ${index + 1} of ${total}`;
+
+    // One bar per screen on the path.
+    while (stepper.children.length < total) {
+      const dot = document.createElement('div');
+      dot.className = 'step-dot';
+      stepper.appendChild(dot);
+    }
+    while (stepper.children.length > total) {
+      stepper.lastElementChild.remove();
+    }
+    Array.from(stepper.children).forEach((dot, i) => {
+      dot.classList.toggle('done', i < index);
+      dot.classList.toggle('active', i === index);
     });
   }
 
@@ -208,6 +217,8 @@
         state.azureKey = '';
         state.azureRegion = '';
       }
+      // The choice sets the path length (Whisper adds two screens).
+      refreshStepper();
     });
   });
 
