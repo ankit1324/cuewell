@@ -12,6 +12,7 @@
  */
 const { URL: NodeURL } = require('url');
 const config = require('../../core/config');
+const { resolveIdleTimeoutMs } = require('./idle-timeout');
 
 // Generous enough for a cold local model, short enough that a dead
 // connection does not hang the overlay for the SDK default of 10 minutes.
@@ -129,6 +130,8 @@ function createProvider(id, env = process.env) {
   if (!provider || provider.kind === 'gemini') return null;
 
   const runtimeOptions = nodeRuntimeClientOptions();
+  // Streamed requests are aborted after this long without receiving any data.
+  const idleTimeoutMs = resolveIdleTimeoutMs(readEnv(env, 'LLM_STREAM_IDLE_TIMEOUT_MS'));
 
   // SDKs are loaded lazily so Gemini-only sessions never pay for them.
   if (provider.kind === 'anthropic') {
@@ -140,6 +143,7 @@ function createProvider(id, env = process.env) {
       effort: readEnv(env, 'ANTHROPIC_EFFORT'),
       label: provider.label,
       timeout: REQUEST_TIMEOUT_MS,
+      idleTimeoutMs,
       clientOptions: runtimeOptions
     });
   }
@@ -152,6 +156,7 @@ function createProvider(id, env = process.env) {
     tokenParam: provider.tokenParam,
     label: provider.label,
     timeout: REQUEST_TIMEOUT_MS,
+    idleTimeoutMs,
     // The SDK reads OPENAI_ORG_ID / OPENAI_PROJECT_ID from the environment;
     // those belong to OpenAI and must not be sent to other hosts.
     clientOptions: id === 'openai'

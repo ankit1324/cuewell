@@ -1,6 +1,7 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const logger = require('../../core/logger').createServiceLogger('LLM');
 const { normalizeSdkError, noTextAtLimitError } = require('./errors');
+const { resolveIdleTimeoutMs, startIdleTimeout } = require('./idle-timeout');
 
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -31,6 +32,27 @@ function isFallbackRejection(error) {
     /fallback/i.test(String(error.apiMessage || error.message || ''));
 }
 
+/**
+ * Per-request middleware that calls `onData` when the response headers and
+ * each body chunk arrive. The SDK drops `ping` events before MessageStream
+ * sees them, so no stream event reports pings; reading the body is the only
+ * way to count them as activity.
+ */
+function onResponseData(onData) {
+  return async (request, next) => {
+    const response = await next(request);
+    onData();
+    if (!response.body) return response;
+    const body = response.body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        onData();
+        controller.enqueue(chunk);
+      }
+    }));
+    return new Response(body, response);
+  };
+}
+
 function textOf(message) {
   return (Array.isArray(message && message.content) ? message.content : [])
     .filter((block) => block && block.type === 'text' && typeof block.text === 'string')
@@ -39,7 +61,7 @@ function textOf(message) {
 }
 
 class AnthropicProvider {
-  constructor({ apiKey, baseURL, effort, label = 'Anthropic Claude', timeout, clientOptions } = {}) {
+  constructor({ apiKey, baseURL, effort, label = 'Anthropic Claude', timeout, idleTimeoutMs, clientOptions } = {}) {
     // LLMService owns retries, so the SDK must not retry on its own.
     const options = { ...(clientOptions || {}), apiKey, maxRetries: 0 };
     if (baseURL) options.baseURL = baseURL;
@@ -47,6 +69,8 @@ class AnthropicProvider {
     this.client = new Anthropic(options);
     this.effort = resolveEffort(effort);
     this.label = label;
+    this.requestTimeoutMs = timeout || 0;
+    this.idleTimeoutMs = resolveIdleTimeoutMs(idleTimeoutMs ?? process.env.LLM_STREAM_IDLE_TIMEOUT_MS);
   }
 
   _params(neutral, model) {
@@ -108,14 +132,23 @@ class AnthropicProvider {
   }
 
   async stream(neutral, model, onDelta) {
-    const message = await this._send(this._params(neutral, model), (api, params) => {
-      const stream = api.stream(params);
-      stream.on('text', (delta) => {
-        if (delta) onDelta(delta);
-      });
-      return stream.finalMessage();
-    });
-    return this._finish(message, neutral.maxTokens);
+    const idle = startIdleTimeout(this.idleTimeoutMs, this.label, this.requestTimeoutMs);
+    try {
+      const message = await idle.run(() => this._send(this._params(neutral, model), (api, params) => {
+        const stream = api.stream(params, { signal: idle.signal, middleware: [onResponseData(idle.reset)] });
+        // Backup for the middleware: every parsed event except `ping`.
+        stream.on('streamEvent', idle.reset);
+        stream.on('text', (delta) => {
+          if (delta) onDelta(delta);
+        });
+        return stream.finalMessage();
+      }));
+      return this._finish(message, neutral.maxTokens);
+    } catch (error) {
+      throw idle.timedOut ? idle.error : error;
+    } finally {
+      idle.clear();
+    }
   }
 }
 
