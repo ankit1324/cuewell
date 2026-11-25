@@ -5,3 +5,8 @@ This product is a modified version of OpenCluely
 (https://github.com/TechyCSR/OpenCluely), Copyright TechyCSR,
 licensed under the Apache License, Version 2.0.
 Modifications include rebranding, a multi-provider AI layer, and UI changes.
+
+Bundled fonts (assests/fonts), licensed under the SIL Open Font License 1.1
+(full texts in assests/fonts/LICENSE-*.txt):
+- Manrope, Copyright 2019 The Manrope Project Authors
+- JetBrains Mono, Copyright 2020 The JetBrains Mono Project Authors

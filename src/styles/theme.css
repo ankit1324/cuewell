@@ -1,0 +1,609 @@
+/*
+ * OpenCluely theme: "Graphite & Lime"
+ * Design by Ankit Chaudhry.
+ *
+ * Shared tokens and primitives for every window. Pages link this file after
+ * common.css so these values win. Fonts are bundled locally (SIL OFL 1.1, see
+ * assests/fonts/LICENSE-*.txt); nothing here loads from the network.
+ *
+ * Look: a dark graphite glass overlay that stays readable over any light or
+ * dark screen, one sharp accent (signal lime), monospace for anything
+ * technical (code, shortcuts, labels).
+ */
+
+/* ---------- Fonts ---------- */
+
+@font-face {
+  font-family: 'Manrope Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url('../../assests/fonts/manrope-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Manrope Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url('../../assests/fonts/manrope-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('../../assests/fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('../../assests/fonts/jetbrains-mono-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---------- Tokens ---------- */
+
+:root {
+  color-scheme: dark;
+
+  /* Type */
+  --oc-font: 'Manrope Variable', 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --oc-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --oc-fs-2xs: 10.5px;  /* mono labels, kbd */
+  --oc-fs-xs: 11.5px;   /* meta, chips */
+  --oc-fs-sm: 12.5px;   /* controls, toolbar */
+  --oc-fs-md: 13.5px;   /* body text */
+  --oc-fs-lg: 15px;     /* section titles */
+  --oc-fs-xl: 18px;     /* window titles */
+  --oc-fs-2xl: 24px;    /* onboarding headline */
+
+  /* Surfaces: graphite glass */
+  --oc-glass: rgba(16, 17, 21, 0.93);       /* panel fill without native blur */
+  --oc-glass-bar: rgba(13, 14, 17, 0.94);   /* toolbar pill (always CSS glass) */
+  --oc-glass-pop: rgba(20, 21, 26, 0.97);   /* popovers, menus */
+  --oc-raised: rgba(255, 255, 255, 0.05);   /* inputs, cards, chips */
+  --oc-raised-2: rgba(255, 255, 255, 0.08); /* hover */
+  --oc-raised-3: rgba(255, 255, 255, 0.12); /* pressed, selected */
+  --oc-sunken: rgba(0, 0, 0, 0.30);         /* code blocks, wells, fields */
+  --oc-line: rgba(255, 255, 255, 0.08);
+  --oc-line-2: rgba(255, 255, 255, 0.14);
+  --oc-sheen: rgba(255, 255, 255, 0.07);    /* 1px top highlight on glass */
+
+  /* Text */
+  --oc-text: #f2f1ec;
+  --oc-text-2: #b5b7bd;
+  --oc-text-3: #80848d;
+  --oc-text-4: #5d6169;
+
+  /* Accent: signal lime. Use sparingly: primary action, focus, live AI state. */
+  --oc-accent: #c9f26b;
+  --oc-accent-2: #dbf79a;                   /* hover */
+  --oc-accent-ink: #141a08;                 /* text and icons on accent */
+  --oc-accent-soft: rgba(201, 242, 107, 0.13);
+  --oc-accent-line: rgba(201, 242, 107, 0.38);
+
+  /* Status */
+  --oc-live: #ff5f57;                       /* recording / listening */
+  --oc-live-soft: rgba(255, 95, 87, 0.15);
+  --oc-live-line: rgba(255, 95, 87, 0.38);
+  --oc-warn: #f6c453;
+  --oc-warn-soft: rgba(246, 196, 83, 0.14);
+  --oc-error: #ff7a72;
+  --oc-error-soft: rgba(255, 122, 114, 0.14);
+  --oc-info: #8ccaff;
+
+  /* Shape */
+  --oc-r-window: 10px;  /* matches the macOS native-glass corner mask */
+  --oc-r-lg: 12px;
+  --oc-r-md: 8px;
+  --oc-r-sm: 6px;
+  --oc-r-xs: 4px;
+  --oc-r-pill: 999px;
+
+  /* Depth */
+  --oc-edge: inset 0 0 0 1px var(--oc-line-2), inset 0 1px 0 var(--oc-sheen);
+  --oc-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.30);
+
+  /* Motion */
+  --oc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --oc-t-fast: 120ms;
+  --oc-t: 180ms;
+}
+
+/*
+ * On macOS the main process gives panel windows native blur (vibrancy), so the
+ * tint can be light and the background shows through as frosted glass. Pages
+ * opt in by putting `oc-window--native` on their root surface. preload.js sets
+ * html[data-platform] to process.platform.
+ */
+html[data-platform="darwin"] .oc-window--native {
+  --oc-glass: rgba(14, 15, 19, 0.34);
+}
+
+/* ---------- Base ---------- */
+
+html,
+body {
+  font-family: var(--oc-font);
+  color: var(--oc-text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(201, 242, 107, 0.28);
+  color: #ffffff;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: var(--oc-r-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--oc-accent-line);
+  outline-offset: 2px;
+}
+
+/* ---------- Window surface ---------- */
+
+/* Root surface of a panel window. Must fill the whole window: no transparent
+   margin around it, or native blur shows outside the panel. */
+.oc-window {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  color: var(--oc-text);
+  background: var(--oc-glass);
+  border-radius: var(--oc-r-window);
+  box-shadow: var(--oc-edge);
+}
+
+.oc-drag { -webkit-app-region: drag; user-select: none; }
+.oc-no-drag { -webkit-app-region: no-drag; }
+
+.oc-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--oc-line);
+  flex: none;
+}
+
+.oc-title {
+  font-size: var(--oc-fs-sm);
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--oc-text);
+}
+
+/* Brand mark: a lens "C" with a dot. Pure CSS, scales with --s. */
+.oc-mark {
+  --s: 16px;
+  position: relative;
+  flex: none;
+  width: var(--s);
+  height: var(--s);
+  border-radius: 50%;
+  border: max(2px, calc(var(--s) * 0.13)) solid var(--oc-accent);
+  border-top-color: transparent;
+  transform: rotate(45deg);
+}
+.oc-mark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 34%;
+  height: 34%;
+  border-radius: 50%;
+  background: var(--oc-accent);
+}
+
+/* Mono eyebrow label: section names, states, meta. */
+.oc-label {
+  font-family: var(--oc-mono);
+  font-size: var(--oc-fs-2xs);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--oc-text-3);
+}
+
+.oc-sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--oc-line-2);
+}
+
+.oc-hr {
+  height: 1px;
+  margin: 0;
+  border: 0;
+  background: var(--oc-line);
+}
+
+/* ---------- Keyboard hints ---------- */
+
+.oc-kbd-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.oc-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-family: var(--oc-mono);
+  font-size: var(--oc-fs-2xs);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--oc-text-2);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-bottom-color: rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+
+/* Platform modifier: <span class="oc-kbd oc-mod"></span> shows ⌘ on macOS, Ctrl elsewhere. */
+.oc-mod::before { content: '\2318'; }
+html[data-platform="win32"] .oc-mod::before,
+html[data-platform="linux"] .oc-mod::before { content: 'Ctrl'; }
+
+/* ---------- Controls ---------- */
+
+.oc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  font: 600 var(--oc-fs-sm)/1 var(--oc-font);
+  color: var(--oc-text);
+  background: var(--oc-raised);
+  border: 1px solid var(--oc-line);
+  border-radius: var(--oc-r-md);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--oc-t-fast) var(--oc-ease),
+    border-color var(--oc-t-fast) var(--oc-ease),
+    color var(--oc-t-fast) var(--oc-ease),
+    transform var(--oc-t-fast) var(--oc-ease);
+}
+.oc-btn:hover { background: var(--oc-raised-2); border-color: var(--oc-line-2); }
+.oc-btn:active { background: var(--oc-raised-3); transform: translateY(0.5px); }
+.oc-btn:disabled { opacity: 0.45; cursor: default; }
+
+.oc-btn--primary {
+  color: var(--oc-accent-ink);
+  background: var(--oc-accent);
+  border-color: transparent;
+}
+.oc-btn--primary:hover { background: var(--oc-accent-2); border-color: transparent; }
+
+.oc-btn--ghost {
+  color: var(--oc-text-2);
+  background: transparent;
+  border-color: transparent;
+}
+.oc-btn--ghost:hover { color: var(--oc-text); background: var(--oc-raised-2); border-color: transparent; }
+
+.oc-btn--danger {
+  color: var(--oc-error);
+  background: var(--oc-error-soft);
+  border-color: transparent;
+}
+
+/* Square icon button; combine with .oc-btn (and usually .oc-btn--ghost). */
+.oc-icon-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 12px;
+}
+
+/* Round accent send button. */
+.oc-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--oc-accent-ink);
+  background: var(--oc-accent);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background var(--oc-t-fast) var(--oc-ease), transform var(--oc-t-fast) var(--oc-ease), opacity var(--oc-t-fast);
+}
+.oc-send:hover { background: var(--oc-accent-2); }
+.oc-send:active { transform: scale(0.96); }
+.oc-send:disabled { opacity: 0.4; cursor: default; }
+
+.oc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: var(--oc-fs-xs);
+  font-weight: 600;
+  color: var(--oc-text-2);
+  background: var(--oc-raised);
+  border: 1px solid var(--oc-line);
+  border-radius: var(--oc-r-pill);
+  white-space: nowrap;
+}
+.oc-chip--accent { color: var(--oc-accent); background: var(--oc-accent-soft); border-color: var(--oc-accent-line); }
+.oc-chip--live { color: var(--oc-live); background: var(--oc-live-soft); border-color: var(--oc-live-line); }
+
+.oc-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 11px;
+  font: 500 var(--oc-fs-md)/1.4 var(--oc-font);
+  color: var(--oc-text);
+  background: var(--oc-sunken);
+  border: 1px solid var(--oc-line-2);
+  border-radius: var(--oc-r-md);
+  outline: none;
+  transition: border-color var(--oc-t-fast), box-shadow var(--oc-t-fast), background var(--oc-t-fast);
+}
+.oc-input::placeholder { color: var(--oc-text-4); }
+.oc-input:focus { border-color: var(--oc-accent-line); box-shadow: 0 0 0 3px var(--oc-accent-soft); }
+textarea.oc-input { height: auto; padding: 9px 11px; resize: none; }
+select.oc-input {
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23b5b7bd' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  cursor: pointer;
+}
+
+.oc-card {
+  background: var(--oc-raised);
+  border: 1px solid var(--oc-line);
+  border-radius: var(--oc-r-lg);
+}
+
+/* ---------- Status ---------- */
+
+.oc-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--oc-text-4);
+}
+.oc-dot--ok { background: var(--oc-accent); box-shadow: 0 0 0 3px var(--oc-accent-soft); }
+.oc-dot--live { background: var(--oc-live); animation: oc-pulse 1.6s var(--oc-ease) infinite; }
+
+@keyframes oc-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 95, 87, 0.45); }
+  70% { box-shadow: 0 0 0 6px rgba(255, 95, 87, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 95, 87, 0); }
+}
+
+/* "Thinking" text: a slow light sweep. */
+.oc-shimmer {
+  color: transparent;
+  background: linear-gradient(90deg, var(--oc-text-3) 0%, var(--oc-text) 45%, var(--oc-text-3) 90%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: oc-shimmer 1.8s linear infinite;
+}
+@keyframes oc-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+/* Thin indeterminate progress line (place at the top edge of a panel). */
+.oc-progress {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  background: transparent;
+}
+.oc-progress::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, var(--oc-accent), transparent);
+  animation: oc-progress 1.2s var(--oc-ease) infinite;
+}
+@keyframes oc-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+
+@keyframes oc-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.oc-rise { animation: oc-rise var(--oc-t) var(--oc-ease) both; }
+
+/* ---------- Markdown answers ---------- */
+
+.oc-prose {
+  font-size: var(--oc-fs-md);
+  line-height: 1.62;
+  color: var(--oc-text);
+  overflow-wrap: anywhere;
+}
+.oc-prose > :first-child { margin-top: 0; }
+.oc-prose > :last-child { margin-bottom: 0; }
+.oc-prose p { margin: 0 0 0.75em; }
+.oc-prose h1,
+.oc-prose h2,
+.oc-prose h3,
+.oc-prose h4 {
+  margin: 1.1em 0 0.45em;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+  color: #ffffff;
+}
+.oc-prose h1 { font-size: 17px; font-weight: 750; }
+.oc-prose h2 { font-size: 15.5px; font-weight: 720; }
+.oc-prose h3 { font-size: 14px; font-weight: 700; }
+.oc-prose h4 {
+  font-family: var(--oc-mono);
+  font-size: var(--oc-fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--oc-text-3);
+}
+.oc-prose strong { font-weight: 700; color: #ffffff; }
+.oc-prose a {
+  color: var(--oc-accent);
+  text-decoration: underline;
+  text-decoration-color: var(--oc-accent-line);
+  text-underline-offset: 2px;
+}
+.oc-prose ul,
+.oc-prose ol { margin: 0 0 0.75em; padding-left: 1.25em; }
+.oc-prose li { margin: 0.2em 0; padding-left: 0.15em; }
+.oc-prose li::marker { color: var(--oc-text-3); }
+.oc-prose ol li::marker { font-family: var(--oc-mono); font-size: 0.9em; }
+.oc-prose blockquote {
+  margin: 0 0 0.75em;
+  padding: 2px 0 2px 12px;
+  color: var(--oc-text-2);
+  border-left: 2px solid var(--oc-accent-line);
+}
+.oc-prose hr { margin: 1em 0; border: 0; border-top: 1px solid var(--oc-line); }
+.oc-prose :not(pre) > code {
+  padding: 0.1em 0.38em;
+  font-family: var(--oc-mono);
+  font-size: 0.88em;
+  color: #ecebe5;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--oc-line);
+  border-radius: var(--oc-r-xs);
+}
+.oc-prose pre {
+  margin: 0 0 0.85em;
+  padding: 12px 14px;
+  overflow: auto;
+  background: var(--oc-sunken);
+  border: 1px solid var(--oc-line);
+  border-radius: var(--oc-r-md);
+}
+.oc-prose pre code {
+  padding: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #e6e4dd;
+  background: none;
+  border: 0;
+}
+.oc-prose table { width: 100%; margin: 0 0 0.85em; border-collapse: collapse; font-size: var(--oc-fs-sm); }
+.oc-prose th {
+  padding: 6px 10px 6px 0;
+  text-align: left;
+  font-family: var(--oc-mono);
+  font-size: var(--oc-fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--oc-text-3);
+  border-bottom: 1px solid var(--oc-line-2);
+}
+.oc-prose td { padding: 6px 10px 6px 0; vertical-align: top; border-bottom: 1px solid var(--oc-line); }
+
+/* ---------- Code and syntax colors (Prism tokens) ---------- */
+
+.oc-code,
+.oc-code code,
+pre[class*="language-"],
+code[class*="language-"],
+.oc-prose pre,
+.oc-prose code {
+  font-family: var(--oc-mono);
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0;
+  tab-size: 4;
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata { color: #6f7480; font-style: italic; }
+.token.punctuation { color: #a3a8b2; }
+.token.operator,
+.token.entity,
+.token.url { color: #d3d1ca; }
+.token.keyword,
+.token.atrule,
+.token.important,
+.token.rule { color: #c9f26b; }
+.token.string,
+.token.char,
+.token.attr-value,
+.token.regex,
+.token.template-string { color: #f2cf7e; }
+.token.function,
+.token.class-name { color: #8fd0ff; }
+.token.number,
+.token.boolean,
+.token.constant,
+.token.symbol { color: #ffab85; }
+.token.builtin,
+.token.property,
+.token.attr-name { color: #9be8d8; }
+.token.tag,
+.token.selector,
+.token.deleted { color: #ff9db0; }
+.token.inserted { color: #c9f26b; }
+.token.variable,
+.token.parameter { color: #ece9e1; }
+.token.namespace { opacity: 0.75; }
+.token.bold { font-weight: 700; }
+.token.italic { font-style: italic; }
+
+/* ---------- Accessibility ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
