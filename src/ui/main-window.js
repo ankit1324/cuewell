@@ -161,6 +161,11 @@ class MainWindowUI {
             } else {
                 this.statusDot.classList.add('non-interactive');
             }
+            const modeLabel = this.isInteractive
+                ? 'Interactive mode (Alt+A for click-through)'
+                : 'Click-through mode (Alt+A to interact)';
+            this.statusDot.title = modeLabel;
+            this.statusDot.setAttribute('aria-label', modeLabel);
             
             logger.debug('Status dot updated', {
                 component: 'MainWindowUI',
@@ -250,8 +255,8 @@ class MainWindowUI {
                 // If shortcuts popover is visible, extend height to fit it
                 if (this.shortcutsPopover && this.shortcutsPopover.classList.contains('is-open')) {
                     const popRect = this.shortcutsPopover.getBoundingClientRect();
-                    // popover is positioned below the bar (top:36px), add that plus its height and a small margin
-                    height = Math.max(height, Math.ceil(36 + popRect.height + 8));
+                    // popover is positioned below the bar (top:46px = 40px bar + 6px gap), add that plus its height and a small margin
+                    height = Math.max(height, Math.ceil(46 + popRect.height + 8));
                 }
                 
                 logger.debug('Resizing window to content', {
