@@ -12,260 +12,217 @@
             box-sizing: border-box;
         }
 
-        :root {
-            --bg: #0a0a0a;
-            --bg-elevated: #121212;
-            --bg-card: #161616;
-            --border: #2a2a2a;
-            --border-hover: #3a3a3a;
-            --text: #ffffff;
-            --text-dim: #a0a0a0;
-            --text-faint: #6a6a6a;
-            --accent: #ffffff;
-            --accent-hover: #e0e0e0;
-            --success: #4ade80;
-            --error: #f87171;
-            --warning: #fbbf24;
-        }
-
-        @media (prefers-color-scheme: light) {
-            :root {
-                --bg: #fafafa;
-                --bg-elevated: #ffffff;
-                --bg-card: #f5f5f5;
-                --border: #e5e5e5;
-                --border-hover: #d4d4d4;
-                --text: #171717;
-                --text-dim: #525252;
-                --text-faint: #a3a3a3;
-                --accent: #171717;
-                --accent-hover: #404040;
-            }
-        }
-
         html, body {
             width: 100vw;
             height: 100vh;
-            background: var(--bg);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            color: var(--text);
+            margin: 0;
+            background: transparent;
+            font-family: var(--oc-font);
+            color: var(--oc-text);
             overflow: hidden;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
         }
 
+        /* Platform Alt/Option key: shows ⌥ on macOS, Alt elsewhere. */
+        .oc-alt::before { content: 'Alt'; }
+        html[data-platform="darwin"] .oc-alt::before { content: '\2325'; }
+
+        /* ── Window ── */
         .wizard {
-            width: 100%;
-            height: 100%;
             display: flex;
             flex-direction: column;
-            position: relative;
-            background: var(--bg);
+            padding: 28px 32px 24px;
         }
 
         /* ── Header ── */
         .header {
-            padding: 20px 24px 12px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            flex-shrink: 0;
-            position: relative;
-            z-index: 1;
+            gap: 16px;
+            flex: none;
+            margin-bottom: 28px;
         }
         .brand {
             display: flex;
             align-items: center;
-            gap: 10px;
-            font-size: 14px;
-            font-weight: 600;
-            letter-spacing: -0.2px;
+            gap: 12px;
         }
-        .brand-dot {
-            width: 8px; height: 8px; border-radius: 50%;
-            background: var(--accent);
+        .brand .oc-mark { --s: 28px; }
+        .brand-name {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
         }
-        .step-badge {
-            font-size: 11px;
-            color: var(--text-faint);
-            background: var(--bg-card);
-            padding: 4px 10px;
-            border-radius: 10px;
-            border: 1px solid var(--border);
+        .brand-word {
+            font-size: var(--oc-fs-lg);
+            font-weight: 750;
+            letter-spacing: -0.01em;
+            line-height: 1.2;
+            color: #ffffff;
+        }
+        .brand-by {
+            font-size: var(--oc-fs-xs);
+            color: var(--oc-text-3);
         }
 
-        /* ── Stepper ── */
+        .progress {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
         .stepper {
             display: flex;
             align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 0 24px 16px;
-            flex-shrink: 0;
-            position: relative;
-            z-index: 1;
+            gap: 4px;
         }
         .step-dot {
-            width: 8px; height: 8px;
-            border-radius: 50%;
-            background: var(--border);
-            transition: all 0.3s ease;
+            width: 24px;
+            height: 3px;
+            border-radius: 2px;
+            background: var(--oc-line-2);
+            transition: background var(--oc-t) var(--oc-ease);
         }
+        .step-dot.done,
         .step-dot.active {
-            width: 28px;
-            border-radius: 4px;
-            background: var(--accent);
-        }
-        .step-dot.done {
-            background: var(--text-dim);
+            background: var(--oc-accent);
         }
 
-        /* ── Content area ── */
+        /* ── Content ── */
         .content {
             flex: 1;
-            padding: 0 28px 20px;
+            min-height: 0;
+            margin-right: -10px;
+            padding-right: 10px;
             overflow-y: auto;
-            position: relative;
-            z-index: 1;
         }
         .screen {
             display: none;
-            animation: fadeUp 0.35s ease;
         }
         .screen.active {
             display: block;
-        }
-        @keyframes fadeUp {
-            from { opacity: 0; transform: translateY(8px); }
-            to   { opacity: 1; transform: translateY(0); }
+            animation: oc-rise var(--oc-t) var(--oc-ease) both;
         }
 
         .screen h1 {
-            font-size: 26px;
-            font-weight: 700;
             margin-bottom: 8px;
-            letter-spacing: -0.3px;
+            font-size: var(--oc-fs-2xl);
+            font-weight: 750;
+            line-height: 1.2;
+            letter-spacing: -0.015em;
+            color: #ffffff;
         }
         .screen .subtitle {
-            font-size: 13.5px;
-            color: var(--text-dim);
-            margin-bottom: 28px;
+            max-width: 44ch;
+            margin-bottom: 24px;
+            font-size: var(--oc-fs-md);
             line-height: 1.55;
+            color: var(--oc-text-2);
         }
 
-        /* ── Welcome screen hero ── */
+        code {
+            padding: 0 4px;
+            font-family: var(--oc-mono);
+            font-size: 0.9em;
+            color: var(--oc-text);
+            background: var(--oc-sunken);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-xs);
+        }
+
+        /* ── Welcome ── */
         .hero {
             display: flex;
             flex-direction: column;
-            align-items: center;
             justify-content: center;
-            text-align: center;
-            min-height: 55vh;
+            min-height: 100%;
+            padding-bottom: 8px;
         }
-        .hero-logo {
-            width: 80px;
-            height: 80px;
-            border-radius: 20px;
-            background: var(--accent);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 36px;
-            color: var(--bg);
-            margin-bottom: 24px;
+        .hero-eyebrow {
+            margin-bottom: 12px;
+            color: var(--oc-accent);
         }
         .hero h1 {
-            font-size: 28px;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
         .hero .tagline {
-            font-size: 14px;
-            color: var(--text-dim);
-            max-width: 380px;
+            max-width: 44ch;
+            font-size: var(--oc-fs-md);
             line-height: 1.6;
+            color: var(--oc-text-2);
         }
         .feature-row {
             display: flex;
-            gap: 12px;
-            margin-top: 28px;
             flex-wrap: wrap;
-            justify-content: center;
-        }
-        .feature-pill {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            padding: 8px 14px;
-            border-radius: 12px;
-            font-size: 11.5px;
-            color: var(--text-dim);
-            display: flex;
-            align-items: center;
-            gap: 6px;
+            gap: 8px;
+            margin-top: 20px;
         }
         .feature-pill i {
-            color: var(--accent);
+            font-size: 11px;
+            color: var(--oc-accent);
         }
 
-        /* ── Hero CTA (welcome screen only) ── */
-        .hero-cta {
-            margin-top: 36px;
-            padding: 16px 44px;
-            font-size: 15px;
-            font-weight: 600;
-            border-radius: 14px;
-            min-width: 240px;
-            justify-content: center;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        .shortcut-card {
+            margin-top: 24px;
+            padding: 6px 14px;
         }
-        .hero-cta:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+        .shortcut-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            min-height: 36px;
+            font-size: var(--oc-fs-sm);
+            color: var(--oc-text-2);
         }
-        @media (prefers-color-scheme: light) {
-            .hero-cta {
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-            }
-            .hero-cta:hover:not(:disabled) {
-                box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
-            }
-        }
-        @media (max-width: 520px) {
-            .hero-cta {
-                margin-top: 28px;
-                padding: 14px 32px;
-                font-size: 14px;
-                min-width: 200px;
-            }
+        .shortcut-row + .shortcut-row {
+            border-top: 1px solid var(--oc-line);
         }
 
-        /* Hide regular nav on the welcome screen — the hero CTA replaces it */
+        .hero-actions {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-top: 28px;
+        }
+        .hero .hero-cta {
+            height: 34px;
+            padding: 0 16px;
+        }
+        .hero-note {
+            font-size: var(--oc-fs-xs);
+            color: var(--oc-text-3);
+        }
+
+        /* Hide regular nav on the welcome screen. The hero CTA replaces it. */
         .wizard.welcome-active .nav {
             visibility: hidden;
         }
 
         /* ── Form controls ── */
         .field {
-            margin-bottom: 20px;
+            margin-bottom: 18px;
         }
         .field label {
             display: block;
-            font-size: 12px;
+            margin-bottom: 6px;
+            font-size: var(--oc-fs-xs);
             font-weight: 600;
-            color: var(--text);
-            margin-bottom: 8px;
+            color: var(--oc-text-2);
         }
         .field .hint {
-            font-size: 11.5px;
-            color: var(--text-faint);
             margin-top: 8px;
+            font-size: var(--oc-fs-xs);
             line-height: 1.5;
+            color: var(--oc-text-3);
         }
         .field .hint a {
-            color: var(--accent);
-            text-decoration: none;
+            color: var(--oc-accent);
+            text-decoration: underline;
+            text-decoration-color: var(--oc-accent-line);
+            text-underline-offset: 2px;
         }
         .field .hint a:hover {
-            text-decoration: underline;
+            color: var(--oc-accent-2);
         }
 
         .input-wrap {
@@ -276,414 +233,348 @@
         .input-wrap .icon {
             position: absolute;
             left: 12px;
-            color: var(--text-faint);
-            font-size: 13px;
+            font-size: 12px;
+            color: var(--oc-text-3);
+            pointer-events: none;
         }
-        input.input {
-            width: 100%;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 12px 44px 12px 38px;
-            color: var(--text);
-            font-size: 13px;
-            font-family: inherit;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        .input-wrap .oc-input {
+            padding-left: 34px;
         }
-        input.input:focus {
-            outline: none;
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+        .input-wrap .oc-input.has-toggle {
+            padding-right: 40px;
         }
-        @media (prefers-color-scheme: light) {
-            input.input:focus {
-                box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.08);
-            }
+        .input-wrap input[type="password"].oc-input,
+        .input-wrap .oc-input.is-mono {
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-sm);
         }
         .input-wrap .toggle-vis {
             position: absolute;
-            right: 10px;
-            background: transparent;
-            border: 0;
-            color: var(--text-faint);
-            cursor: pointer;
-            padding: 6px;
-            border-radius: 6px;
-        }
-        .input-wrap .toggle-vis:hover {
-            color: var(--text);
-            background: var(--bg-elevated);
+            right: 4px;
+            width: 26px;
+            height: 26px;
         }
 
+        /* Status chips. JS sets className to "oc-chip status-pill <state>". */
         .status-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 11.5px;
-            padding: 6px 12px;
-            border-radius: 10px;
             margin-top: 10px;
-            border: 1px solid var(--border);
         }
-        .status-pill.idle    { color: var(--text-faint); }
-        .status-pill.testing { color: var(--warning); border-color: rgba(251, 191, 36, 0.3); }
-        .status-pill.success { color: var(--success); border-color: rgba(74, 222, 128, 0.3); background: rgba(74, 222, 128, 0.08); }
-        .status-pill.error   { color: var(--error);  border-color: rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.08); }
+        .status-pill i { font-size: 10px; }
+        .status-pill.idle    { color: var(--oc-text-3); }
+        .status-pill.testing { color: var(--oc-warn); background: var(--oc-warn-soft); border-color: transparent; }
+        .status-pill.success { color: var(--oc-accent); background: var(--oc-accent-soft); border-color: var(--oc-accent-line); }
+        .status-pill.error   { color: var(--oc-error); background: var(--oc-error-soft); border-color: transparent; }
 
         /* ── Choice cards ── */
         .choice-list {
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            margin-top: 8px;
+            gap: 8px;
         }
         .choice-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 14px 16px;
-            cursor: pointer;
-            display: flex;
-            align-items: flex-start;
-            gap: 14px;
-            transition: all 0.2s ease;
-        }
-        .choice-card:hover {
-            background: var(--bg-elevated);
-            border-color: var(--border-hover);
-        }
-        .choice-card.selected {
-            background: var(--bg-elevated);
-            border-color: var(--accent);
-            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
-        }
-        @media (prefers-color-scheme: light) {
-            .choice-card.selected {
-                box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.15);
-            }
-        }
-        .choice-icon {
-            width: 36px;
-            height: 36px;
-            border-radius: 10px;
-            background: var(--bg);
             display: flex;
             align-items: center;
+            gap: 12px;
+            padding: 14px;
+            cursor: pointer;
+            transition:
+                background var(--oc-t-fast) var(--oc-ease),
+                border-color var(--oc-t-fast) var(--oc-ease);
+        }
+        .choice-card:hover {
+            background: var(--oc-raised-2);
+            border-color: var(--oc-line-2);
+        }
+        .choice-card.selected {
+            background: var(--oc-accent-soft);
+            border-color: var(--oc-accent-line);
+        }
+        .choice-icon {
+            display: flex;
+            flex: none;
+            align-items: center;
             justify-content: center;
-            color: var(--accent);
-            font-size: 15px;
-            flex-shrink: 0;
+            width: 32px;
+            height: 32px;
+            font-size: 13px;
+            color: var(--oc-text-2);
+            background: var(--oc-sunken);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-md);
+            transition: color var(--oc-t-fast) var(--oc-ease), border-color var(--oc-t-fast) var(--oc-ease);
         }
         .choice-card.selected .choice-icon {
-            background: var(--accent);
-            color: var(--bg);
+            color: var(--oc-accent);
+            border-color: var(--oc-accent-line);
         }
-        .choice-text { flex: 1; }
+        .choice-text { flex: 1; min-width: 0; }
         .choice-title {
-            font-size: 13.5px;
-            font-weight: 600;
             margin-bottom: 2px;
+            font-size: var(--oc-fs-md);
+            font-weight: 650;
+            color: var(--oc-text);
         }
         .choice-desc {
-            font-size: 11.5px;
-            color: var(--text-dim);
+            font-size: var(--oc-fs-xs);
             line-height: 1.5;
+            color: var(--oc-text-2);
         }
+        /* Radio ring; becomes a lime check when selected. */
         .choice-radio {
-            width: 18px; height: 18px;
+            flex: none;
+            width: 16px;
+            height: 16px;
             border-radius: 50%;
-            border: 2px solid var(--border);
-            flex-shrink: 0;
-            margin-top: 8px;
-            transition: all 0.2s ease;
+            border: 1.5px solid var(--oc-line-2);
+            transition: background-color var(--oc-t-fast) var(--oc-ease), border-color var(--oc-t-fast) var(--oc-ease);
         }
         .choice-card.selected .choice-radio {
-            border-color: var(--accent);
-            background: var(--accent);
-            box-shadow: inset 0 0 0 3px var(--bg);
-        }
-        @media (prefers-color-scheme: light) {
-            .choice-card.selected .choice-radio {
-                box-shadow: inset 0 0 0 3px #fff;
-            }
+            border-color: var(--oc-accent);
+            background: var(--oc-accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23141a08' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center;
         }
 
-        /* ── Whisper install screen ── */
+        /* ── Whisper install ── */
         .install-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 14px;
             margin-top: 12px;
+            padding: 14px;
         }
         .install-title {
-            font-size: 12.5px;
-            font-weight: 600;
-            margin-bottom: 8px;
             display: flex;
             align-items: center;
             gap: 8px;
+            margin-bottom: 10px;
+            font-size: var(--oc-fs-sm);
+            font-weight: 650;
+            color: var(--oc-text);
         }
         .install-title i {
-            color: var(--accent);
+            font-size: 11px;
+            color: var(--oc-text-3);
         }
         .install-list {
             list-style: none;
-            padding: 0;
         }
         .install-list li {
-            font-size: 11.5px;
-            color: var(--text-dim);
-            line-height: 1.6;
-            padding-left: 16px;
             position: relative;
-            margin-bottom: 2px;
+            margin-bottom: 4px;
+            padding-left: 14px;
+            font-size: var(--oc-fs-xs);
+            line-height: 1.6;
+            color: var(--oc-text-2);
         }
         .install-list li::before {
-            content: "·";
-            color: var(--accent);
+            content: '';
             position: absolute;
-            left: 4px;
-            font-weight: 700;
+            top: 0.75em;
+            left: 2px;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: var(--oc-text-4);
         }
 
         .install-log {
-            background: var(--bg);
-            border: 1px solid var(--border);
-            border-radius: 10px;
+            max-height: 128px;
+            margin-top: 12px;
             padding: 10px 12px;
-            font-family: 'SF Mono', Menlo, Consolas, monospace;
-            font-size: 11px;
-            color: var(--text-dim);
-            max-height: 120px;
             overflow-y: auto;
-            margin-top: 10px;
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-2xs);
+            line-height: 1.6;
+            color: var(--oc-text-2);
             white-space: pre-wrap;
             word-break: break-word;
+            background: var(--oc-sunken);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-md);
         }
         .install-log:empty::before {
             content: "Install output will appear here…";
-            color: var(--text-faint);
-            font-style: italic;
+            color: var(--oc-text-4);
         }
 
         .detect-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 10px 12px;
-            margin-bottom: 12px;
-            font-size: 12px;
+            gap: 12px;
+            padding: 14px;
+        }
+        .detect-main {
+            min-width: 0;
+        }
+        .detect-main .oc-label {
+            display: block;
+            margin-bottom: 6px;
         }
         .detect-row code {
-            font-family: 'SF Mono', Menlo, monospace;
-            font-size: 11.5px;
-            color: var(--accent);
-            background: var(--bg);
-            padding: 2px 6px;
-            border-radius: 4px;
+            display: inline-block;
+            max-width: 100%;
+            padding: 4px 8px;
+            overflow: hidden;
+            font-size: var(--oc-fs-xs);
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            vertical-align: middle;
+            color: var(--oc-text);
+            border-radius: var(--oc-r-sm);
+        }
+        .detect-row .status-pill {
+            flex: none;
+            margin-top: 0;
+        }
+
+        #installWhisperBtn {
+            height: 34px;
         }
 
         /* ── Finish ── */
         .finish-card {
-            text-align: center;
-            padding: 20px 12px 12px;
+            padding-top: 4px;
         }
         .finish-card .check {
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
-            background: var(--accent);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 26px;
-            color: var(--bg);
-            margin: 0 auto 16px;
+            width: 40px;
+            height: 40px;
+            margin-bottom: 16px;
+            font-size: 16px;
+            color: var(--oc-accent);
+            background: var(--oc-accent-soft);
+            border: 1px solid var(--oc-accent-line);
+            border-radius: 50%;
         }
         .summary-list {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 14px;
-            margin: 14px 0;
-            font-size: 12px;
+            padding: 4px 14px;
+            font-size: var(--oc-fs-sm);
         }
         .summary-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 8px 0;
-            border-bottom: 1px solid var(--border);
+            gap: 12px;
+            min-height: 44px;
         }
-        .summary-row:last-child { border-bottom: 0; }
+        .summary-row + .summary-row {
+            border-top: 1px solid var(--oc-line);
+        }
         .summary-row .label {
-            color: var(--text-dim);
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
+            color: var(--oc-text-2);
         }
+        .summary-row .label i {
+            width: 14px;
+            font-size: 11px;
+            text-align: center;
+            color: var(--oc-text-3);
+        }
+        /* Values render as chips (markup comes from onboarding.js). */
         .summary-row .value {
-            font-weight: 600;
-            font-size: 11.5px;
-        }
-        .summary-row .value.ok    { color: var(--success); }
-        .summary-row .value.skip  { color: var(--text-faint); }
-
-        /* ── Footer ── */
-        .footer {
-            padding: 14px 24px;
-            border-top: 1px solid var(--border);
-            background: var(--bg-elevated);
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            justify-content: center;
-            font-size: 11.5px;
-            color: var(--text-faint);
-            flex-shrink: 0;
-            position: relative;
-            z-index: 1;
-        }
-        .footer a {
-            color: var(--accent);
-            text-decoration: none;
-            transition: color 0.2s;
-        }
-        .footer a:hover {
-            color: var(--accent-hover);
-        }
-        .footer .dev {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .footer .dev strong {
-            color: var(--text);
+            min-width: 0;
+            height: 24px;
+            padding: 0 10px;
+            overflow: hidden;
+            font-size: var(--oc-fs-xs);
             font-weight: 600;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--oc-text-2);
+            background: var(--oc-raised);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-pill);
+        }
+        .summary-row .value.ok {
+            color: var(--oc-accent);
+            background: var(--oc-accent-soft);
+            border-color: var(--oc-accent-line);
+        }
+        .summary-row .value.skip {
+            color: var(--oc-text-3);
         }
 
         /* ── Navigation ── */
         .nav {
-            padding: 18px 24px;
             display: flex;
-            justify-content: center;
-            gap: 10px;
-            flex-shrink: 0;
-            position: relative;
-            z-index: 1;
+            flex: none;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--oc-line);
         }
-        .btn {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 11px 22px;
-            color: var(--text);
-            font-size: 13px;
-            font-weight: 500;
-            font-family: inherit;
-            cursor: pointer;
-            display: inline-flex;
+        .nav-right {
+            display: flex;
             align-items: center;
             gap: 8px;
-            transition: all 0.2s ease;
         }
-        .btn:hover:not(:disabled) {
-            background: var(--bg-elevated);
-            border-color: var(--border-hover);
+        .nav .oc-btn {
+            height: 34px;
         }
-        .btn:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
+        .nav #nextBtn {
+            min-width: 112px;
         }
-        .btn.primary {
-            background: var(--accent);
-            border-color: var(--accent);
-            color: var(--bg);
+        .nav #skipBtn {
+            color: var(--oc-text-3);
         }
-        .btn.primary:hover:not(:disabled) {
-            background: var(--accent-hover);
-            border-color: var(--accent-hover);
+        .nav #skipBtn:hover {
+            color: var(--oc-text);
         }
-        .btn.ghost {
-            background: transparent;
-            border-color: transparent;
-            color: var(--text-dim);
+        .oc-btn i {
+            font-size: 11px;
         }
-        .btn.ghost:hover:not(:disabled) {
-            background: var(--bg-card);
-            color: var(--text);
+
+        /* Completed state (install done, model downloaded). */
+        .oc-btn.oc-btn--success,
+        .oc-btn.oc-btn--success:hover {
+            color: var(--oc-accent);
+            background: var(--oc-accent-soft);
+            border-color: var(--oc-accent-line);
         }
-        .btn.danger {
-            background: transparent;
-            border-color: var(--error);
-            color: var(--error);
+        .oc-btn.oc-btn--success:disabled {
+            opacity: 1;
         }
-        .btn .spinner {
-            width: 12px; height: 12px;
-            border: 2px solid rgba(0, 0, 0, 0.3);
-            border-top-color: var(--bg);
+
+        .oc-btn .spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid currentColor;
+            border-top-color: transparent;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
-        }
-        @media (prefers-color-scheme: light) {
-            .btn .spinner {
-                border-color: rgba(0, 0, 0, 0.3);
-                border-top-color: #fff;
-            }
         }
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-
-        /* Responsive adjustments */
-        @media (max-width: 520px) {
-            .hero-logo { width: 70px; height: 70px; font-size: 32px; }
-            .screen h1 { font-size: 22px; }
-            .hero h1 { font-size: 24px; }
-            .content { padding: 0 20px 16px; }
-            .nav { padding: 14px 20px; }
-            .btn { padding: 10px 18px; font-size: 12.5px; }
-            .footer { padding: 12px 20px; font-size: 11px; }
-            .header { padding: 16px 20px 10px; }
-        }
-
-        @media (max-height: 650px) {
-            .hero { min-height: auto; padding: 16px 0; }
-            .feature-row { margin-top: 16px; }
-            .screen .subtitle { margin-bottom: 16px; }
-            .footer { padding: 10px 24px; }
-            .nav { padding: 14px 24px; }
-        }
-
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb {
-            background: var(--border);
-            border-radius: 3px;
-        }
     </style>
+    <link rel="stylesheet" href="./src/styles/theme.css">
 </head>
 <body>
-    <div class="wizard" id="wizard">
+    <div class="wizard oc-window oc-window--native" id="wizard">
 
         <!-- ── Header ── -->
-        <div class="header">
+        <div class="header oc-drag">
             <div class="brand">
-                <div class="brand-dot"></div>
-                OpenCluely
+                <span class="oc-mark" aria-hidden="true"></span>
+                <div class="brand-name">
+                    <span class="brand-word">OpenCluely</span>
+                    <span class="brand-by">by Ankit Chaudhry</span>
+                </div>
             </div>
-            <div class="step-badge" id="stepBadge">Step 1 of 4</div>
-        </div>
-
-        <!-- ── Stepper ── -->
-        <div class="stepper" id="stepper">
-            <div class="step-dot active"></div>
-            <div class="step-dot"></div>
-            <div class="step-dot"></div>
-            <div class="step-dot"></div>
+            <div class="progress">
+                <div class="stepper" id="stepper" aria-hidden="true">
+                    <div class="step-dot active"></div>
+                    <div class="step-dot"></div>
+                    <div class="step-dot"></div>
+                    <div class="step-dot"></div>
+                </div>
+                <div class="step-badge oc-label" id="stepBadge" aria-live="polite">Step 1 of 4</div>
+            </div>
         </div>
 
         <!-- ── Content ── -->
@@ -692,20 +583,39 @@
             <!-- SCREEN 1: Welcome -->
             <section class="screen active" data-screen="welcome">
                 <div class="hero">
-                    <div class="hero-logo"><i class="fas fa-bolt"></i></div>
+                    <div class="oc-label hero-eyebrow">First-run setup</div>
                     <h1>Welcome to OpenCluely</h1>
                     <p class="tagline">
                         Your AI-powered interview &amp; problem-solving copilot.
                         Let's get you set up in about a minute.
                     </p>
                     <div class="feature-row">
-                        <div class="feature-pill"><i class="fas fa-keyboard"></i> Live answers</div>
-                        <div class="feature-pill"><i class="fas fa-microphone"></i> Voice input</div>
-                        <div class="feature-pill"><i class="fas fa-shield-halved"></i> Local &amp; private</div>
+                        <div class="feature-pill oc-chip"><i class="fas fa-keyboard" aria-hidden="true"></i> Live answers</div>
+                        <div class="feature-pill oc-chip"><i class="fas fa-microphone" aria-hidden="true"></i> Voice input</div>
+                        <div class="feature-pill oc-chip"><i class="fas fa-shield-halved" aria-hidden="true"></i> Local &amp; private</div>
                     </div>
-                    <button class="btn primary hero-cta" id="heroCtaBtn" type="button">
-                        Get Started <i class="fas fa-arrow-right"></i>
-                    </button>
+
+                    <div class="shortcut-card oc-card">
+                        <div class="shortcut-row">
+                            <span>Capture the screen and ask</span>
+                            <span class="oc-kbd-group"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">S</span></span>
+                        </div>
+                        <div class="shortcut-row">
+                            <span>Start or stop voice</span>
+                            <span class="oc-kbd-group"><span class="oc-kbd oc-alt"></span><span class="oc-kbd">R</span></span>
+                        </div>
+                        <div class="shortcut-row">
+                            <span>Show or hide all windows</span>
+                            <span class="oc-kbd-group"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">V</span></span>
+                        </div>
+                    </div>
+
+                    <div class="hero-actions">
+                        <button class="oc-btn oc-btn--primary hero-cta" id="heroCtaBtn" type="button">
+                            Get started <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                        </button>
+                        <span class="hero-note">You can change everything later in Settings.</span>
+                    </div>
                 </div>
             </section>
 
@@ -717,30 +627,28 @@
                 </p>
 
                 <div class="field">
-                    <label for="geminiKey">Gemini API Key</label>
+                    <label for="geminiKey">Gemini API key</label>
                     <div class="input-wrap">
-                        <i class="fas fa-key icon"></i>
+                        <i class="fas fa-key icon" aria-hidden="true"></i>
                         <input
                             type="password"
                             id="geminiKey"
-                            class="input"
+                            class="oc-input has-toggle"
                             placeholder="AIza…"
                             autocomplete="off"
                             spellcheck="false"
                         >
-                        <button class="toggle-vis" id="toggleVis" type="button" title="Show / hide">
+                        <button class="toggle-vis oc-btn oc-btn--ghost oc-icon-btn" id="toggleVis" type="button" title="Show / hide" aria-label="Show or hide API key">
                             <i class="fas fa-eye"></i>
                         </button>
                     </div>
                     <div class="hint">
                         Don't have one? Get a free key at
-                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
-                            aistudio.google.com/apikey
-                        </a>.
-                        It's stored locally in <code>.env</code> — never sent anywhere except Google.
+                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a>.
+                        It's stored locally in <code>.env</code> and only sent to Google.
                     </div>
-                    <div id="keyStatus" class="status-pill idle" style="display:none;">
-                        <i class="fas fa-circle-info"></i>
+                    <div id="keyStatus" class="oc-chip status-pill idle" style="display:none;">
+                        <i class="fas fa-circle-info" aria-hidden="true"></i>
                         <span class="text">Enter your key above</span>
                     </div>
                 </div>
@@ -749,36 +657,36 @@
 
             <!-- SCREEN 3: Speech -->
             <section class="screen" data-screen="speech">
-                <h1>Speech Recognition</h1>
+                <h1>Speech recognition</h1>
                 <p class="subtitle">
                     How would you like to capture audio? You can change this later in Settings.
                 </p>
 
                 <div class="choice-list" id="speechChoices">
-                    <div class="choice-card" data-value="whisper">
-                        <div class="choice-icon"><i class="fas fa-microphone"></i></div>
+                    <div class="choice-card oc-card" data-value="whisper">
+                        <div class="choice-icon"><i class="fas fa-microphone" aria-hidden="true"></i></div>
                         <div class="choice-text">
                             <div class="choice-title">Local Whisper</div>
                             <div class="choice-desc">
-                                Run OpenAI Whisper on your own machine. Free, offline, and private —
-                                no data leaves your computer. Requires Python.
+                                Run OpenAI Whisper on your own machine. Free, offline, and private:
+                                no audio leaves your computer. Requires Python.
                             </div>
                         </div>
                         <div class="choice-radio"></div>
                     </div>
-                    <div class="choice-card" data-value="azure">
-                        <div class="choice-icon"><i class="fas fa-cloud"></i></div>
+                    <div class="choice-card oc-card" data-value="azure">
+                        <div class="choice-icon"><i class="fas fa-cloud" aria-hidden="true"></i></div>
                         <div class="choice-text">
                             <div class="choice-title">Azure Speech</div>
                             <div class="choice-desc">
-                                Microsoft Azure cloud STT. Needs an Azure Speech key + region.
+                                Microsoft Azure cloud speech-to-text. Needs an Azure Speech key and region.
                                 High accuracy, requires internet.
                             </div>
                         </div>
                         <div class="choice-radio"></div>
                     </div>
-                    <div class="choice-card" data-value="skip">
-                        <div class="choice-icon"><i class="fas fa-forward"></i></div>
+                    <div class="choice-card oc-card" data-value="skip">
+                        <div class="choice-icon"><i class="fas fa-forward" aria-hidden="true"></i></div>
                         <div class="choice-text">
                             <div class="choice-title">Skip for now</div>
                             <div class="choice-desc">
@@ -790,19 +698,19 @@
                 </div>
 
                 <!-- Inline Azure key entry (revealed only if Azure selected) -->
-                <div id="azurePanel" style="display:none; margin-top: 14px;">
+                <div id="azurePanel" style="display:none; margin-top: 16px;">
                     <div class="field">
-                        <label for="azureKey">Azure Speech Key</label>
+                        <label for="azureKey">Azure Speech key</label>
                         <div class="input-wrap">
-                            <i class="fas fa-key icon"></i>
-                            <input type="password" id="azureKey" class="input" placeholder="Azure key" autocomplete="off">
+                            <i class="fas fa-key icon" aria-hidden="true"></i>
+                            <input type="password" id="azureKey" class="oc-input" placeholder="Azure key" autocomplete="off" spellcheck="false">
                         </div>
                     </div>
                     <div class="field">
-                        <label for="azureRegion">Azure Region</label>
+                        <label for="azureRegion">Azure region</label>
                         <div class="input-wrap">
-                            <i class="fas fa-globe icon"></i>
-                            <input type="text" id="azureRegion" class="input" placeholder="eastus" autocomplete="off">
+                            <i class="fas fa-globe icon" aria-hidden="true"></i>
+                            <input type="text" id="azureRegion" class="oc-input is-mono" placeholder="eastus" autocomplete="off" spellcheck="false">
                         </div>
                         <div class="hint">e.g. <code>eastus</code>, <code>westus2</code>, <code>westeurope</code></div>
                     </div>
@@ -811,25 +719,25 @@
 
             <!-- SCREEN 4: Whisper install (only shown when whisper chosen) -->
             <section class="screen" data-screen="whisper">
-                <h1>Local Whisper Setup</h1>
+                <h1>Local Whisper setup</h1>
                 <p class="subtitle" id="whisperSubtitle">
                     Detecting your Whisper installation…
                 </p>
 
-                <div class="detect-row" id="detectRow">
-                    <div>
-                        <div style="font-size:11px; color: var(--text-faint); margin-bottom:2px;">Detected command</div>
+                <div class="detect-row oc-card" id="detectRow">
+                    <div class="detect-main">
+                        <span class="oc-label">Detected command</span>
                         <code id="detectCmd">scanning…</code>
                     </div>
-                    <div id="detectStatus" class="status-pill idle">
-                        <i class="fas fa-circle-notch fa-spin"></i>
+                    <div id="detectStatus" class="oc-chip status-pill idle">
+                        <i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i>
                         <span class="text">Probing</span>
                     </div>
                 </div>
 
-                <div class="install-card" id="installCard">
+                <div class="install-card oc-card" id="installCard">
                     <div class="install-title">
-                        <i class="fas fa-circle-info"></i>
+                        <i class="fas fa-circle-info" aria-hidden="true"></i>
                         <span id="installCardTitle">What we'll do</span>
                     </div>
                     <ul class="install-list" id="installList"></ul>
@@ -840,31 +748,31 @@
 
             <!-- SCREEN 5: Whisper Model Download -->
             <section class="screen" data-screen="model-download">
-                <h1>Whisper Model Download</h1>
+                <h1>Whisper model download</h1>
                 <p class="subtitle" id="modelDownloadSubtitle">
                     The Whisper transcription model needs to be downloaded before first use.
                 </p>
 
-                <div class="install-card" id="modelDownloadCard">
+                <div class="install-card oc-card" id="modelDownloadCard">
                     <div class="install-title">
-                        <i class="fas fa-circle-info"></i>
+                        <i class="fas fa-circle-info" aria-hidden="true"></i>
                         <span id="modelDownloadTitle">Choose when to download the model</span>
                     </div>
                     <div class="choice-list" id="modelDownloadChoices">
-                        <div class="choice-card" data-value="now">
-                            <div class="choice-icon"><i class="fas fa-download"></i></div>
+                        <div class="choice-card oc-card" data-value="now">
+                            <div class="choice-icon"><i class="fas fa-download" aria-hidden="true"></i></div>
                             <div class="choice-text">
-                                <div class="choice-title">Download Now</div>
+                                <div class="choice-title">Download now</div>
                                 <div class="choice-desc">
                                     Download the <code>turbo</code> model (~150 MB) now so it's ready when you need it. Recommended.
                                 </div>
                             </div>
                             <div class="choice-radio"></div>
                         </div>
-                        <div class="choice-card" data-value="later">
-                            <div class="choice-icon"><i class="fas fa-clock"></i></div>
+                        <div class="choice-card oc-card" data-value="later">
+                            <div class="choice-icon"><i class="fas fa-clock" aria-hidden="true"></i></div>
                             <div class="choice-text">
-                                <div class="choice-title">Download on First Use</div>
+                                <div class="choice-title">Download on first use</div>
                                 <div class="choice-desc">
                                     Download the model automatically when you first use voice input. First transcription will take longer.
                                 </div>
@@ -880,13 +788,13 @@
             <!-- SCREEN 6: Finish (summary) -->
             <section class="screen" data-screen="finish">
                 <div class="finish-card">
-                    <div class="check"><i class="fas fa-check"></i></div>
-                    <h1>You're all set!</h1>
-                    <p class="subtitle" style="margin-bottom: 18px;">
+                    <div class="check"><i class="fas fa-check" aria-hidden="true"></i></div>
+                    <h1>You're all set</h1>
+                    <p class="subtitle" style="margin-bottom: 20px;">
                         Here's what we configured. You can change any of this later in Settings.
                     </p>
 
-                    <div class="summary-list" id="summaryList">
+                    <div class="summary-list oc-card" id="summaryList">
                         <!-- populated dynamically -->
                     </div>
                 </div>
@@ -895,23 +803,16 @@
 
         <!-- ── Navigation ── -->
         <div class="nav">
-            <button class="btn ghost" id="backBtn" type="button" style="visibility:hidden;">
-                <i class="fas fa-arrow-left"></i> Back
+            <button class="oc-btn oc-btn--ghost" id="backBtn" type="button" style="visibility:hidden;">
+                <i class="fas fa-arrow-left" aria-hidden="true"></i> Back
             </button>
             <div class="nav-right">
-                <button class="btn ghost" id="skipBtn" type="button" style="display:none;">
+                <button class="oc-btn oc-btn--ghost" id="skipBtn" type="button" style="display:none;">
                     Skip
                 </button>
-                <button class="btn primary" id="nextBtn" type="button">
+                <button class="oc-btn oc-btn--primary" id="nextBtn" type="button">
                     Get started <i class="fas fa-arrow-right"></i>
                 </button>
-            </div>
-        </div>
-
-        <!-- ── Footer ── -->
-        <div class="footer">
-            <div class="dev">
-                Built by <strong>Ankit Chaudhry</strong>
             </div>
         </div>
     </div>

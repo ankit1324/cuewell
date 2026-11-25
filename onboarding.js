@@ -90,8 +90,8 @@
     // Reset next button state unless we're actively downloading a model
     if (name !== 'model-download' || !state.modelDownloading) {
       nextBtn.disabled = false;
-      nextBtn.classList.remove('success');
-      nextBtn.classList.add('primary');
+      nextBtn.classList.remove('oc-btn--success');
+      nextBtn.classList.add('oc-btn--primary');
     }
     // The primary action label changes by step
     if (name === 'welcome') nextBtn.innerHTML = 'Get started <i class="fas fa-arrow-right"></i>';
@@ -160,7 +160,7 @@
   const keyStatus = $('#keyStatus');
 
   function setKeyStatus(state_, text) {
-    keyStatus.className = `status-pill ${state_}`;
+    keyStatus.className = `oc-chip status-pill ${state_}`;
     keyStatus.style.display = 'inline-flex';
     const icon = keyStatus.querySelector('i');
     const txt = keyStatus.querySelector('.text');
@@ -227,7 +227,7 @@
   }
 
   function setDetectStatus(state_, text) {
-    detectStatus.className = `status-pill ${state_}`;
+    detectStatus.className = `oc-chip status-pill ${state_}`;
     const icon = detectStatus.querySelector('i');
     if (state_ === 'success') icon.className = 'fas fa-check-circle';
     else if (state_ === 'error') icon.className = 'fas fa-circle-xmark';
@@ -294,8 +294,8 @@
           // Keep button disabled — install is done. Show a checkmark
           // so the user sees the final state at a glance.
           btn.innerHTML = '<i class="fas fa-check-circle"></i> Installed';
-          btn.classList.remove('primary');
-          btn.classList.add('success');
+          btn.classList.remove('oc-btn--primary');
+          btn.classList.add('oc-btn--success');
         }
       } else {
         setDetectStatus('error', 'Install failed');
@@ -428,8 +428,8 @@
         state.modelDownloaded = true;
         appendModelLog(`\n✓ Model downloaded successfully: ${r.path}`);
         nextBtn.disabled = false;
-        nextBtn.classList.remove('primary');
-        nextBtn.classList.add('success');
+        nextBtn.classList.remove('oc-btn--primary');
+        nextBtn.classList.add('oc-btn--success');
         nextBtn.innerHTML = '<i class="fas fa-check-circle"></i> Continue';
       } else {
         appendModelLog(`\n✗ Download failed: ${r.message}`);
@@ -627,7 +627,7 @@
     const btn = document.createElement('button');
     btn.id = 'installWhisperBtn';
     btn.type = 'button';
-    btn.className = 'btn primary';
+    btn.className = 'oc-btn oc-btn--primary';
     btn.style.marginTop = '12px';
     btn.innerHTML = '<i class="fas fa-download"></i> Install Whisper now';
     btn.addEventListener('click', runWhisperInstall);

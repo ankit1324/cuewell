@@ -350,7 +350,7 @@ class ChatWindowUI {
         }
         
         const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${type}`;
+        messageDiv.className = `message ${type} oc-rise`;
         
         const timeDiv = document.createElement('div');
         timeDiv.className = 'message-time';
@@ -361,6 +361,7 @@ class ChatWindowUI {
         
         // Format assistant messages as markdown
         if (type === 'assistant') {
+            textDiv.classList.add('oc-prose');
             // Model output is sanitized; without lib/safe-html.js it is shown as text.
             if (typeof window.sanitizeHtml === 'function') {
                 textDiv.innerHTML = window.sanitizeHtml(this.formatMarkdown(text));
@@ -371,13 +372,36 @@ class ChatWindowUI {
             textDiv.textContent = text;
         }
         
-        messageDiv.appendChild(timeDiv);
+        if (type === 'assistant' || type === 'transcription') {
+            messageDiv.appendChild(this.buildMessageHead(type, timeDiv));
+        } else {
+            messageDiv.appendChild(timeDiv);
+        }
         messageDiv.appendChild(textDiv);
         
         this.elements.chatMessages.appendChild(messageDiv);
         
         // Auto-scroll to bottom
         this.elements.chatMessages.scrollTop = this.elements.chatMessages.scrollHeight;
+    }
+
+    // Small head row above heard and assistant messages: a label (plus the
+    // brand mark for assistant) and the timestamp.
+    buildMessageHead(type, timeDiv) {
+        const head = document.createElement('div');
+        head.className = 'message-head';
+        if (type !== 'transcription') {
+            const mark = document.createElement('span');
+            mark.className = 'oc-mark';
+            mark.setAttribute('aria-hidden', 'true');
+            head.appendChild(mark);
+        }
+        const label = document.createElement('span');
+        label.className = 'oc-label';
+        label.textContent = type === 'transcription' ? 'Heard' : 'OpenCluely';
+        head.appendChild(label);
+        head.appendChild(timeDiv);
+        return head;
     }
 
     // Create a live, growing assistant bubble for a streaming response.
@@ -389,7 +413,7 @@ class ChatWindowUI {
             return;
         }
         const messageDiv = document.createElement('div');
-        messageDiv.className = 'message assistant streaming';
+        messageDiv.className = 'message assistant streaming oc-rise';
         messageDiv.setAttribute('data-stream-id', messageId);
 
         const timeDiv = document.createElement('div');
@@ -400,7 +424,7 @@ class ChatWindowUI {
         textDiv.className = 'message-text';
         textDiv.textContent = '';
 
-        messageDiv.appendChild(timeDiv);
+        messageDiv.appendChild(this.buildMessageHead('assistant', timeDiv));
         messageDiv.appendChild(textDiv);
         this.elements.chatMessages.appendChild(messageDiv);
         this._streamBuffers = this._streamBuffers || {};
@@ -475,19 +499,16 @@ class ChatWindowUI {
     addCodeSnippet(language, code) {
         if (!this.elements.chatMessages) return;
         const messageDiv = document.createElement('div');
-        messageDiv.className = 'message assistant';
+        messageDiv.className = 'message assistant snippet oc-rise';
         const timeDiv = document.createElement('div');
         timeDiv.className = 'message-time';
         timeDiv.textContent = new Date().toLocaleTimeString();
         const textDiv = document.createElement('div');
-        textDiv.className = 'message-text';
-        const escapedLang = this.escapeHtmlForSnippet((language || 'text').toUpperCase());
+        textDiv.className = 'message-text oc-prose';
+        const escapedLang = this.escapeHtmlForSnippet((language || 'text').toLowerCase());
         const escapedCode = this.escapeHtmlForSnippet(code || '');
-        textDiv.innerHTML = `
-            <div style="font-size:12px;color:rgba(255,255,255,0.85);margin-bottom:6px;">Snippet: ${escapedLang}</div>
-            <pre><code>${escapedCode}</code></pre>
-        `;
-        messageDiv.appendChild(timeDiv);
+        textDiv.innerHTML = `<div class="code-block"><div class="code-head"><span class="oc-label">${escapedLang}</span></div><pre><code>${escapedCode}</code></pre></div>`;
+        messageDiv.appendChild(this.buildMessageHead('assistant', timeDiv));
         messageDiv.appendChild(textDiv);
         this.elements.chatMessages.appendChild(messageDiv);
         this.elements.chatMessages.scrollTop = this.elements.chatMessages.scrollHeight;
@@ -554,10 +575,13 @@ class ChatWindowUI {
         timeDiv.textContent = new Date().toLocaleTimeString();
 
         const textDiv = document.createElement('div');
-        textDiv.className = 'message-text thinking-dots';
-        textDiv.innerHTML = '<span class="dot">•</span><span class="dot">•</span><span class="dot">•</span>';
+        textDiv.className = 'message-text';
+        const shimmer = document.createElement('span');
+        shimmer.className = 'oc-shimmer';
+        shimmer.textContent = 'Thinking…';
+        textDiv.appendChild(shimmer);
 
-        thinkingDiv.appendChild(timeDiv);
+        thinkingDiv.appendChild(this.buildMessageHead('assistant', timeDiv));
         thinkingDiv.appendChild(textDiv);
 
         this.elements.chatMessages.appendChild(thinkingDiv);
@@ -640,15 +664,17 @@ class ChatWindowUI {
             interimElement = document.createElement('div');
             interimElement.className = 'interim-text';
             interimElement.style.cssText = `
-                color: rgba(255, 255, 255, 0.8);
-                font-size: 12px;
+                color: var(--oc-text-2);
+                font-size: var(--oc-fs-sm);
                 font-style: italic;
-                margin-top: 10px;
-                padding: 8px;
-                background: rgba(76, 175, 80, 0.2);
-                border-radius: 6px;
-                min-height: 20px;
-                border: 1px dashed rgba(76, 175, 80, 0.4);
+                margin-top: 8px;
+                padding: 4px 12px;
+                background: var(--oc-raised);
+                border: 1px solid var(--oc-line);
+                border-radius: var(--oc-r-pill);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             `;
             this.elements.listeningContainer.appendChild(interimElement);
         }
