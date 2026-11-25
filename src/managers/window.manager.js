@@ -1,7 +1,24 @@
-const { BrowserWindow, screen, desktopCapturer, shell } = require('electron');
+const { app, BrowserWindow, screen, desktopCapturer, shell } = require('electron');
 const path = require('path');
+// Node's URL on purpose: speech.service.js replaces globalThis.URL with a
+// stand-in that reports every URL as https:.
+const { URL, fileURLToPath } = require('url');
 const logger = require('../core/logger').createServiceLogger('WINDOW');
 const config = require('../core/config');
+
+/** Open http(s) URLs in the system browser and drop every other scheme. */
+function openExternalHttpUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (_) {
+    return;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return;
+  shell.openExternal(parsed.href).catch((error) => {
+    logger.warn('Failed to open external URL', { error: error.message });
+  });
+}
 
 class WindowManager {
   constructor() {
@@ -264,6 +281,23 @@ class WindowManager {
     return window;
   }
 
+  /** True when `url` is a file: URL of one of the app's own pages (windowConfigs). */
+  isAppPageUrl(url) {
+    let pagePath;
+    try {
+      pagePath = fileURLToPath(url);
+    } catch (_) {
+      return false; // not a local file URL
+    }
+    const normalize = (value) => {
+      const resolved = path.resolve(value);
+      return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    };
+    const appRoot = app.getAppPath();
+    return Object.values(this.windowConfigs)
+      .some(({ file }) => normalize(path.join(appRoot, file)) === normalize(pagePath));
+  }
+
   async createWindow(type, showOnCreate = false) {
     const windowConfig = this.windowConfigs[type];
     if (!windowConfig) {
@@ -446,21 +480,19 @@ class WindowManager {
 
   const window = new BrowserWindow(browserWindowOptions);
 
-    // External links (GitHub, the website, Google AI Studio, etc.) must open in
-    // the user's real browser, never inside the frameless overlay windows.
-    // Deny any in-app window.open and hand http(s) URLs to the OS browser, and
-    // block the current window from navigating away to an external site.
+    // External links (GitHub, the website, Google AI Studio, links in AI
+    // answers, etc.) must open in the user's real browser, never inside the
+    // frameless overlay windows. Deny any in-app window.open, and keep every
+    // window on the app's own pages: other navigations are cancelled and
+    // http(s) targets go to the OS browser instead.
     window.webContents.setWindowOpenHandler(({ url }) => {
-      if (/^https?:\/\//i.test(url)) {
-        shell.openExternal(url);
-      }
+      openExternalHttpUrl(url);
       return { action: 'deny' };
     });
     window.webContents.on('will-navigate', (event, url) => {
-      if (/^https?:\/\//i.test(url) && url !== window.webContents.getURL()) {
-        event.preventDefault();
-        shell.openExternal(url);
-      }
+      if (this.isAppPageUrl(url)) return;
+      event.preventDefault();
+      openExternalHttpUrl(url);
     });
 
   // Load the HTML file

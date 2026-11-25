@@ -2,8 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OpenCluely</title>
+    <script src="./node_modules/dompurify/dist/purify.min.js"></script>
+    <script src="lib/safe-html.js"></script>
     <script src="lib/markdown.js"></script>
     <script src="lib/mathrender.js"></script>
     <style>
@@ -833,7 +836,7 @@
             textContent = textContent.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
 
             // Render text content
-            const textHtml = renderMarkdown(textContent);
+            const textHtml = sanitizeHtml(renderMarkdown(textContent));
             document.getElementById('text-content').innerHTML = textHtml;
             if (window.renderMathInElement) window.renderMathInElement(document.getElementById('text-content'));
 
@@ -848,9 +851,9 @@
                     const codeBlock = document.createElement('div');
                     codeBlock.className = 'code-block';
                     codeBlock.innerHTML = `
-                        <div class="code-header">${block.language.toUpperCase()}</div>
+                        <div class="code-header">${escapeHtml(block.language.toUpperCase())}</div>
                         <div class="code-content">
-                            <pre><code class="language-${block.language}">${escapeHtml(block.code)}</code></pre>
+                            <pre><code class="language-${escapeHtml(block.language)}">${escapeHtml(block.code)}</code></pre>
                         </div>
                     `;
                     const pre = codeBlock.querySelector('pre');
@@ -877,7 +880,7 @@
             document.getElementById('full-content').classList.remove('hidden');
 
             // Render full markdown
-            const html = renderMarkdown(response);
+            const html = sanitizeHtml(renderMarkdown(response));
             const full = document.getElementById('full-markdown');
             full.innerHTML = html;
             if (window.renderMathInElement) window.renderMathInElement(full);
@@ -905,7 +908,9 @@
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
-            return div.innerHTML;
+            // innerHTML leaves quotes as-is; escape them so the result is also
+            // safe inside attribute values.
+            return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
 
