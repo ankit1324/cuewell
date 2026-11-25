@@ -487,36 +487,7 @@
             border-radius: 4px;
         }
 
-        /* ── Star / Finish ── */
-        .star-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 20px;
-            text-align: center;
-            margin-top: 16px;
-        }
-        .star-card .star-icon {
-            font-size: 36px;
-            color: var(--warning);
-            margin-bottom: 10px;
-        }
-        .star-card h3 {
-            font-size: 16px;
-            margin-bottom: 6px;
-        }
-        .star-card p {
-            font-size: 12px;
-            color: var(--text-dim);
-            line-height: 1.5;
-            margin-bottom: 14px;
-        }
-        .star-card .actions {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-        }
-
+        /* ── Finish ── */
         .finish-card {
             text-align: center;
             padding: 20px 12px 12px;
@@ -906,7 +877,7 @@
                 <div class="install-log" id="modelDownloadLog"></div>
             </section>
 
-            <!-- SCREEN 6: Finish (star prompt + summary) -->
+            <!-- SCREEN 6: Finish (summary) -->
             <section class="screen" data-screen="finish">
                 <div class="finish-card">
                     <div class="check"><i class="fas fa-check"></i></div>
@@ -917,23 +888,6 @@
 
                     <div class="summary-list" id="summaryList">
                         <!-- populated dynamically -->
-                    </div>
-
-                    <div class="star-card">
-                        <div class="star-icon"><i class="fas fa-star"></i></div>
-                        <h3>Enjoying OpenCluely?</h3>
-                        <p>
-                            If this saved you time in an interview or a coding session,
-                            a quick ⭐ on GitHub helps others find it.
-                        </p>
-                        <div class="actions">
-                            <button class="btn primary" id="starBtn" type="button">
-                                <i class="fab fa-github"></i> Star on GitHub
-                            </button>
-                            <button class="btn ghost" id="skipStarBtn" type="button">
-                                Maybe later
-                            </button>
-                        </div>
                     </div>
                 </div>
             </section>
@@ -957,11 +911,7 @@
         <!-- ── Footer ── -->
         <div class="footer">
             <div class="dev">
-                Built by <a href="https://techycsr.dev" target="_blank" rel="noreferrer"><strong>@TechyCSR</strong></a>
-                <span style="opacity:0.5; margin: 0 8px;">·</span>
-                <a href="https://github.com/TechyCSR/OpenCluely" target="_blank" rel="noreferrer">
-                    <i class="fab fa-github"></i> GitHub
-                </a>
+                Built by <strong>Ankit Chaudhry</strong>
             </div>
         </div>
     </div>

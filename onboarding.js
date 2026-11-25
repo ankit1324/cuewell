@@ -9,7 +9,7 @@
  *   2. Gemini API key entry + live connection test
  *   3. Speech provider choice (Whisper / Azure / Skip)
  *   4. Whisper detect + (optional) install — only shown when whisper
- *   5. Star-the-repo prompt + summary
+ *   5. Summary
  */
 
 (function () {
@@ -488,17 +488,6 @@
       `)
       .join('');
   }
-
-  $('#starBtn').addEventListener('click', () => {
-    if (window.electronAPI && window.electronAPI.openExternal) {
-      window.electronAPI.openExternal('https://github.com/TechyCSR/OpenCluely');
-    } else {
-      window.open('https://github.com/TechyCSR/OpenCluely', '_blank');
-    }
-  });
-  $('#skipStarBtn').addEventListener('click', () => {
-    // No-op — just visual closure
-  });
 
   // ── Wire up: Hero CTA (welcome screen) ────────────────────────────
   // The big inline "Get Started" button on the welcome screen reuses

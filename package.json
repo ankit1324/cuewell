@@ -20,15 +20,9 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "author": {
-    "name": "TechyCSR",
-    "email": "info@techycsr.dev",
-    "url": "https://techycsr.dev"
+    "name": "Ankit Chaudhry"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/TechyCSR/OpenCluely"
-  },
-  "license": "ISC",
+  "license": "Apache-2.0",
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.2.0",
     "@google/genai": "^2.9.0",
