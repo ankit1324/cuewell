@@ -472,28 +472,74 @@ class ChatWindowUI {
     // Split AI response into plain text and code snippets and append to chat
     renderAssistantResponse(response) {
         if (!response || typeof response !== 'string') return;
-        const blocks = this.extractCodeBlocks(response);
-        const textOnly = this.stripCodeBlocks(response, blocks);
+        const { text: textOnly, blocks } = this.splitCodeBlocks(response);
         if (textOnly && textOnly.trim().length) {
             this.addMessage(textOnly, 'assistant');
         }
         blocks.forEach(b => this.addCodeSnippet(b.language, b.code));
     }
 
-    extractCodeBlocks(text) {
-        const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+    // Split an answer into its prose and its fenced code blocks (``` or ~~~
+    // on their own lines, possibly indented inside a list). When a coding
+    // language is set, the main process tags every fence line with it,
+    // closing ones too (enforceProgrammingLanguage in llm.service.js), so a
+    // closing fence may end in one word (```cpp). A fence leaves nothing in
+    // the prose: its lines and the blank lines around it are dropped and the
+    // text on either side is rejoined. A fence that is never closed, as in a
+    // cut-off answer, runs to the end.
+    // Keep in sync with splitCodeBlocks in chat.html.
+    splitCodeBlocks(text) {
+        const prose = [];
         const blocks = [];
-        let match;
-        while ((match = codeBlockRegex.exec(text)) !== null) {
-            blocks.push({ language: match[1] || 'text', code: (match[2] || '').trim(), fullMatch: match[0] });
-        }
-        return blocks;
-    }
-
-    stripCodeBlocks(text, blocks) {
-        let result = text || '';
-        blocks.forEach(b => { result = result.replace(b.fullMatch, ''); });
-        return result.replace(/\n\s*\n\s*\n/g, '\n\n').trim();
+        const listLine = /^(?:[ \t]|[-*+][ \t]|\d+[.)][ \t])/; // list item or indented line
+        let fence = null; // the block being read
+        let cut = false;  // a block was removed after the last prose line
+        const endBlock = () => {
+            const lines = fence.lines;
+            while (lines.length && !lines[0].trim()) lines.shift();
+            while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+            if (lines.length) blocks.push({ language: fence.language, code: lines.join('\n') });
+            fence = null;
+            cut = true;
+        };
+        String(text || '').split(/\r\n?|\n/).forEach(line => {
+            if (fence) {
+                const close = line.match(/^[ \t]*(`{3,}|~{3,})[ \t]*(\S*)[ \t]*$/);
+                if (close && close[1][0] === fence.char && close[1].length >= fence.size &&
+                    !close[2].includes(fence.char)) {
+                    endBlock();
+                } else {
+                    // Drop the fence's own indentation, keep the code's.
+                    const lead = line.match(/^[ \t]*/)[0].length;
+                    fence.lines.push(line.slice(Math.min(lead, fence.indent)));
+                }
+                return;
+            }
+            const open = line.match(/^([ \t]*)(`{3,}|~{3,})(.*)$/);
+            // A backtick fence's info string has no backticks, so ```x``` stays inline code.
+            if (open && !(open[2][0] === '`' && open[3].includes('`'))) {
+                while (prose.length && !prose[prose.length - 1].trim()) prose.pop();
+                fence = {
+                    char: open[2][0],
+                    size: open[2].length,
+                    indent: open[1].length,
+                    language: open[3].trim().split(/\s+/)[0] || 'text',
+                    lines: []
+                };
+                return;
+            }
+            if (cut) {
+                if (!line.trim()) return;
+                cut = false;
+                // A blank line keeps paragraphs apart; inside a list the two sides
+                // are joined directly so the list stays tight.
+                const before = prose[prose.length - 1];
+                if (before !== undefined && !(listLine.test(before) && listLine.test(line))) prose.push('');
+            }
+            prose.push(line);
+        });
+        if (fence) endBlock();
+        return { text: prose.join('\n').replace(/\n\s*\n\s*\n/g, '\n\n').trim(), blocks };
     }
 
     addCodeSnippet(language, code) {
