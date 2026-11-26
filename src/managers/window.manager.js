@@ -870,8 +870,22 @@ class WindowManager {
     });
   }
 
-  showOnCurrentDesktop(win) {
+  /**
+   * Show a window on the current desktop, above other apps. Pass
+   * { focus: false } for windows the user did not ask to type into (answers,
+   * the loading state, restored or repositioned windows): they appear without
+   * taking keyboard focus from the app the user is working in.
+   */
+  showOnCurrentDesktop(win, { focus = true } = {}) {
     if (!win || win.isDestroyed()) return;
+    const reveal = () => {
+      if (focus) {
+        win.show();
+        win.focus();
+      } else {
+        win.showInactive();
+      }
+    };
 
     const llmWin = this.windows.get('llmResponse');
     const isLLM = llmWin && !llmWin.isDestroyed() && win.id === llmWin.id;
@@ -896,8 +910,7 @@ class WindowManager {
 
       setTimeout(() => {
         if (win.isDestroyed()) return;
-        win.show();
-        win.focus();
+        reveal();
         setMacOSAlwaysOnTop();
         setTimeout(() => { if (!win.isDestroyed()) setMacOSAlwaysOnTop(); }, 100);
         // Keep LLM window visible across workspaces; others revert
@@ -913,8 +926,7 @@ class WindowManager {
       // Linux/Windows
       win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
       win.setAlwaysOnTop(true);
-      win.show();
-      win.focus();
+      reveal();
       setTimeout(() => {
         if (win.isDestroyed()) return;
         if (!isLLM) {
@@ -1054,7 +1066,8 @@ class WindowManager {
 
   handleScreenSharingStarted() {
     logger.info('Screen sharing mode enabled - hiding windows');
-    
+    this.rememberVisibleWindows();
+
     this.windows.forEach((window, type) => {
       if (!window.isDestroyed()) {
         window.hide();
@@ -1100,38 +1113,56 @@ class WindowManager {
     }
   }
 
+  /**
+   * Restore the windows that were visible when they were last hidden (by the
+   * hide shortcut or by screen sharing), without taking focus. With no record,
+   * only the toolbar comes back; Settings, Chat and onboarding are never
+   * opened by this.
+   */
   showAllWindows() {
     if (this.isScreenBeingShared) {
       return;
     }
 
-    this.windows.forEach((window, type) => {
-      if (type !== 'llmResponse') { // Don't show LLM response unless it has content
-        this.showOnCurrentDesktop(window);
+    const types = this.hiddenWindowTypes && this.hiddenWindowTypes.length
+      ? this.hiddenWindowTypes
+      : ['main'];
+    this.hiddenWindowTypes = null;
+
+    types.forEach((type) => {
+      const window = this.windows.get(type);
+      if (window && !window.isDestroyed()) {
+        this.showOnCurrentDesktop(window, { focus: false });
       }
     });
-    
+
     this.isVisible = true;
-    const activeWindow = this.windows.get(this.activeWindow);
-    if (activeWindow) {
-      activeWindow.focus();
-    }
-    
-    logger.info('All windows shown on current desktop', { 
-      activeWindow: this.activeWindow,
-      windowCount: this.windows.size 
+
+    logger.info('Windows restored on current desktop', {
+      restored: types,
+      windowCount: this.windows.size
     });
   }
 
-  hideAllWindows() {
+  /** Remember which windows are on screen, so showAllWindows can restore them. */
+  rememberVisibleWindows() {
+    const visible = [];
     this.windows.forEach((window, type) => {
-      if (type !== 'llmResponse') {
-        window.hide();
-      }
+      if (!window.isDestroyed() && window.isVisible()) visible.push(type);
     });
-    
+    // A second hide (nothing visible) must not forget the first one's list.
+    if (visible.length) this.hiddenWindowTypes = visible;
+  }
+
+  hideAllWindows() {
+    this.rememberVisibleWindows();
+    // Every window, the answer included: this is the panic-hide.
+    this.windows.forEach((window) => {
+      if (!window.isDestroyed()) window.hide();
+    });
+
     this.isVisible = false;
-    logger.info('All windows hidden');
+    logger.info('All windows hidden', { willRestore: this.hiddenWindowTypes });
   }
 
   toggleVisibility() {
@@ -1334,8 +1365,8 @@ class WindowManager {
       timestamp: new Date().toISOString()
     });
     
-    logger.debug('Showing and focusing LLM window');
-    this.showOnCurrentDesktop(llmWindow);
+    logger.debug('Showing LLM window without taking focus');
+    this.showOnCurrentDesktop(llmWindow, { focus: false });
     
     // Position bound windows when LLM response is shown
     if (this.bindWindows) {
@@ -1360,7 +1391,7 @@ class WindowManager {
     if (llmWindow) {
       logger.debug('Showing LLM loading state');
       llmWindow.webContents.send('show-loading');
-      this.showOnCurrentDesktop(llmWindow);
+      this.showOnCurrentDesktop(llmWindow, { focus: false });
       
       // Position bound windows when LLM loading is shown
       if (this.bindWindows) {
@@ -1663,8 +1694,8 @@ class WindowManager {
       if (mainWindow && llmWindow && !mainWindow.isDestroyed() && !llmWindow.isDestroyed()) {
         // Position bound windows on the new screen and ensure they appear on current desktop
         this.positionBoundWindows();
-        if (mainWindow.isVisible()) this.showOnCurrentDesktop(mainWindow);
-        if (llmWindow.isVisible()) this.showOnCurrentDesktop(llmWindow);
+        if (mainWindow.isVisible()) this.showOnCurrentDesktop(mainWindow, { focus: false });
+        if (llmWindow.isVisible()) this.showOnCurrentDesktop(llmWindow, { focus: false });
       }
     }
     
@@ -1719,7 +1750,7 @@ class WindowManager {
         
         // Ensure window appears on current desktop if it's visible
         if (window.isVisible()) {
-          this.showOnCurrentDesktop(window);
+          this.showOnCurrentDesktop(window, { focus: false });
         }
         
         logger.debug('Window moved to active screen and shown on current desktop', {

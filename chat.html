@@ -645,8 +645,10 @@
         }
       }
 
-      // Show thinking indicator
+      // Show thinking indicator. One at a time: voice can send several
+      // fragments for one answer, and each would otherwise add its own.
       function showThinkingIndicator() {
+        if (chatMessages.querySelector('.message.thinking')) return;
         const thinkingDiv = document.createElement('div');
         thinkingDiv.className = 'message assistant thinking';
         thinkingDiv.id = 'thinking-indicator';
@@ -671,10 +673,7 @@
 
       // Hide thinking indicator
       function hideThinkingIndicator() {
-        const thinkingIndicator = document.getElementById('thinking-indicator');
-        if (thinkingIndicator) {
-          thinkingIndicator.remove();
-        }
+        chatMessages.querySelectorAll('.message.thinking').forEach(el => el.remove());
       }
 
       // Minimalist Listening Animation Functions
@@ -682,7 +681,8 @@
         if (listeningIndicator) {
           listeningIndicator.classList.add('active');
 
-          // Start timer
+          // Start timer (replacing any running one, so it never leaks)
+          if (listeningTimer) clearInterval(listeningTimer);
           listeningStartTime = Date.now();
           listeningTimer = setInterval(() => {
             if (listeningStartTime && listeningDuration) {
@@ -745,6 +745,7 @@
       }
 
       function handleRecordingStopped() {
+        const wasRecording = isRecording;
         isRecording = false;
 
         if (recordingIndicator) {
@@ -755,7 +756,7 @@
         }
 
         hideListeningAnimation();
-        addMessage('Stopped Listening', 'system');
+        if (wasRecording) addMessage('Stopped Listening', 'system');
       }
 
       function handleTranscription(text) {
@@ -763,15 +764,10 @@
           // Hide listening animation first
           hideListeningAnimation();
 
-          // Show transcribed text with slight delay for smooth transition
-          setTimeout(() => {
-            addMessage(text.trim(), 'transcription');
-            
-            // Show thinking indicator after transcription
-            setTimeout(() => {
-              showThinkingIndicator();
-            }, 300);
-          }, 200);
+          // Shown right away: a delayed indicator could appear after a fast
+          // error or answer had already cleared it, and then never go away.
+          addMessage(text.trim(), 'transcription');
+          showThinkingIndicator();
         } else {
           console.warn('Invalid or empty transcription text - ignoring:', text);
         }
@@ -976,21 +972,18 @@
 
         // Listen for speech status
         whysperAPI.onSpeechStatus((event, data) => {
+          // Only a message. Recording state follows recording-started and
+          // recording-stopped: matching words here turned the final
+          // "Recording stopped" status back into "recording".
           if (data && data.status) {
             addMessage(data.status, 'system');
-
-            if (data.status.includes('started') || data.status.includes('Recording')) {
-              handleRecordingStarted();
-            } else if (data.status.includes('stopped') || data.status.includes('ended')) {
-              handleRecordingStopped();
-            }
           }
         });
 
         // Listen for speech errors
         whysperAPI.onSpeechError((event, data) => {
           if (data && data.error) {
-            addMessage(`Error in recognizing speech`, 'error');
+            addMessage(`Speech error: ${data.error}`, 'error');
             handleRecordingStopped();
           }
         });
@@ -1007,6 +1000,14 @@
         whysperAPI.onSessionCleared(() => {
           addMessage('Session memory has been cleared', 'system');
         });
+
+        // A request failed: say why instead of leaving "Thinking…" forever.
+        if (whysperAPI.onLlmError) {
+          whysperAPI.onLlmError((event, data) => {
+            try { hideThinkingIndicator(); } catch (_) {}
+            addMessage((data && data.error) || 'The AI request failed.', 'error');
+          });
+        }
 
         // Replace transcription LLM handler to store text + snippets
         whysperAPI.onTranscriptionLlmResponse((event, data) => {
@@ -1056,10 +1057,7 @@
             addMessage(text, 'user');
             messageInput.value = '';
             
-            // Show thinking indicator after user message
-            setTimeout(() => {
-              showThinkingIndicator();
-            }, 300);
+            showThinkingIndicator();
             
             // Send to main process for session memory storage and LLM processing
             try {
@@ -1095,7 +1093,7 @@
               addMessage(text, 'user');
               messageInput.value = '';
               autoGrow(messageInput);
-              setTimeout(() => { showThinkingIndicator(); }, 300);
+              showThinkingIndicator();
               try {
                 if (whysperAPI && whysperAPI.sendChatMessage) {
                   await whysperAPI.sendChatMessage(text);

@@ -486,30 +486,67 @@ class ApplicationController {
   }
 
   setupGlobalShortcuts() {
+    // Global shortcuts work in every app, so they only use combinations that
+    // editors and browsers leave alone. Cmd/Ctrl+arrows (line and word jumps)
+    // and Cmd/Ctrl+, (every app's Settings) would be swallowed system-wide,
+    // so they are registered only while one of this app's windows has focus.
     const shortcuts = {
       "CommandOrControl+Shift+S": () => this.triggerScreenshotOCR(),
       "CommandOrControl+Shift+V": () => windowManager.toggleVisibility(),
       "CommandOrControl+Shift+I": () => windowManager.toggleInteraction(),
       "CommandOrControl+Shift+C": () => windowManager.switchToWindow("chat"),
       "CommandOrControl+Shift+\\": () => this.clearSessionMemory(),
-      "CommandOrControl+,": () => windowManager.showSettings(),
       "Alt+A": () => windowManager.toggleInteraction(),
       "Alt+R": () => this.toggleSpeechRecognition(),
-      "CommandOrControl+Shift+T": () => windowManager.forceAlwaysOnTopForAllWindows(),
-      "CommandOrControl+Shift+Alt+T": () => {
-        const results = windowManager.testAlwaysOnTopForAllWindows();
-        logger.info('Always-on-top test triggered via shortcut', results);
-      },
-      // Context-sensitive shortcuts based on interaction mode
+    };
+
+    Object.entries(shortcuts).forEach(([accelerator, handler]) => {
+      const success = globalShortcut.register(accelerator, handler);
+      if (success) {
+        logger.debug("Global shortcut registered", { accelerator });
+      } else {
+        logger.warn("Global shortcut unavailable (another app owns it)", { accelerator });
+      }
+    });
+
+    this.setupFocusShortcuts();
+  }
+
+  /**
+   * Shortcuts that only apply while a Super Interview window is focused.
+   * They are registered on focus and released as soon as focus leaves the
+   * app, so other apps keep these keys.
+   */
+  setupFocusShortcuts() {
+    this.focusShortcuts = {
+      "CommandOrControl+,": () => windowManager.showSettings(),
       "CommandOrControl+Up": () => this.handleUpArrow(),
       "CommandOrControl+Down": () => this.handleDownArrow(),
       "CommandOrControl+Left": () => this.handleLeftArrow(),
       "CommandOrControl+Right": () => this.handleRightArrow(),
     };
+    this.focusShortcutsActive = false;
 
-    Object.entries(shortcuts).forEach(([accelerator, handler]) => {
-      const success = globalShortcut.register(accelerator, handler);
-      logger.debug("Global shortcut registered", { accelerator, success });
+    app.on("browser-window-focus", () => this.setFocusShortcutsActive(true));
+    app.on("browser-window-blur", () => {
+      // Focus may be moving to another window of this app; check after the
+      // focus change has settled.
+      setTimeout(() => {
+        this.setFocusShortcutsActive(!!BrowserWindow.getFocusedWindow());
+      }, 0);
+    });
+    this.setFocusShortcutsActive(!!BrowserWindow.getFocusedWindow());
+  }
+
+  setFocusShortcutsActive(active) {
+    if (!this.focusShortcuts || active === this.focusShortcutsActive) return;
+    this.focusShortcutsActive = active;
+    Object.entries(this.focusShortcuts).forEach(([accelerator, handler]) => {
+      if (active) {
+        globalShortcut.register(accelerator, handler);
+      } else if (globalShortcut.isRegistered(accelerator)) {
+        globalShortcut.unregister(accelerator);
+      }
     });
   }
 
@@ -1171,9 +1208,10 @@ class ApplicationController {
     const startTime = Date.now();
 
     try {
+      // Capture first: on Linux windows can't be hidden from capture, so a
+      // loading window shown before it would be in the screenshot.
+      const capture = await captureService.captureAndProcess();
       windowManager.showLLMLoading();
-
-  const capture = await captureService.captureAndProcess();
 
       if (!capture.imageBuffer || !capture.imageBuffer.length) {
         this.showScreenshotError("Failed to capture screenshot image");
@@ -1267,6 +1305,8 @@ class ApplicationController {
   }
 
   async processWithLLM(text, sessionHistory) {
+    // Hoisted so the catch block can tell chat which request failed.
+    let messageId = null;
     try {
       // The send-chat-message handler has already stored `text` in session memory.
 
@@ -1275,7 +1315,7 @@ class ApplicationController {
       const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
 
       this._responseSeq = (this._responseSeq || 0) + 1;
-      const messageId = `chat-${Date.now()}-${this._responseSeq}`;
+      messageId = `chat-${Date.now()}-${this._responseSeq}`;
       windowManager.broadcastToAllWindows("transcription-llm-response-start", {
         messageId,
         skill: this.activeSkill
@@ -1323,7 +1363,11 @@ class ApplicationController {
         skill: this.activeSkill,
       });
 
-      windowManager.hideLLMResponse();
+      // Show why there is no answer, in the answer window and in chat.
+      windowManager.showLLMResponse(error.message, {
+        skill: this.activeSkill,
+        isError: true,
+      });
       sessionManager.addConversationEvent({
         role: 'system',
         content: `LLM processing failed: ${error.message}`,
@@ -1334,7 +1378,7 @@ class ApplicationController {
         }
       });
 
-      this.broadcastLLMError(error.message);
+      this.broadcastLLMError(error.message, messageId);
     }
   }
 
@@ -1414,9 +1458,8 @@ class ApplicationController {
   }
 
   async processTranscriptionWithLLM(text, sessionHistory) {
-    // Hoisted so the catch block can tie a fallback answer to the same UI
-    // bubble the streaming start event created; otherwise a total failure
-    // leaves an empty streamed bubble stranded next to the fallback message.
+    // Hoisted so the catch block can tie the error to the same request the
+    // streaming start event announced.
     let messageId = null;
     try {
       // Validate input text
@@ -1504,52 +1547,30 @@ class ApplicationController {
         textLength: typeof text === 'string' ? text.length : 0
       });
 
-      // Try to provide a fallback response
-      try {
-        const fallbackResult = llmService.generateIntelligentFallbackResponse(text, this.activeSkill);
-        // Carry the streaming messageId so the target replaces the live
-        // bubble instead of leaving it stuck and appending a duplicate.
-        if (messageId) {
-          fallbackResult.metadata = { ...fallbackResult.metadata, messageId };
-        }
-
-        sessionManager.addModelResponse(fallbackResult.response, {
+      // Show why there is no answer where voice answers go. Nothing is
+      // stored as a model reply, so the next question's history stays clean.
+      this.sendToVoiceResponseWindows("llm-error", {
+        error: error.message,
+        messageId,
+        timestamp: new Date().toISOString(),
+      });
+      if (this.shouldShowVoiceOverlay()) {
+        windowManager.showLLMResponse(error.message, {
           skill: this.activeSkill,
-          processingTime: fallbackResult.metadata.processingTime,
-          usedFallback: true,
           isTranscriptionResponse: true,
-          fallbackReason: error.message
-        });
-
-        this.sendTranscriptionLLMResponseToVoiceTargets(fallbackResult);
-        if (this.shouldShowVoiceOverlay()) {
-          windowManager.showLLMResponse(fallbackResult.response, {
-            skill: this.activeSkill,
-            processingTime: fallbackResult.metadata.processingTime,
-            usedFallback: true,
-            isTranscriptionResponse: true
-          });
-        }
-        logger.info("Used fallback response for transcription", {
-          skill: this.activeSkill,
-          fallbackResponseLength: fallbackResult.response.length
-        });
-        
-      } catch (fallbackError) {
-        logger.error("Fallback response also failed", {
-          fallbackError: fallbackError.message
-        });
-
-        sessionManager.addConversationEvent({
-          role: 'system',
-          content: `Transcription LLM processing failed: ${error.message}`,
-          action: 'transcription_llm_error',
-          metadata: {
-            error: error.message,
-            skill: this.activeSkill
-          }
+          isError: true,
         });
       }
+
+      sessionManager.addConversationEvent({
+        role: 'system',
+        content: `Transcription LLM processing failed: ${error.message}`,
+        action: 'transcription_llm_error',
+        metadata: {
+          error: error.message,
+          skill: this.activeSkill
+        }
+      });
     }
   }
 
@@ -1583,9 +1604,10 @@ class ApplicationController {
     windowManager.broadcastToAllWindows("llm-response", broadcastData);
   }
 
-  broadcastLLMError(errorMessage) {
+  broadcastLLMError(errorMessage, messageId = null) {
     windowManager.broadcastToAllWindows("llm-error", {
       error: errorMessage,
+      messageId,
       timestamp: new Date().toISOString(),
     });
   }

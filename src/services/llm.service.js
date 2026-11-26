@@ -283,10 +283,7 @@ class LLMService {
         requestId: this.requestCount
       });
 
-      if (config.get('llm.gemini.fallbackEnabled')) {
-        return this.generateFallbackResponse('[image]', activeSkill);
-      }
-      throw error;
+      throw this._userFacingError(error);
     }
   }
 
@@ -448,11 +445,7 @@ class LLMService {
         requestId: this.requestCount
       });
 
-      if (config.get('llm.gemini.fallbackEnabled')) {
-        return this.generateFallbackResponse(text, activeSkill);
-      }
-
-      throw error;
+      throw this._userFacingError(error);
     }
   }
 
@@ -584,11 +577,7 @@ class LLMService {
         requestId: this.requestCount
       });
 
-      if (config.get('llm.gemini.fallbackEnabled')) {
-        return this.generateIntelligentFallbackResponse(text, activeSkill);
-      }
-      
-      throw error;
+      throw this._userFacingError(error);
     }
   }
 
@@ -1485,70 +1474,17 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
     });
   }
 
-  generateFallbackResponse(text, activeSkill) {
-    logger.info('Generating fallback response', { activeSkill });
-
-    const fallbackResponses = {
-      'dsa': 'This appears to be a data structures and algorithms problem. Consider breaking it down into smaller components and identifying the appropriate algorithm or data structure to use.',
-      'system-design': 'For this system design question, consider scalability, reliability, and the trade-offs between different architectural approaches.',
-      'programming': 'This looks like a programming challenge. Focus on understanding the requirements, edge cases, and optimal time/space complexity.',
-      'default': this._providerCopy().fallbackHint
-    };
-
-    const response = fallbackResponses[activeSkill] || fallbackResponses.default;
-    
-    return {
-      response,
-      metadata: {
-        skill: activeSkill,
-        processingTime: 0,
-        requestId: this.requestCount,
-        usedFallback: true
-      }
-    };
-  }
-
-  generateIntelligentFallbackResponse(text, activeSkill) {
-    logger.info('Generating intelligent fallback response for transcription', { activeSkill });
-
-    // Simple heuristic to determine if message seems skill-related
-    const skillKeywords = {
-      'dsa': ['algorithm', 'data structure', 'array', 'tree', 'graph', 'sort', 'search', 'complexity', 'big o'],
-      'programming': ['code', 'function', 'variable', 'class', 'method', 'bug', 'debug', 'syntax'],
-      'system-design': ['scalability', 'database', 'architecture', 'microservice', 'load balancer', 'cache'],
-      'behavioral': ['interview', 'experience', 'situation', 'leadership', 'conflict', 'team'],
-      'sales': ['customer', 'deal', 'negotiation', 'price', 'revenue', 'prospect'],
-      'presentation': ['slide', 'audience', 'public speaking', 'presentation', 'nervous'],
-      'data-science': ['data', 'model', 'machine learning', 'statistics', 'analytics', 'python', 'pandas'],
-      'devops': ['deployment', 'ci/cd', 'docker', 'kubernetes', 'infrastructure', 'monitoring'],
-      'negotiation': ['negotiate', 'compromise', 'agreement', 'terms', 'conflict resolution']
-    };
-
-    const textLower = text.toLowerCase();
-    const relevantKeywords = skillKeywords[activeSkill] || [];
-    const hasRelevantKeywords = relevantKeywords.some(keyword => textLower.includes(keyword));
-    
-    // Check for question indicators
-    const questionIndicators = ['how', 'what', 'why', 'when', 'where', 'can you', 'could you', 'should i', '?'];
-    const seemsLikeQuestion = questionIndicators.some(indicator => textLower.includes(indicator));
-
-    let response;
-    if (hasRelevantKeywords || seemsLikeQuestion) {
-      response = `I'm having trouble processing that right now, but it sounds like a ${activeSkill} question. Could you rephrase or ask more specifically about what you need help with?`;
-    } else {
-      response = `Yeah, I'm listening. Ask your question relevant to ${activeSkill}.`;
-    }
-    
-    return {
-      response,
-      metadata: {
-        skill: activeSkill,
-        processingTime: 0,
-        requestId: this.requestCount,
-        usedFallback: true,
-        isTranscriptionResponse: true
-      }
-    };
+  /**
+   * The error to surface when every request attempt failed. The message is
+   * the same short, actionable text Test connection shows (bad key, rate
+   * limited, offline, ...), so the user sees why there is no answer instead
+   * of a canned reply that looks like one. The raw error stays on `cause`.
+   */
+  _userFacingError(error) {
+    const friendly = new Error(this._friendlyTestError(error, this.analyzeError(error)));
+    friendly.cause = error;
+    friendly.isUserFacing = true;
+    return friendly;
   }
 
   async testConnection() {
@@ -1688,7 +1624,6 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
     if (!providerConfig) {
       return {
         notInitialized: 'LLM service not initialized. Check Gemini API key configuration.',
-        fallbackHint: 'I can help analyze this content. Please ensure your Gemini API key is properly configured for detailed analysis.',
         unreachable: 'Cannot reach Google servers. Check your internet connection, firewall, or VPN settings.',
         badKey: 'Invalid API key or insufficient permissions. Double-check the key at aistudio.google.com/apikey.',
         rateLimited: 'Rate limit or quota exceeded. Wait a moment or check your Google Cloud billing.',
@@ -1704,9 +1639,6 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
       notInitialized: isOllama
         ? `LLM service not initialized. Check the ${label} settings.`
         : `LLM service not initialized. Check ${label} API key configuration.`,
-      fallbackHint: isOllama
-        ? `I can help analyze this content. Please ensure ${label} is running for detailed analysis.`
-        : `I can help analyze this content. Please ensure your ${label} API key is properly configured for detailed analysis.`,
       unreachable: isOllama
         ? `Cannot reach ${label} at ${getBaseURL(this.providerId)}. Make sure it is running.`
         : `Cannot reach ${label}. Check your internet connection, firewall, or VPN settings.`,

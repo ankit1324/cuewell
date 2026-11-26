@@ -1,6 +1,9 @@
 const { desktopCapturer, screen } = require('electron');
 const logger = require('../core/logger').createServiceLogger('CAPTURE');
 
+// Longest edge of a screenshot sent to the AI, in pixels (4K width).
+const MAX_CAPTURE_EDGE = 3840;
+
 class CaptureService {
   constructor() {
     this.isProcessing = false;
@@ -66,30 +69,25 @@ class CaptureService {
 
   async captureScreenshot(options = {}) {
     const targetDisplay = this._getTargetDisplay(options.displayId);
-    const { width, height } = targetDisplay.size || { width: 1920, height: 1080 };
+    const thumbnailSize = this._thumbnailSize(targetDisplay);
 
     const sources = await desktopCapturer.getSources({
       types: ['screen'],
-      thumbnailSize: { width, height }
+      thumbnailSize
     });
 
     if (sources.length === 0) {
       throw new Error('No screen sources available for capture');
     }
 
-    // Find source matching the target display by comparing sizes as heuristic
-    let source = sources[0];
-    const match = sources.find(s => {
-      const size = s.thumbnail.getSize();
-      return size.width === width && size.height === height;
-    });
-    if (match) source = match;
+    const source = this._pickSource(sources, targetDisplay, thumbnailSize);
 
     const image = source.thumbnail;
     if (!image) throw new Error('Failed to capture screen thumbnail');
 
     logger.debug('Screenshot captured successfully', {
       sourceName: source.name,
+      displayId: targetDisplay.id,
       imageSize: image.getSize()
     });
 
@@ -104,12 +102,56 @@ class CaptureService {
     };
   }
 
+  /**
+   * Thumbnail size in physical pixels. display.size is in DIPs, so on a 2x
+   * Retina screen asking for it returns a half-resolution image and small code
+   * text blurs. The longest edge is capped to keep the upload reasonable.
+   */
+  _thumbnailSize(display) {
+    const size = (display && display.size) || { width: 1920, height: 1080 };
+    const scale = (display && display.scaleFactor) || 1;
+    let width = Math.round(size.width * scale);
+    let height = Math.round(size.height * scale);
+    const longest = Math.max(width, height);
+    if (longest > MAX_CAPTURE_EDGE) {
+      const ratio = MAX_CAPTURE_EDGE / longest;
+      width = Math.round(width * ratio);
+      height = Math.round(height * ratio);
+    }
+    return { width, height };
+  }
+
+  /**
+   * The source for `display`: matched by display_id, then by size (sources
+   * from older platforms may lack display_id), then the first one.
+   */
+  _pickSource(sources, display, thumbnailSize) {
+    const byId = sources.find(s => s.display_id && String(s.display_id) === String(display.id));
+    if (byId) return byId;
+    const bySize = sources.find(s => {
+      const size = s.thumbnail && s.thumbnail.getSize();
+      return size && size.width === thumbnailSize.width && size.height === thumbnailSize.height;
+    });
+    return bySize || sources[0];
+  }
+
+  /**
+   * The display to capture: the one asked for, otherwise the one under the
+   * mouse pointer, which is where the user is working when they press the
+   * shortcut. Falls back to the primary display.
+   */
   _getTargetDisplay(displayId) {
     const all = screen.getAllDisplays();
     if (!all || all.length === 0) return screen.getPrimaryDisplay();
-    if (displayId == null) return screen.getPrimaryDisplay();
-    const found = all.find(d => d.id === displayId);
-    return found || screen.getPrimaryDisplay();
+    if (displayId != null) {
+      const found = all.find(d => d.id === displayId);
+      if (found) return found;
+    }
+    try {
+      return screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    } catch (_) {
+      return screen.getPrimaryDisplay();
+    }
   }
 
   _isValidArea(area) {
