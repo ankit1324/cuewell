@@ -24,6 +24,31 @@ const path = require('path');
 const PROBE_TIMEOUT_MS = 30000; // first `import whisper` (torch) is slow on a cold cache
 const INSTALL_TIMEOUT_MS = 300000; // pip downloads can be slow on cold cache
 
+// The openai-whisper release this app is tested with. Keep in sync with
+// WHISPER_PIP_SPEC in setup.sh.
+const WHISPER_PIP_SPEC = 'openai-whisper==20250625';
+
+// Variable names that hold credentials (GEMINI_API_KEY, AZURE_SPEECH_KEY,
+// GITHUB_TOKEN, ...). Child processes never need them.
+const SECRET_ENV_NAME = /(_API_KEY|_KEY|_TOKEN|_SECRET)$/;
+
+/**
+ * Environment for child processes (Whisper, pip, python, sox, which/where):
+ * a copy of process.env without API keys, tokens and secrets. PATH, HOME,
+ * locale, Python/venv and WHISPER_* variables are kept. `extra` is merged in
+ * last.
+ */
+function childProcessEnv(extra = {}) {
+  const env = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    const upper = name.toUpperCase();
+    if (SECRET_ENV_NAME.test(upper) || upper.startsWith('AZURE_SPEECH_KEY')) continue;
+    env[name] = value;
+  }
+  return Object.assign(env, extra);
+}
+
 /**
  * Run a command, streaming stdout/stderr lines to `onProgress` as they
  * arrive. Resolves with the full result once the process exits.
@@ -49,7 +74,7 @@ function runExec(cmd, args, { timeout = PROBE_TIMEOUT_MS, onProgress } = {}) {
     try {
       child = spawn(cmd, args, {
         windowsHide: true,
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+        env: childProcessEnv({ PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' }),
       });
     } catch (e) {
       finish({ ok: false, error: e.message, stderr: e.message, stdout: '', code: null });
@@ -314,7 +339,7 @@ class WhisperInstaller {
 
     // Step 3: pip install into the venv
     log(`→ Installing openai-whisper into venv (this can take a few minutes)…`);
-    const pipResult = await this.runExec(vp.python, ['-m', 'pip', 'install', '--upgrade', 'openai-whisper'], {
+    const pipResult = await this.runExec(vp.python, ['-m', 'pip', 'install', WHISPER_PIP_SPEC], {
       timeout: INSTALL_TIMEOUT_MS,
       onProgress: log,
     });
@@ -378,7 +403,7 @@ class WhisperInstaller {
       const r = spawnSync(
         this.platform === 'win32' ? 'where' : 'which',
         ['ffmpeg'],
-        { windowsHide: true },
+        { windowsHide: true, env: childProcessEnv() },
       );
       if (r.status === 0) {
         const path = (r.stdout || '').toString().split(/\r?\n/)[0].trim();
@@ -508,7 +533,7 @@ class WhisperInstaller {
         const which = require('child_process').spawnSync(
           this.platform === 'win32' ? 'where' : 'which',
           [c],
-          { windowsHide: true, encoding: 'utf8' },
+          { windowsHide: true, encoding: 'utf8', env: childProcessEnv() },
         );
         if (which.status === 0) {
           const lines = (which.stdout || '')
@@ -629,3 +654,5 @@ class WhisperInstaller {
 module.exports = WhisperInstaller;
 module.exports.WhisperInstaller = WhisperInstaller;
 module.exports.runExec = runExec;
+module.exports.childProcessEnv = childProcessEnv;
+module.exports.WHISPER_PIP_SPEC = WHISPER_PIP_SPEC;

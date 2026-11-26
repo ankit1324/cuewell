@@ -1,6 +1,24 @@
-// Enhanced polyfills for Azure Speech SDK in Node.js environment
-if (typeof window === 'undefined') {
-  global.window = {
+// Browser stand-ins for the Azure Speech SDK in Electron's main process.
+//
+// They exist only while withAzureBrowserShims() runs: while the SDK is
+// required and while SpeechConfig / AudioConfig / SpeechRecognizer objects are
+// built. Afterwards the previous globals come back, so the rest of the main
+// process sees Node's real URL, Blob and File and no fake window, document or
+// navigator (URL checks elsewhere would otherwise see every URL as
+// https://localhost/). The SDK only checks these globals synchronously while
+// those objects are built; at connect time it uses the `ws` package with
+// Node's URL, so nothing breaks once they are removed.
+const AZURE_SHIM_GLOBALS = [
+  'window', 'document', 'navigator', 'AudioContext', 'webkitAudioContext',
+  'URL', 'Blob', 'File', 'performance', 'crypto'
+];
+// Only filled in when Node lacks them, as before.
+const AZURE_SHIM_IF_MISSING = new Set(['performance', 'crypto']);
+let azureBrowserShims = null;
+let azureShimDepth = 0;
+
+function createAzureBrowserShims() {
+  const shimWindow = {
     navigator: {
       userAgent: 'Node.js',
       platform: 'node',
@@ -347,16 +365,16 @@ if (typeof window === 'undefined') {
       }
     }
   };
-  global.document = global.window.document;
-  global.navigator = global.window.navigator;
-  global.AudioContext = global.window.AudioContext;
-  global.webkitAudioContext = global.window.webkitAudioContext;
-  global.URL = global.window.URL;
-  global.Blob = global.window.Blob;
-  global.File = global.window.File;
-
-  if (!global.performance) {
-    global.performance = {
+  return {
+    window: shimWindow,
+    document: shimWindow.document,
+    navigator: shimWindow.navigator,
+    AudioContext: shimWindow.AudioContext,
+    webkitAudioContext: shimWindow.webkitAudioContext,
+    URL: shimWindow.URL,
+    Blob: shimWindow.Blob,
+    File: shimWindow.File,
+    performance: {
       now: () => Date.now(),
       mark: () => {},
       measure: () => {},
@@ -364,18 +382,63 @@ if (typeof window === 'undefined') {
       clearMeasures: () => {},
       getEntriesByName: () => [],
       getEntriesByType: () => []
-    };
-  }
-
-  if (!global.crypto) {
-    global.crypto = {
+    },
+    crypto: {
       getRandomValues: (arr) => {
         for (let i = 0; i < arr.length; i++) {
           arr[i] = Math.floor(Math.random() * 256);
         }
         return arr;
       }
-    };
+    }
+  };
+}
+
+function setGlobal(name, descriptor) {
+  try {
+    if (descriptor) {
+      Object.defineProperty(globalThis, name, descriptor);
+    } else {
+      delete globalThis[name];
+    }
+  } catch (_) {
+    // Non-configurable global: fall back to plain assignment.
+    try { globalThis[name] = descriptor ? descriptor.value : undefined; } catch (__) { /* ignore */ }
+  }
+}
+
+/**
+ * Run `fn` with the browser stand-ins installed, then put the previous
+ * globals back (even if `fn` throws). Nested calls share one install. When a
+ * real `window` exists (a renderer), `fn` runs as is.
+ */
+function withAzureBrowserShims(fn) {
+  if (azureShimDepth > 0 || typeof globalThis.window !== 'undefined') {
+    return fn();
+  }
+  if (!azureBrowserShims) azureBrowserShims = createAzureBrowserShims();
+
+  const saved = new Map();
+  for (const name of AZURE_SHIM_GLOBALS) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+    if (AZURE_SHIM_IF_MISSING.has(name) && globalThis[name]) continue;
+    saved.set(name, previous);
+    setGlobal(name, {
+      value: azureBrowserShims[name],
+      writable: true,
+      configurable: true,
+      enumerable: previous ? previous.enumerable : true
+    });
+  }
+
+  azureShimDepth += 1;
+  try {
+    return fn();
+  } finally {
+    azureShimDepth -= 1;
+    for (const [name, previous] of saved) {
+      setGlobal(name, previous);
+    }
   }
 }
 
@@ -387,10 +450,11 @@ const { EventEmitter } = require('events');
 const logger = require('../core/logger').createServiceLogger('SPEECH');
 const config = require('../core/config');
 const WhisperWorkerService = require('./whisper-worker.service');
+const { childProcessEnv } = require('../core/whisper-installer');
 
 let sdk = null;
 try {
-  sdk = require('microsoft-cognitiveservices-speech-sdk');
+  sdk = withAzureBrowserShims(() => require('microsoft-cognitiveservices-speech-sdk'));
 } catch (error) {
   logger.warn('Azure Speech SDK unavailable', { error: error.message });
 }
@@ -479,22 +543,23 @@ class SpeechService extends EventEmitter {
         return;
       }
 
-      this.speechConfig = sdk.SpeechConfig.fromSubscription(subscriptionKey, region);
-
       const azureConfig = config.get('speech.azure') || {};
-      this.speechConfig.speechRecognitionLanguage = azureConfig.language || 'en-US';
-      this.speechConfig.outputFormat = sdk.OutputFormat.Detailed;
-      this.speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, '5000');
-      this.speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, '2000');
-      this.speechConfig.setProperty(sdk.PropertyId.Speech_SegmentationSilenceTimeoutMs, '2000');
+      withAzureBrowserShims(() => {
+        this.speechConfig = sdk.SpeechConfig.fromSubscription(subscriptionKey, region);
+        this.speechConfig.speechRecognitionLanguage = azureConfig.language || 'en-US';
+        this.speechConfig.outputFormat = sdk.OutputFormat.Detailed;
+        this.speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, '5000');
+        this.speechConfig.setProperty(sdk.PropertyId.SpeechServiceConnection_EndSilenceTimeoutMs, '2000');
+        this.speechConfig.setProperty(sdk.PropertyId.Speech_SegmentationSilenceTimeoutMs, '2000');
 
-      if (azureConfig.enableDictation) {
-        this.speechConfig.enableDictation();
-      }
+        if (azureConfig.enableDictation) {
+          this.speechConfig.enableDictation();
+        }
 
-      if (azureConfig.enableAudioLogging) {
-        this.speechConfig.enableAudioLogging();
-      }
+        if (azureConfig.enableAudioLogging) {
+          this.speechConfig.enableAudioLogging();
+        }
+      });
 
       this.available = true;
       logger.info('Azure Speech service initialized successfully', {
@@ -591,10 +656,14 @@ class SpeechService extends EventEmitter {
     this._cleanup();
 
     try {
-      this.pushStream = sdk.AudioInputStream.createPushStream();
-      this.audioConfig = sdk.AudioConfig.fromStreamInput(this.pushStream);
+      withAzureBrowserShims(() => {
+        this.pushStream = sdk.AudioInputStream.createPushStream();
+        this.audioConfig = sdk.AudioConfig.fromStreamInput(this.pushStream);
+      });
       this._startMicrophoneCapture();
-      this.recognizer = new sdk.SpeechRecognizer(this.speechConfig, this.audioConfig);
+      this.recognizer = withAzureBrowserShims(
+        () => new sdk.SpeechRecognizer(this.speechConfig, this.audioConfig)
+      );
     } catch (error) {
       logger.error('Failed to start Azure recording session', { error: error.message });
       this.emit('error', `Audio configuration failed: ${error.message}`);
@@ -1089,8 +1158,10 @@ class SpeechService extends EventEmitter {
         throw new Error(`Audio file not found: ${audioFilePath}`);
       }
 
-      const audioConfig = sdk.AudioConfig.fromWavFileInput(audioFilePath);
-      const recognizer = new sdk.SpeechRecognizer(this.speechConfig, audioConfig);
+      const { audioConfig, recognizer } = withAzureBrowserShims(() => {
+        const fileConfig = sdk.AudioConfig.fromWavFileInput(audioFilePath);
+        return { audioConfig: fileConfig, recognizer: new sdk.SpeechRecognizer(this.speechConfig, fileConfig) };
+      });
 
       return await new Promise((resolve, reject) => {
         recognizer.recognizeOnceAsync(
@@ -1122,10 +1193,12 @@ class SpeechService extends EventEmitter {
       }
 
       try {
-        const audioConfig = sdk.AudioConfig.fromDefaultMicrophoneInput();
-        const recognizer = new sdk.SpeechRecognizer(this.speechConfig, audioConfig);
-        recognizer.close();
-        audioConfig.close();
+        withAzureBrowserShims(() => {
+          const audioConfig = sdk.AudioConfig.fromDefaultMicrophoneInput();
+          const recognizer = new sdk.SpeechRecognizer(this.speechConfig, audioConfig);
+          recognizer.close();
+          audioConfig.close();
+        });
         return { success: true, message: 'Azure connection test successful' };
       } catch (error) {
         return { success: false, message: error.message };
@@ -1140,7 +1213,7 @@ class SpeechService extends EventEmitter {
       const probe = spawnSync(
         this.whisperCommand.command,
         [...this.whisperCommand.baseArgs, '--help'],
-        { encoding: 'utf8', timeout: 10000 }
+        { encoding: 'utf8', timeout: 10000, env: childProcessEnv() }
       );
       if (probe.error || probe.status !== 0) {
         const err = probe.error ? probe.error.message : `exit code ${probe.status}`;
@@ -1515,6 +1588,7 @@ class SpeechService extends EventEmitter {
         encoding: 'utf8',
         timeout: 8000,
         windowsHide: true,
+        env: childProcessEnv(),
       });
       if (!probe.error && probe.status === 0) {
         return candidate;
@@ -1564,6 +1638,7 @@ class SpeechService extends EventEmitter {
         // First `import whisper` (torch/numba) can be slow on a cold cache.
         timeout: 30000,
         windowsHide: true,
+        env: childProcessEnv(),
         // No shell — see _probeWhisperModuleFast: shell:true on Windows splits
         // spaced paths (e.g. "C:\Users\CANDAN SINGH\...") and breaks the probe.
       });
@@ -1710,7 +1785,7 @@ class SpeechService extends EventEmitter {
       const r = spawnSync(
         process.platform === 'win32' ? 'where' : 'which',
         [bin],
-        { windowsHide: true, timeout: 4000 }
+        { windowsHide: true, timeout: 4000, env: childProcessEnv() }
       );
       return r.status === 0;
     } catch (_) {
@@ -1748,15 +1823,24 @@ class SpeechService extends EventEmitter {
 
       const program = candidate.bin;
       try {
-        this.recording = recorder.record({
-          sampleRate: 16000,
-          sampleRateHertz: 16000,
-          channels: 1,
-          threshold: 0,
-          verbose: false,
-          recorder: candidate.recorder,
-          silence: '10.0s'
-        });
+        // node-record-lpcm16 spawns the recorder inside record() with
+        // process.env and has no env option, so swap in the scrubbed copy
+        // for that synchronous call only.
+        const parentEnv = process.env;
+        process.env = childProcessEnv();
+        try {
+          this.recording = recorder.record({
+            sampleRate: 16000,
+            sampleRateHertz: 16000,
+            channels: 1,
+            threshold: 0,
+            verbose: false,
+            recorder: candidate.recorder,
+            silence: '10.0s'
+          });
+        } finally {
+          process.env = parentEnv;
+        }
 
         const stream = this.recording.stream();
         this.audioProgram = program;
@@ -1964,7 +2048,8 @@ class SpeechService extends EventEmitter {
     try {
       await new Promise((resolve, reject) => {
         const child = spawn(this.whisperCommand.command, args, {
-          stdio: ['ignore', 'pipe', 'pipe']
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: childProcessEnv()
         });
 
         let stderr = '';

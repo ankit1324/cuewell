@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const { spawn } = require('child_process');
+const { childProcessEnv } = require('../core/whisper-installer');
 const logger = require('../core/logger').createServiceLogger('WHISPER-WORKER');
 
 class WhisperWorkerService {
@@ -81,7 +82,8 @@ class WhisperWorkerService {
     this.closing = false;
     const child = spawn(this.pythonPath, ['-u', this.scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true
+      windowsHide: true,
+      env: childProcessEnv()
     });
     this.process = child;
 

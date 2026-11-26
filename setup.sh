@@ -10,6 +10,9 @@ WHISPER_MODEL="${WHISPER_MODEL:-base}"
 WHISPER_LANGUAGE="${WHISPER_LANGUAGE:-en}"
 WHISPER_SEGMENT_MS="${WHISPER_SEGMENT_MS:-4000}"
 WHISPER_VENV_DIR=".venv-whisper"
+# The openai-whisper release this app is tested with. Keep in sync with
+# WHISPER_PIP_SPEC in src/core/whisper-installer.js.
+WHISPER_PIP_SPEC="openai-whisper==20250625"
 WHISPER_MODEL_DIR=".whisper-models"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OS_NAME="unknown"
@@ -126,20 +129,58 @@ ensure_env_file() {
   chmod 600 .env 2>/dev/null || true
 }
 
+# Set KEY=value in .env: replace the first KEY= line, or append one. awk
+# reads the key and value from its environment (ENVIRON, not -v, which would
+# expand backslash escapes), so characters such as $ @ | \ & stay plain data.
 upsert_env() {
   local key="$1"
   local value="$2"
+  local tmp
 
-  if grep -q "^${key}=" .env 2>/dev/null; then
-    perl -0pi -e "s|^${key}=.*\$|${key}=${value}|m" .env
+  case "$value" in
+    *$'\n'*|*$'\r'*)
+      echo "Error: refusing to write a multi-line value for ${key} to .env"
+      return 1
+      ;;
+  esac
+
+  [[ -f .env ]] || : > .env
+  tmp="$(mktemp .env.XXXXXX)"
+  chmod 600 "$tmp"
+  if UPSERT_NAME="$key" UPSERT_VALUE="$value" awk '
+    BEGIN { prefix = ENVIRON["UPSERT_NAME"] "="; value = ENVIRON["UPSERT_VALUE"]; done = 0 }
+    !done && index($0, prefix) == 1 { print prefix value; done = 1; next }
+    { print }
+    END { if (!done) print prefix value }
+  ' .env > "$tmp"; then
+    mv -f "$tmp" .env
   else
-    printf "%s=%s\n" "$key" "$value" >> .env
+    rm -f "$tmp"
+    echo "Error: could not update ${key} in .env"
+    return 1
   fi
+}
+
+# Run a command without API keys, tokens or secrets in its environment, so
+# pip, Python and Whisper never see them.
+run_without_secrets() {
+  (
+    local name
+    for name in $(compgen -e); do
+      case "$name" in
+        *_KEY|*_TOKEN|*_SECRET|AZURE_SPEECH_KEY*) unset "$name" ;;
+      esac
+    done
+    "$@"
+  )
 }
 
 ensure_gemini_key() {
   if [[ -n "${GEMINI_API_KEY:-}" ]]; then
     upsert_env "GEMINI_API_KEY" "$GEMINI_API_KEY"
+    # The app reads it from .env; keep it out of npm install scripts and the
+    # other commands below.
+    unset GEMINI_API_KEY
   fi
 
   # GEMINI_API_KEY is now OPTIONAL during setup. The app's first-run
@@ -234,13 +275,13 @@ setup_whisper_env() {
 
   if [[ ! -d "$WHISPER_VENV_DIR" ]]; then
     echo "Creating Whisper virtual environment at $WHISPER_VENV_DIR"
-    "$PYTHON_BIN" -m venv "$WHISPER_VENV_DIR"
+    run_without_secrets "$PYTHON_BIN" -m venv "$WHISPER_VENV_DIR"
   fi
 
   echo "Installing local Whisper into $WHISPER_VENV_DIR"
-  "$WHISPER_PIP_PATH" install --upgrade pip || true
-  "$WHISPER_PIP_PATH" install openai-whisper || {
-    echo "WARNING: pip install openai-whisper failed. Whisper may be unavailable."
+  run_without_secrets "$WHISPER_PIP_PATH" install --upgrade pip || true
+  run_without_secrets "$WHISPER_PIP_PATH" install "$WHISPER_PIP_SPEC" || {
+    echo "WARNING: pip install ${WHISPER_PIP_SPEC} failed. Whisper may be unavailable."
     echo "Common causes: insufficient disk space (needs ~3-5 GB), missing Python headers, or network issues."
   }
 
@@ -259,7 +300,7 @@ setup_whisper_env() {
     else
       venv_python="${WHISPER_VENV_DIR}/bin/python"
     fi
-    if [[ -f "$venv_python" ]] && "$venv_python" -m whisper --help >/dev/null 2>&1; then
+    if [[ -f "$venv_python" ]] && run_without_secrets "$venv_python" -m whisper --help >/dev/null 2>&1; then
       echo "Whisper CLI not found as standalone script, but 'python -m whisper' works."
       echo "Adjusting WHISPER_COMMAND to use venv Python module."
       WHISPER_COMMAND_PATH="$venv_python"
@@ -282,7 +323,7 @@ setup_whisper_env() {
 
   if [[ "$whisper_found" -eq 1 ]]; then
     echo "Running Whisper smoke test"
-    npm run test-speech
+    run_without_secrets npm run test-speech
   else
     echo "Skipping Whisper smoke test (CLI not found)"
   fi
