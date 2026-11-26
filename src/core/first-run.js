@@ -9,6 +9,29 @@ const SENTINEL_NAME = '.superinterview-firstrun-completed';
 const LEGACY_SENTINEL_NAME = '.opencluely-firstrun-completed';
 
 /**
+ * Whether files in the launch folder (process.cwd()) may be used. Only when
+ * running from source: a packaged app is launched from any folder, which must
+ * not be able to supply its config. `options.allowLaunchFolder` overrides.
+ */
+function launchFolderAllowed(options) {
+  if (typeof options.allowLaunchFolder === 'boolean') return options.allowLaunchFolder;
+  try {
+    const { app } = require('electron');
+    if (app && typeof app.isPackaged === 'boolean') return !app.isPackaged;
+  } catch (_) { /* not running under Electron */ }
+  return true;
+}
+
+/** Default folder for .env and the marker in packaged builds: Electron's userData. */
+function defaultDataDir() {
+  try {
+    const { app } = require('electron');
+    if (app && typeof app.getPath === 'function') return app.getPath('userData');
+  } catch (_) { /* not running under Electron */ }
+  return path.join(os.homedir(), '.SuperInterview');
+}
+
+/**
  * First-run detection and onboarding helper.
  *
  * Responsibilities:
@@ -25,8 +48,10 @@ const LEGACY_SENTINEL_NAME = '.opencluely-firstrun-completed';
 class FirstRunManager {
   constructor(options = {}) {
     this.cwd = options.cwd || process.cwd();
-    this.envPath = options.envPath || path.join(this.cwd, '.env');
-    this.sentinelPath = options.sentinelPath || path.join(this.cwd, SENTINEL_NAME);
+    this.allowLaunchFolder = launchFolderAllowed(options);
+    const defaultDir = this.allowLaunchFolder ? this.cwd : defaultDataDir();
+    this.envPath = options.envPath || path.join(defaultDir, '.env');
+    this.sentinelPath = options.sentinelPath || path.join(defaultDir, SENTINEL_NAME);
     // Old-name markers that also mean "completed": the one next to the new
     // marker, plus any the caller lists (main.js passes the userData folders
     // used before the rename).
@@ -152,9 +177,11 @@ class FirstRunManager {
 
   _readTemplate() {
     // Prefer env.example if it ships in the project; otherwise write a
-    // minimal template that the user can extend.
+    // minimal template that the user can extend. The launch folder's copy is
+    // only read when running from source; packaged builds use the one inside
+    // the app.
     const candidates = [
-      path.join(this.cwd, 'env.example'),
+      ...(this.allowLaunchFolder ? [path.join(this.cwd, 'env.example')] : []),
       path.join(__dirname, '..', '..', 'env.example'),
     ];
     for (const candidate of candidates) {

@@ -27,7 +27,10 @@ class ConfigManager {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
+          sandbox: true,
           enableRemoteModule: false,
+          // Default only: window.manager.js picks preload.js or
+          // preload-content.js per window type.
           preload: path.join(__dirname, '../../preload.js')
         }
       },

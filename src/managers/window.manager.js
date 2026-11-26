@@ -6,6 +6,18 @@ const { URL, fileURLToPath } = require('url');
 const logger = require('../core/logger').createServiceLogger('WINDOW');
 const config = require('../core/config');
 
+// The chat and answer windows render AI output, so they get the minimal
+// preload. The toolbar, Settings and onboarding pages use preload.js, which
+// picks each page's methods from the --si-window argument.
+const APP_ROOT = path.join(__dirname, '..', '..');
+const PRELOAD_BY_TYPE = {
+  main: path.join(APP_ROOT, 'preload.js'),
+  settings: path.join(APP_ROOT, 'preload.js'),
+  onboarding: path.join(APP_ROOT, 'preload.js'),
+  chat: path.join(APP_ROOT, 'preload-content.js'),
+  llmResponse: path.join(APP_ROOT, 'preload-content.js'),
+};
+
 /** Open http(s) URLs in the system browser and drop every other scheme. */
 function openExternalHttpUrl(url) {
   let parsed;
@@ -23,6 +35,10 @@ function openExternalHttpUrl(url) {
 class WindowManager {
   constructor() {
     this.windows = new Map();
+    // webContents id -> window type, recorded when each BrowserWindow is
+    // created (before its page loads) so main.js can tell which window sent
+    // an IPC message, including messages sent while the page is loading.
+    this.webContentsTypes = new Map();
     this.activeWindow = 'main';
     this.isInteractive = true; // default to interactive so windows are clickable/drag-able
     this.isVisible = false;
@@ -281,8 +297,11 @@ class WindowManager {
     return window;
   }
 
-  /** True when `url` is a file: URL of one of the app's own pages (windowConfigs). */
-  isAppPageUrl(url) {
+  /**
+   * True when `url` is a file: URL of one of the app's own pages
+   * (windowConfigs). With `type`, only that window type's own page counts.
+   */
+  isAppPageUrl(url, type = null) {
     let pagePath;
     try {
       pagePath = fileURLToPath(url);
@@ -294,8 +313,21 @@ class WindowManager {
       return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
     };
     const appRoot = app.getAppPath();
-    return Object.values(this.windowConfigs)
+    const configs = type ? [this.windowConfigs[type]].filter(Boolean) : Object.values(this.windowConfigs);
+    return configs
       .some(({ file }) => normalize(path.join(appRoot, file)) === normalize(pagePath));
+  }
+
+  /** Window type ('main', 'chat', ...) that owns `webContents`, or null. */
+  getWindowTypeForWebContents(webContents) {
+    if (!webContents || typeof webContents.id !== 'number') return null;
+    const type = this.webContentsTypes.get(webContents.id);
+    if (!type) return null;
+    const win = this.windows.get(type);
+    // A window that has not been added to `windows` yet (its page is still
+    // loading) is still identified by the id recorded at creation.
+    if (win && !win.isDestroyed() && win.webContents.id !== webContents.id) return null;
+    return type;
   }
 
   async createWindow(type, showOnCreate = false) {
@@ -310,10 +342,15 @@ class WindowManager {
       height: windowConfig.height,
       webPreferences: {
         ...config.get('window.webPreferences'),
+        preload: PRELOAD_BY_TYPE[type] || config.get('window.webPreferences').preload,
+        // Tells the preload which page's API to expose.
+        additionalArguments: [`--si-window=${type}`],
         nodeIntegration: false,
         contextIsolation: true,
+        sandbox: true,
         backgroundThrottling: false,
-        devTools: true, // Enable DevTools for debugging
+        // DevTools only when running from source.
+        devTools: !app.isPackaged,
       },
       show: false, // Never show during creation, use showOnCurrentDesktop instead
       title: windowConfig.title,
@@ -495,19 +532,27 @@ class WindowManager {
 
   const window = new BrowserWindow(browserWindowOptions);
 
+    const webContentsId = window.webContents.id;
+    this.webContentsTypes.set(webContentsId, type);
+    window.webContents.once('destroyed', () => {
+      if (this.webContentsTypes.get(webContentsId) === type) {
+        this.webContentsTypes.delete(webContentsId);
+      }
+    });
+
     // External links (GitHub, the website, Google AI Studio, links in AI
     // answers, etc.) must open in the user's real browser, never inside the
     // frameless overlay windows. Deny any in-app window.open, and keep every
-    // window on the app's own pages: other navigations are cancelled and
-    // http(s) targets go to the OS browser instead.
+    // window on its own page: other navigations are cancelled and http(s)
+    // targets go to the OS browser instead.
     window.webContents.setWindowOpenHandler(({ url }) => {
       openExternalHttpUrl(url);
       return { action: 'deny' };
     });
     window.webContents.on('will-navigate', (event, url) => {
-      if (this.isAppPageUrl(url)) return;
+      if (this.isAppPageUrl(url, type)) return;
       event.preventDefault();
-      openExternalHttpUrl(url);
+      if (!this.isAppPageUrl(url)) openExternalHttpUrl(url);
     });
 
   // Load the HTML file

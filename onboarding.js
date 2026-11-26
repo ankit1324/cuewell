@@ -287,10 +287,9 @@
     // Subscribe to streamed progress lines from the main process.
     // `installWhisper()` only returns once install completes; live
     // output comes through `onInstallProgress` events.
-    let progressHandler = null;
+    let stopProgress = null;
     if (window.electronAPI && window.electronAPI.onInstallProgress) {
-      progressHandler = (line) => appendLog(line);
-      window.electronAPI.onInstallProgress(progressHandler);
+      stopProgress = window.electronAPI.onInstallProgress((line) => appendLog(line));
     }
 
     try {
@@ -325,8 +324,8 @@
         btn.innerHTML = btn.dataset.originalHtml || '<i class="fas fa-download"></i> Install Whisper now';
       }
     } finally {
-      if (progressHandler && window.electronAPI.removeAllListeners) {
-        try { window.electronAPI.removeAllListeners('install-progress'); } catch (_) { /* ignore */ }
+      if (typeof stopProgress === 'function') {
+        try { stopProgress(); } catch (_) { /* ignore */ }
       }
     }
   }
@@ -426,10 +425,9 @@
 
     appendModelLog('Starting model download…');
 
-    let progressHandler = null;
+    let stopProgress = null;
     if (window.electronAPI && window.electronAPI.onInstallProgress) {
-      progressHandler = (line) => appendModelLog(line);
-      window.electronAPI.onInstallProgress(progressHandler);
+      stopProgress = window.electronAPI.onInstallProgress((line) => appendModelLog(line));
     }
 
     try {
@@ -452,8 +450,8 @@
       appendModelLog(`\n! Error: ${e.message || e}`);
       nextBtn.disabled = false;
     } finally {
-      if (progressHandler && window.electronAPI.removeAllListeners) {
-        try { window.electronAPI.removeAllListeners('install-progress'); } catch (_) { /* ignore */ }
+      if (typeof stopProgress === 'function') {
+        try { stopProgress(); } catch (_) { /* ignore */ }
       }
     }
   }
@@ -523,7 +521,11 @@
     // testing.
     if (name === 'apikey' && state.geminiKey && window.electronAPI) {
       try {
-        await window.electronAPI.saveSettings({ geminiKey: state.geminiKey });
+        const r = await window.electronAPI.saveSettings({ geminiKey: state.geminiKey });
+        if (r && r.success === false) {
+          setKeyStatus('error', r.error || 'Could not save the key');
+          return;
+        }
       } catch (_) { /* surfaced elsewhere */ }
     }
     if (name === 'speech' && window.electronAPI) {
@@ -539,7 +541,20 @@
         if (state.speechProvider === 'whisper' && state.whisperCmd) {
           payload.whisperCommand = quoteCommandIfNeeded(state.whisperCmd);
         }
-        await window.electronAPI.saveSettings(payload);
+        const r = await window.electronAPI.saveSettings(payload);
+        // Main rejected a value the user typed: show it on that field and stay.
+        const rejected = r && r.success === false && Array.isArray(r.errors)
+          ? r.errors.find((e) => e.field === 'azureKey' || e.field === 'azureRegion')
+          : null;
+        if (rejected) {
+          const input = document.getElementById(rejected.field);
+          if (input && typeof input.setCustomValidity === 'function') {
+            input.setCustomValidity(rejected.error);
+            input.reportValidity();
+            input.addEventListener('input', () => input.setCustomValidity(''), { once: true });
+          }
+          return;
+        }
       } catch (_) { /* surfaced elsewhere */ }
     }
 
@@ -553,7 +568,12 @@
       // Persist whatever whisper command we found (could be empty if skipped)
       if (window.electronAPI && state.whisperCmd) {
         try {
-          await window.electronAPI.saveSettings({ whisperCommand: quoteCommandIfNeeded(state.whisperCmd) });
+          const r = await window.electronAPI.saveSettings({ whisperCommand: quoteCommandIfNeeded(state.whisperCmd) });
+          if (r && r.success === false) {
+            setDetectStatus('error', 'Not saved');
+            appendLog(`\n✗ ${r.error || 'Could not save the Whisper command'}`);
+            return;
+          }
         } catch (_) { /* ignore */ }
       }
     }
@@ -660,12 +680,15 @@
   if (window.electronAPI && window.electronAPI.getFirstRunStatus) {
     window.electronAPI.getFirstRunStatus().then((s) => {
       if (s && s.geminiConfigured) {
-        // We can't read the key back (settings returns empty for keys),
-        // but we can mark status as success if the env file already has one
-        // and let the user advance without retyping it.
+        // The key itself never leaves the main process (only its last 4
+        // characters), but we can mark status as success if the env file
+        // already has one and let the user advance without retyping it.
         state.geminiConfigured = true;
         setKeyStatus('success', 'Already configured — click Continue');
-        geminiInput.placeholder = '•••••••••••••••• (already set)';
+        const last4 = s.geminiKey && s.geminiKey.set && s.geminiKey.last4;
+        geminiInput.placeholder = last4
+          ? `•••••••••••••••• ${last4} (already set)`
+          : '•••••••••••••••• (already set)';
       }
     }).catch(() => {});
   }

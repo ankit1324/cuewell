@@ -462,7 +462,7 @@ class MainWindowUI {
     setupEventListeners() {
         if (window.electronAPI) {
             // Fix interaction mode change listener
-            window.electronAPI.onInteractionModeChanged((event, interactive) => {
+            window.electronAPI.onInteractionModeChanged((interactive) => {
                 logger.debug('Interaction mode changed received:', interactive);
                 this.handleInteractionModeChanged(interactive);
             });
@@ -475,19 +475,19 @@ class MainWindowUI {
                 this.handleRecordingStopped();
             });
 
-            window.electronAPI.onSkillChanged((event, data) => {
+            window.electronAPI.onSkillChanged((data) => {
                 if (data && data.skill) {
                     this.handleSkillChanged(data);
                 }
             });
 
-            window.electronAPI.onSpeechAvailability((event, data) => {
+            window.electronAPI.onSpeechAvailability((data) => {
                 this.speechAvailable = !!(data && data.available);
                 this.applyMicVisibility();
             });
 
             // Listen for coding language changes from other windows
-            window.electronAPI.onCodingLanguageChanged((event, data) => {
+            window.electronAPI.onCodingLanguageChanged((data) => {
                 if (data && data.language && this.languageSelect) {
                     // avoid clobbering if same value
                     if (this.languageSelect.value !== data.language) {
@@ -542,12 +542,7 @@ class MainWindowUI {
                     logger.warn('Skill updated event received but no skill data found:', data);
                 }
             });
-            
-            // Listen for skill updates from settings window  
-            window.api.receive('update-skill', (skill) => {
-                logger.info('Direct skill update received from settings:', skill);
-                this.handleSkillChanged({ skill: skill });
-            });
+
         } else {
             logger.error('window.api not available - event listeners not set up!');
         }
@@ -1042,118 +1037,6 @@ class MainWindowUI {
             message,
             type
         });
-    }
-
-    async showGeminiConfig() {
-        try {
-            const status = await window.electronAPI.getGeminiStatus();
-            
-            const modal = this.createGeminiConfigModal(status);
-            document.body.appendChild(modal);
-            
-            logger.debug('Gemini config modal shown', { component: 'MainWindowUI' });
-        } catch (error) {
-            logger.error('Failed to show Gemini config', {
-                component: 'MainWindowUI',
-                error: error.message
-            });
-            this.showNotification('Failed to load Gemini configuration', 'error');
-        }
-    }
-
-    createGeminiConfigModal(status) {
-        const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50';
-        modal.innerHTML = `
-            <div class="bg-gray-900 text-white p-6 rounded-lg max-w-md w-full">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-bold">🤖 Gemini Flash 1.5 Configuration</h2>
-                    <button class="text-gray-400 hover:text-white" onclick="this.closest('.fixed').remove()">✕</button>
-                </div>
-                
-                <div class="mb-4 p-3 rounded ${status.hasApiKey ? 'bg-green-900' : 'bg-red-900'}">
-                    <p><strong>Status:</strong> ${status.hasApiKey ? 'Configured' : 'Not Configured'}</p>
-                    <p><strong>Model:</strong> ${status.model}</p>
-                </div>
-                
-                <div class="mb-4">
-                    <label class="block text-sm font-medium mb-2">API Key:</label>
-                    <input type="password" id="geminiApiKey" placeholder="Enter your Gemini API key" 
-                           class="w-full p-2 bg-gray-800 border border-gray-600 rounded text-white">
-                    <p class="text-xs text-gray-400 mt-1">
-                        Get your API key from: <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-400">Google AI Studio</a>
-                    </p>
-                </div>
-                
-                <div class="flex space-x-2">
-                    <button onclick="mainWindowUI.configureGemini()" class="flex-1 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
-                        Configure
-                    </button>
-                    <button onclick="mainWindowUI.testGeminiConnection()" class="flex-1 bg-green-600 hover:bg-green-700 px-4 py-2 rounded">
-                        Test Connection
-                    </button>
-                </div>
-                
-                <div class="mt-4 text-center">
-                    <button class="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded" onclick="this.closest('.fixed').remove()">
-                        Close
-                    </button>
-                </div>
-            </div>
-        `;
-        return modal;
-    }
-
-    async configureGemini() {
-        const apiKey = document.getElementById('geminiApiKey').value.trim();
-        if (!apiKey) {
-            this.showNotification('Please enter an API key', 'error');
-            return;
-        }
-        
-        try {
-            const result = await window.electronAPI.setGeminiApiKey(apiKey);
-            if (result.success) {
-                this.showNotification('Gemini API key configured successfully!', 'success');
-                document.querySelector('.fixed').remove();
-                
-                logger.info('Gemini API key configured', { component: 'MainWindowUI' });
-            } else {
-                this.showNotification(`Configuration failed: ${result.error}`, 'error');
-                logger.error('Gemini configuration failed', {
-                    component: 'MainWindowUI',
-                    error: result.error
-                });
-            }
-        } catch (error) {
-            this.showNotification(`Error: ${error.message}`, 'error');
-            logger.error('Gemini configuration error', {
-                component: 'MainWindowUI',
-                error: error.message
-            });
-        }
-    }
-
-    async testGeminiConnection() {
-        try {
-            const result = await window.electronAPI.testGeminiConnection();
-            if (result.success) {
-                this.showNotification('Gemini connection test successful!', 'success');
-                logger.info('Gemini connection test successful', { component: 'MainWindowUI' });
-            } else {
-                this.showNotification(`Connection test failed: ${result.error}`, 'error');
-                logger.error('Gemini connection test failed', {
-                    component: 'MainWindowUI',
-                    error: result.error
-                });
-            }
-        } catch (error) {
-            this.showNotification(`Error: ${error.message}`, 'error');
-            logger.error('Gemini connection test error', {
-                component: 'MainWindowUI',
-                error: error.message
-            });
-        }
     }
 
     setupSettingsShortcut() {
