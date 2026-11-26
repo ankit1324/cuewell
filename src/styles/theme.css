@@ -1,5 +1,5 @@
 /*
- * OpenCluely theme: "Graphite & Lime"
+ * Super Interview theme: "Graphite & Lime"
  * Design by Ankit Chaudhry.
  *
  * Shared tokens and primitives for every window. Pages link this file after
@@ -199,27 +199,24 @@ body {
   color: var(--oc-text);
 }
 
-/* Brand mark: a lens "C" with a dot. Pure CSS, scales with --s. */
+/* Brand mark: a lime keycap "S". Pure CSS, scales with --s. */
 .oc-mark {
   --s: 16px;
-  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   width: var(--s);
   height: var(--s);
-  border-radius: 50%;
-  border: max(2px, calc(var(--s) * 0.13)) solid var(--oc-accent);
-  border-top-color: transparent;
-  transform: rotate(45deg);
+  border-radius: calc(var(--s) * 0.28);
+  background: var(--oc-accent);
+  /* Darker bottom edge, like a key. At least 1px so small marks keep it. */
+  box-shadow: inset 0 calc(-1 * max(1px, var(--s) * 0.08)) 0 rgba(0, 0, 0, 0.25);
 }
 .oc-mark::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 34%;
-  height: 34%;
-  border-radius: 50%;
-  background: var(--oc-accent);
+  content: 'S';
+  font: 800 calc(var(--s) * 0.62) / 1 var(--oc-mono);
+  color: var(--oc-accent-ink);
 }
 
 /* Mono eyebrow label: section names, states, meta. */

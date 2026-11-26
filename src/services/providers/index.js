@@ -36,7 +36,7 @@ const PROVIDERS = Object.freeze({
   openrouter: Object.freeze({
     label: 'OpenRouter', keyEnv: 'OPENROUTER_API_KEY', modelEnv: 'OPENROUTER_MODEL',
     defaultModel: 'openrouter/auto', baseURL: 'https://openrouter.ai/api/v1',
-    tokenParam: 'max_tokens', headers: Object.freeze({ 'X-Title': 'OpenCluely' }),
+    tokenParam: 'max_tokens', headers: Object.freeze({ 'X-Title': 'Super Interview' }),
     kind: 'openai', supportsImages: true
   }),
   groq: Object.freeze({

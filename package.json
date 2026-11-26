@@ -1,7 +1,7 @@
 {
-  "name": "opencluely",
+  "name": "super-interview",
   "version": "1.0.0",
-  "description": "AI Problem Solving Assistant",
+  "description": "AI interview copilot",
   "main": "main.js",
   "scripts": {
     "start": "env -u ELECTRON_RUN_AS_NODE electron .",
@@ -43,8 +43,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.opencluely.app",
-    "productName": "OpenCluely",
+    "appId": "com.ankitchaudhry.superinterview",
+    "productName": "Super Interview",
     "directories": {
       "output": "dist"
     },
@@ -88,9 +88,9 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "OpenCluely uses the microphone to transcribe your speech locally with Whisper.",
-        "NSCameraUsageDescription": "OpenCluely does not record video; this entitlement is only present for media-capture compatibility.",
-        "NSScreenCaptureUsageDescription": "OpenCluely captures the screen to read on-screen content for AI assistance."
+        "NSMicrophoneUsageDescription": "Super Interview uses the microphone to transcribe your speech locally with Whisper.",
+        "NSCameraUsageDescription": "Super Interview does not record video; this entitlement is only present for media-capture compatibility.",
+        "NSScreenCaptureUsageDescription": "Super Interview captures the screen to read on-screen content for AI assistance."
       }
     },
     "win": {
@@ -159,10 +159,13 @@
       "perMachine": false,
       "include": "scripts/post-install-nsis.nsh",
       "deleteAppDataOnUninstall": false,
-      "artifactName": "OpenCluely-Setup-${version}.${ext}"
+      "artifactName": "Super-Interview-Setup-${version}.${ext}"
+    },
+    "appImage": {
+      "artifactName": "Super-Interview-${version}.${ext}"
     },
     "dmg": {
-      "title": "OpenCluely Interview Assistant",
+      "title": "Super Interview",
       "backgroundColor": "#000000",
       "window": {
         "width": 600,

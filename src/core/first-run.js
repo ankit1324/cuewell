@@ -3,11 +3,16 @@ const path = require('path');
 const os = require('os');
 const { getActiveProviderId, isConfigured } = require('../services/providers');
 
+const SENTINEL_NAME = '.superinterview-firstrun-completed';
+// Builds released under the old name (OpenCluely) wrote this marker. It still
+// counts as completed so a user who finished onboarding never sees it again.
+const LEGACY_SENTINEL_NAME = '.opencluely-firstrun-completed';
+
 /**
  * First-run detection and onboarding helper.
  *
  * Responsibilities:
- *   - Decide whether this is the user's first launch of OpenCluely
+ *   - Decide whether this is the user's first launch of Super Interview
  *   - Auto-create a default `.env` from `env.example` if one is missing
  *   - Report whether the selected AI provider (LLM_PROVIDER, Gemini by
  *     default) has its API key configured (the only required setting)
@@ -21,7 +26,14 @@ class FirstRunManager {
   constructor(options = {}) {
     this.cwd = options.cwd || process.cwd();
     this.envPath = options.envPath || path.join(this.cwd, '.env');
-    this.sentinelPath = options.sentinelPath || path.join(this.cwd, '.opencluely-firstrun-completed');
+    this.sentinelPath = options.sentinelPath || path.join(this.cwd, SENTINEL_NAME);
+    // Old-name markers that also mean "completed": the one next to the new
+    // marker, plus any the caller lists (main.js passes the userData folders
+    // used before the rename).
+    this.legacySentinelPaths = [
+      path.join(path.dirname(this.sentinelPath), LEGACY_SENTINEL_NAME),
+      ...(options.legacySentinelPaths || []),
+    ];
     this.logger = options.logger || console;
   }
 
@@ -30,9 +42,14 @@ class FirstRunManager {
    * sentinel file, or .env exists but the selected AI provider has no key.
    */
   needsOnboarding() {
-    if (!fs.existsSync(this.sentinelPath)) return true;
+    if (!this._sentinelExists()) return true;
     if (!fs.existsSync(this.envPath)) return true;
     return !this._isLlmConfigured(this._readEnv());
+  }
+
+  /** A first-run marker exists, under the current or the old name. */
+  _sentinelExists() {
+    return [this.sentinelPath, ...this.legacySentinelPaths].some((p) => fs.existsSync(p));
   }
 
   /** The provider chosen by LLM_PROVIDER (Gemini by default) has a usable key. */
@@ -87,7 +104,7 @@ class FirstRunManager {
     const gemini = (env.GEMINI_API_KEY || '').trim();
     return {
       envExists: fs.existsSync(this.envPath),
-      sentinelExists: fs.existsSync(this.sentinelPath),
+      sentinelExists: this._sentinelExists(),
       // Kept for the onboarding wizard's Gemini step.
       geminiConfigured: !!gemini && gemini !== 'your_gemini_api_key_here',
       llmProvider: getActiveProviderId(env),
@@ -146,7 +163,7 @@ class FirstRunManager {
       } catch (_) { /* try next */ }
     }
     return [
-      '# OpenCluely configuration',
+      '# Super Interview configuration',
       '# Add your Google Gemini API key below — the app picks it up immediately.',
       '# Get a key from: https://aistudio.google.com/',
       '',

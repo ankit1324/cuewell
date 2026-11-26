@@ -4,16 +4,16 @@ const os = require('os');
 class ConfigManager {
   constructor() {
     this.env = process.env.NODE_ENV || 'development';
-    this.appDataDir = path.join(os.homedir(), '.OpenCluely');
+    this.appDataDir = path.join(os.homedir(), '.SuperInterview');
     this.loadConfiguration();
   }
 
   loadConfiguration() {
     this.config = {
       app: {
-        name: 'OpenCluely',
+        name: 'Super Interview',
         version: '1.0.0',
-        processTitle: 'OpenCluely',
+        processTitle: 'Super Interview',
         dataDir: this.appDataDir,
         isDevelopment: this.env === 'development',
         isProduction: this.env === 'production'

@@ -3,6 +3,86 @@ const fs = require("fs");
 const { fileURLToPath } = require("url");
 const { app, BrowserWindow, globalShortcut, session, ipcMain, nativeTheme } = require("electron");
 
+// ── Carry data over from the folder used before the rename ──
+// Electron names the userData folder after package.json, so renaming the app
+// to Super Interview gave it a new, empty folder. Builds released under the
+// old name used <appData>/opencluely or <appData>/OpenCluely (one folder on a
+// case-insensitive disk). Before anything reads userData, bring over the .env,
+// the first-run marker and the downloaded Whisper models. Each step is skipped
+// when the new folder already has the item, so it acts once. The old folder is
+// only read, apart from moving the models out of it, and a failure is logged
+// (once the logger loads) instead of blocking startup.
+const FIRST_RUN_MARKER = ".superinterview-firstrun-completed";
+const LEGACY_FIRST_RUN_MARKER = ".opencluely-firstrun-completed";
+
+function legacyUserDataDirs() {
+  try {
+    const appData = app.getPath("appData");
+    // Packaged builds used the product name, source runs the package name.
+    const names = app.isPackaged ? ["OpenCluely", "opencluely"] : ["opencluely", "OpenCluely"];
+    return names.map((name) => path.join(appData, name));
+  } catch (_) {
+    return [];
+  }
+}
+
+// Copy a small private file (.env holds API keys). The copy is created 0600,
+// never replaces an existing file, and a half-written copy is removed so the
+// next launch can retry.
+function copyPrivateFile(from, to) {
+  const data = fs.readFileSync(from);
+  try {
+    fs.writeFileSync(to, data, { mode: 0o600, flag: "wx" });
+  } catch (err) {
+    if (err.code !== "EEXIST") {
+      try { fs.unlinkSync(to); } catch (_) { /* nothing was created */ }
+    }
+    throw err;
+  }
+}
+
+function migrateLegacyUserData() {
+  const log = [];
+  let userData;
+  try {
+    userData = app.getPath("userData");
+  } catch (err) {
+    log.push({ level: "warn", message: "Skipped data folder migration: userData path unavailable", meta: { error: err.message } });
+    return log;
+  }
+  const oldDirs = legacyUserDataDirs();
+  const steps = [
+    { item: ".env", from: ".env", to: ".env", isDir: false },
+    { item: "first-run marker", from: LEGACY_FIRST_RUN_MARKER, to: FIRST_RUN_MARKER, isDir: false },
+    // The folder src/core/whisper-installer.js downloads weights into.
+    { item: "Whisper models", from: ".whisper-models", to: ".whisper-models", isDir: true },
+  ];
+  for (const step of steps) {
+    try {
+      const target = path.join(userData, step.to);
+      if (fs.lstatSync(target, { throwIfNoEntry: false })) continue;
+      const source = oldDirs
+        .map((dir) => path.join(dir, step.from))
+        .find((candidate) => {
+          const stat = fs.statSync(candidate, { throwIfNoEntry: false });
+          return !!stat && (step.isDir ? stat.isDirectory() : stat.isFile());
+        });
+      if (!source) continue;
+      if (step.isDir) {
+        // Moved, not copied, so the model is not downloaded or stored twice.
+        fs.renameSync(source, target);
+      } else {
+        copyPrivateFile(source, target);
+      }
+      log.push({ level: "info", message: `Migrated ${step.item} from the previous data folder`, meta: { from: source, to: target } });
+    } catch (err) {
+      log.push({ level: "warn", message: `Could not migrate ${step.item} from the previous data folder`, meta: { error: err.message } });
+    }
+  }
+  return log;
+}
+const userDataMigrationLog = migrateLegacyUserData();
+
 // ── Resolve a stable .env location ──
 // In packaged builds process.cwd() is unstable and frequently read-only
 // (NSIS install dir, AppImage mount, .app bundle), so the canonical config
@@ -66,7 +146,7 @@ function formatEnvValue(raw) {
 // exhaust the X11 client limit, producing "Maximum number of clients reached".
 //
 // Disabling hardware acceleration and the GPU subprocess forces Chromium to
-// render via the CPU (SwiftShader). OpenCluely's UI is light enough that
+// render via the CPU (SwiftShader). Super Interview's UI is light enough that
 // this is imperceptible, and it eliminates the GPU crash entirely.
 if (process.platform === "linux") {
   app.disableHardwareAcceleration();
@@ -87,6 +167,7 @@ app.commandLine.appendSwitch("disable-domain-reliability");
 app.commandLine.appendSwitch("no-pings");
 
 const logger = require("./src/core/logger").createServiceLogger("MAIN");
+for (const entry of userDataMigrationLog) logger[entry.level](entry.message, entry.meta);
 const config = require("./src/core/config");
 const FirstRunManager = require("./src/core/first-run");
 
@@ -170,7 +251,10 @@ class ApplicationController {
       // any directory). ENV_PATH is the same file dotenv loaded at startup
       // and that persistEnvUpdates() writes to.
       envPath: ENV_PATH,
-      sentinelPath: path.join(app.getPath("userData"), ".opencluely-firstrun-completed"),
+      sentinelPath: path.join(app.getPath("userData"), FIRST_RUN_MARKER),
+      // Onboarding finished under the old name also counts: the migration
+      // above normally copies that marker, this covers a failed copy.
+      legacySentinelPaths: legacyUserDataDirs().map((dir) => path.join(dir, LEGACY_FIRST_RUN_MARKER)),
     });
     // Lazily-initialised in getWhisperInstaller() so tests can mock
     // the constructor without polluting main-process startup.
@@ -179,7 +263,7 @@ class ApplicationController {
 
     // Window configurations for reference
     this.windowConfigs = {
-      main: { title: "OpenCluely" },
+      main: { title: "Super Interview" },
       chat: { title: "Chat" },
       llmResponse: { title: "AI Response" },
       settings: { title: "Settings" },
@@ -1173,7 +1257,7 @@ class ApplicationController {
     // capture.service throws this when desktopCapturer returns no screens,
     // which on macOS means Screen Recording permission is missing.
     const message = process.platform === "darwin" && errorMessage === "No screen sources available for capture"
-      ? "Screen capture failed. Allow Screen Recording for the app that launched OpenCluely (System Settings > Privacy & Security > Screen & System Audio Recording), then restart it."
+      ? "Screen capture failed. Allow Screen Recording for the app that launched Super Interview (System Settings > Privacy & Security > Screen & System Audio Recording), then restart it."
       : errorMessage || "Screenshot failed.";
     windowManager.showLLMResponse(message, {
       skill: this.activeSkill,

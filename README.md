@@ -1,6 +1,6 @@
 <div align="center">
 
-# OpenCluely
+# Super Interview
 
 **The invisible AI interview copilot.**
 
@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/896a7140-1e85-405d-bfbe-e05c9f3a816b
 
 ## What it is
 
-OpenCluely is a desktop app for technical interviews and practice. It places a small overlay on your screen that recording and conferencing tools do not capture. You can speak a question or take a screenshot, and the AI answers in real time. The answer streams into a floating window and an optional chat panel, with clean code blocks and syntax highlighting.
+Super Interview is a desktop app for technical interviews and practice. It places a small overlay on your screen that recording and conferencing tools do not capture. You can speak a question or take a screenshot, and the AI answers in real time. The answer streams into a floating window and an optional chat panel, with clean code blocks and syntax highlighting.
 
 It is free and open source. Processing stays on your machine, and the only thing that leaves your device is the request you send to the AI provider.
 
@@ -46,7 +46,7 @@ If you would rather build from source, three steps are all it takes.
 
    ```bash
    git clone <your-repo-url>
-   cd opencluely
+   cd super-interview
    ```
 
 2. Run the setup script.
@@ -135,7 +135,7 @@ For Azure Speech, create a Speech resource in the [Azure Portal](https://portal.
 
 ## Project status
 
-OpenCluely is under active development. The core is stable and improvements ship regularly.
+Super Interview is under active development. The core is stable and improvements ship regularly.
 
 ### Done
 
@@ -166,7 +166,7 @@ OpenCluely is under active development. The core is stable and improvements ship
 <details>
 <summary>Setup issues</summary>
 
-- **setup.sh will not run.** Make sure you are in the project folder (`cd opencluely`) and that the script is executable (`chmod +x setup.sh`). On Windows, use Git Bash.
+- **setup.sh will not run.** Make sure you are in the project folder (`cd super-interview`) and that the script is executable (`chmod +x setup.sh`). On Windows, use Git Bash.
 - **Setup stops with exit code 130.** That means Ctrl+C was pressed. Run `./setup.sh` again.
 - **Node or npm not found.** Install Node.js 18 or newer from [nodejs.org](https://nodejs.org/), restart the terminal, and retry.
 
@@ -186,7 +186,7 @@ OpenCluely is under active development. The core is stable and improvements ship
 
 <summary> Limitations </summary>
 
-- **Screen-capture invisibility does not work on Linux.** The overlay stays hidden from screen shares and recordings only on **macOS** and **Windows**. This relies on Electron's `setContentProtection`, which maps to `NSWindowSharingNone` on macOS and `WDA_EXCLUDEFROMCAPTURE` on Windows. Electron provides **no equivalent on Linux** (neither X11 nor Wayland), so on Linux the call is a silent no-op and the overlay **will be visible** to anyone you screen-share with. This is a platform limitation, not a bug — there is no window flag on Linux that excludes a window from framebuffer capture. If you need capture-invisibility, run OpenCluely on macOS or Windows. As a partial workaround on Linux, share a single application window instead of your entire screen, or place the overlay on a monitor you are not sharing.
+- **Screen-capture invisibility does not work on Linux.** The overlay stays hidden from screen shares and recordings only on **macOS** and **Windows**. This relies on Electron's `setContentProtection`, which maps to `NSWindowSharingNone` on macOS and `WDA_EXCLUDEFROMCAPTURE` on Windows. Electron provides **no equivalent on Linux** (neither X11 nor Wayland), so on Linux the call is a silent no-op and the overlay **will be visible** to anyone you screen-share with. This is a platform limitation, not a bug — there is no window flag on Linux that excludes a window from framebuffer capture. If you need capture-invisibility, run Super Interview on macOS or Windows. As a partial workaround on Linux, share a single application window instead of your entire screen, or place the overlay on a monitor you are not sharing.
 
 </details>
 
@@ -194,7 +194,7 @@ OpenCluely is under active development. The core is stable and improvements ship
 
 ## Privacy and ethics
 
-OpenCluely collects no data and sends no telemetry. Processing happens locally, and your session stays on your device. Requests to the AI provider are encrypted in transit.
+Super Interview collects no data and sends no telemetry. Processing happens locally, and your session stays on your device. Requests to the AI provider are encrypted in transit.
 
 The app is built for learning and practice. You are responsible for following the rules of any interview you take and the policies of the companies involved.
 
@@ -217,4 +217,4 @@ Maintained by **Ankit Chaudhry**.
 
 ## Credits and license
 
-This project is a modified fork of [OpenCluely](https://github.com/TechyCSR/OpenCluely) by TechyCSR, licensed under the Apache License 2.0. See `LICENSE` and `NOTICE`.
+Super Interview is a modified version of [OpenCluely](https://github.com/TechyCSR/OpenCluely) by TechyCSR, licensed under the Apache License 2.0. See `LICENSE` and `NOTICE`.

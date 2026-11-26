@@ -59,7 +59,7 @@ class WindowManager {
         height: 35,
         useContentSize: true,
         file: 'index.html',
-        title: 'OpenCluely'
+        title: 'Super Interview'
       },
       chat: {
         width: 500,
@@ -95,7 +95,7 @@ class WindowManager {
         width: 560,
         height: 680,
         file: 'onboarding.html',
-        title: 'Welcome to OpenCluely',
+        title: 'Welcome to Super Interview',
         frame: false,
         titleBarStyle: 'hidden',
         transparent: true,

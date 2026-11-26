@@ -398,7 +398,7 @@ class ChatWindowUI {
         }
         const label = document.createElement('span');
         label.className = 'oc-label';
-        label.textContent = type === 'transcription' ? 'Heard' : 'OpenCluely';
+        label.textContent = type === 'transcription' ? 'Heard' : 'Super Interview';
         head.appendChild(label);
         head.appendChild(timeDiv);
         return head;

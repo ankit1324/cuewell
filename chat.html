@@ -456,7 +456,7 @@
       let speechAvailable = false;
 
       // Chat persistence and deduplication
-      const CHAT_HISTORY_KEY = 'opencluely_chat_history_v1';
+      const CHAT_HISTORY_KEY = 'superinterview_chat_history_v1';
       let chatHistory = [];
       const recentResponseHashes = new Set();
       const RECENT_HASH_LIMIT = 50;
@@ -574,7 +574,7 @@
         }
         const label = document.createElement('span');
         label.className = 'oc-label';
-        label.textContent = type === 'transcription' ? 'Heard' : 'OpenCluely';
+        label.textContent = type === 'transcription' ? 'Heard' : 'Super Interview';
         head.appendChild(label);
         head.appendChild(timeDiv);
         return head;

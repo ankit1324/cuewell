@@ -20,7 +20,7 @@ WHISPER_COMMAND_PATH=""
 
 print_header() {
   echo "========================================"
-  echo " OpenCluely Setup"
+  echo " Super Interview Setup"
   echo "========================================"
 }
 
@@ -34,7 +34,7 @@ This script will:
 3. Optionally set up local Whisper in ${WHISPER_VENV_DIR}
 4. Optionally install system audio dependencies
 5. Optionally build the app
-6. Optionally run OpenCluely
+6. Optionally run Super Interview
 
 Options:
   --build                 Build a distributable for this OS
@@ -183,7 +183,7 @@ install_system_deps() {
 
   case "$OS_NAME" in
     macos)
-      # OpenCluely captures microphone audio via the renderer (Web Audio API) on
+      # Super Interview captures microphone audio via the renderer (Web Audio API) on
       # macOS, so the native sox/arecord recorders are not used. Skip installing
       # sox to avoid an unnecessary Homebrew dependency.
       echo "macOS uses built-in renderer audio capture; skipping sox install."
