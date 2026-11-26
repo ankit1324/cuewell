@@ -30,6 +30,108 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeSkillSelect = document.getElementById('activeSkill');
     const iconGrid = document.getElementById('iconGrid');
 
+    // API-key fields. Main never sends a saved key back, only whether one is
+    // set and its last 4 characters. These inputs stay empty and show the
+    // saved state in their placeholder; typing a new key replaces it, and an
+    // empty field keeps the saved key.
+    const secretInputs = [
+        'geminiKey', 'azureKey', 'anthropicKey', 'openaiKey', 'openrouterKey',
+        'groqKey', 'deepseekKey'
+    ].map((id) => document.getElementById(id)).filter(Boolean);
+    secretInputs.forEach((input) => {
+        input.dataset.emptyPlaceholder = input.placeholder;
+    });
+    const isSecretInput = (input) => secretInputs.includes(input);
+
+    const showSecretState = (input, masked) => {
+        input.value = '';
+        if (masked && masked.set) {
+            input.placeholder = masked.last4 ? `•••••••• ${masked.last4} (saved)` : '•••••••• (saved)';
+        } else {
+            input.placeholder = input.dataset.emptyPlaceholder || '';
+        }
+    };
+
+    // Main saves the valid fields and rejects invalid ones with
+    // { success: false, field, error, errors: [{ field, error }] }. Each
+    // rejected field gets its message as a validation error; the first is
+    // shown in the browser's validation bubble, once per value, so leaving
+    // the field does not keep pulling focus back to it.
+    let lastReportedError = '';
+    const clearSaveErrors = () => {
+        document.querySelectorAll('input, select').forEach((el) => {
+            if (typeof el.setCustomValidity === 'function') el.setCustomValidity('');
+        });
+    };
+    const showSaveError = (result) => {
+        const message = (result && result.error) || 'Could not save settings.';
+        console.error('Settings not saved:', message);
+        const errors = result && Array.isArray(result.errors) && result.errors.length
+            ? result.errors
+            : [{ field: result && result.field, error: message }];
+        clearSaveErrors();
+        let first = null;
+        errors.forEach(({ field, error }) => {
+            const input = field ? document.getElementById(field) : null;
+            if (!input || typeof input.setCustomValidity !== 'function') return;
+            input.setCustomValidity(error || message);
+            if (!first) first = { input, field, error: error || message };
+        });
+        if (!first) return;
+        const key = `${first.field}\n${first.input.value}\n${first.error}`;
+        if (key !== lastReportedError) {
+            lastReportedError = key;
+            first.input.reportValidity();
+        }
+    };
+    document.addEventListener('input', (e) => {
+        if (e.target && typeof e.target.setCustomValidity === 'function') e.target.setCustomValidity('');
+    });
+
+    // Refresh the saved-key placeholders. A key input is cleared only if it
+    // is empty or still holds the key that was just saved, never while the
+    // user is typing a different one.
+    const refreshSecretStates = (sentKeys) => {
+        if (!window.electronAPI || !window.electronAPI.getSettings) return;
+        window.electronAPI.getSettings().then((settings) => {
+            secretInputs.forEach((input) => {
+                const current = input.value.trim();
+                if (current && current !== sentKeys[input.id]) return;
+                showSecretState(input, settings[input.id]);
+            });
+        }).catch((error) => console.error('Failed to refresh settings:', error));
+    };
+
+    // Send settings to main and report the result.
+    const sendSettings = (settings) => {
+        if (!window.electronAPI || !window.electronAPI.saveSettings) return Promise.resolve(null);
+        const sentKeys = {};
+        secretInputs.forEach((input) => {
+            if (settings[input.id] !== undefined) sentKeys[input.id] = settings[input.id];
+        });
+        return window.electronAPI.saveSettings(settings).then((result) => {
+            if (result && result.success === false) {
+                showSaveError(result);
+                // A rejected key stays in its field for the user to fix. With
+                // no per-field list nothing was saved, so no key is cleared.
+                if (!Array.isArray(result.errors)) {
+                    Object.keys(sentKeys).forEach((k) => delete sentKeys[k]);
+                }
+                (Array.isArray(result.errors) ? result.errors : []).forEach((e) => {
+                    if (e && e.field) delete sentKeys[e.field];
+                });
+            } else {
+                lastReportedError = '';
+                clearSaveErrors();
+            }
+            if (Object.keys(sentKeys).length > 0) refreshSecretStates(sentKeys);
+            return result;
+        }).catch((error) => {
+            showSaveError({ error: error && error.message });
+            return null;
+        });
+    };
+
     // Check if window.api exists
     if (!window.api) {
         console.error('window.api not available');
@@ -86,7 +188,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Always set the input value, even if empty, so the user sees what's
         // currently configured (including env-derived defaults). Previously
         // empty strings were skipped which left stale UI values.
-        if (azureKeyInput) azureKeyInput.value = settings.azureKey || '';
         if (azureRegionInput) azureRegionInput.value = settings.azureRegion || '';
         if (whisperCommandInput) whisperCommandInput.value = settings.whisperCommand || '';
         if (whisperModelInput) whisperModelInput.value = settings.whisperModel || '';
@@ -95,10 +196,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (whisperCaptureModeSelect) whisperCaptureModeSelect.value = settings.whisperCaptureMode || 'vad';
         if (whisperResponseTargetSelect) whisperResponseTargetSelect.value = settings.whisperResponseTarget || 'both';
         if (whisperSegmentMsInput) whisperSegmentMsInput.value = settings.whisperSegmentMs || '';
-        if (geminiKeyInput) geminiKeyInput.value = settings.geminiKey || '';
+        secretInputs.forEach((input) => showSecretState(input, settings[input.id]));
         if (settings.llmProvider && llmProviderSelect) llmProviderSelect.value = settings.llmProvider;
         llmFieldInputs.forEach((input) => {
-            input.value = settings[input.id] || '';
+            if (!isSecretInput(input)) input.value = settings[input.id] || '';
         });
         // Show each provider's default model as the placeholder.
         if (Array.isArray(settings.llmProviders)) {
@@ -139,13 +240,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Listen for settings window shown event
-    if (window.electronAPI && window.electronAPI.receive) {
-        window.electronAPI.receive('settings-window-shown', () => {
+    if (window.electronAPI && window.electronAPI.onSettingsWindowShown) {
+        window.electronAPI.onSettingsWindowShown(() => {
             requestCurrentSettings();
         });
 
     // Listen for coding language changes from other windows via helper
-    window.electronAPI.onCodingLanguageChanged((event, data) => {
+    window.electronAPI.onCodingLanguageChanged((data) => {
             if (data && data.language && codingLanguageSelect) {
                 codingLanguageSelect.value = data.language;
                 console.log('Language updated from overlay window:', data.language);
@@ -157,7 +258,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveSettings = () => {
         const settings = {};
         if (speechProviderSelect) settings.speechProvider = speechProviderSelect.value;
-        if (azureKeyInput) settings.azureKey = azureKeyInput.value;
         if (azureRegionInput) settings.azureRegion = azureRegionInput.value;
         if (whisperCommandInput) settings.whisperCommand = whisperCommandInput.value;
         if (whisperModelInput) settings.whisperModel = whisperModelInput.value;
@@ -166,16 +266,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (whisperCaptureModeSelect) settings.whisperCaptureMode = whisperCaptureModeSelect.value;
         if (whisperResponseTargetSelect) settings.whisperResponseTarget = whisperResponseTargetSelect.value;
         if (whisperSegmentMsInput) settings.whisperSegmentMs = whisperSegmentMsInput.value;
-        if (geminiKeyInput) settings.geminiKey = geminiKeyInput.value;
         if (llmProviderSelect) settings.llmProvider = llmProviderSelect.value;
         llmFieldInputs.forEach((input) => {
-            settings[input.id] = input.value;
+            if (!isSecretInput(input)) settings[input.id] = input.value;
+        });
+        // Keys only when the user typed a new one; empty keeps the saved key.
+        secretInputs.forEach((input) => {
+            const key = input.value.trim();
+            if (key) settings[input.id] = key;
         });
         if (windowGapInput) settings.windowGap = windowGapInput.value;
         if (codingLanguageSelect) settings.codingLanguage = codingLanguageSelect.value;
         if (activeSkillSelect) settings.activeSkill = activeSkillSelect.value;
-        
-        window.api.send('save-settings', settings);
+
+        sendSettings(settings);
     };
 
     const updateSpeechFieldStates = () => {
@@ -260,7 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const lang = e.target.value;
             // use electronAPI so main broadcast is consistent
             if (window.electronAPI && window.electronAPI.saveSettings) {
-                window.electronAPI.saveSettings({ codingLanguage: lang });
+                sendSettings({ codingLanguage: lang });
             } else {
                 // fallback
                 saveSettings();
@@ -348,7 +452,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 iconElement.classList.add('selected');
                 
                 // Save the selection - this should trigger the app icon change
-                window.api.send('save-settings', { selectedIcon: icon.key });
+                sendSettings({ selectedIcon: icon.key });
                 
                 // Show visual feedback
                 iconElement.style.transform = 'scale(0.95)';
