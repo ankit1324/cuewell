@@ -1,10 +1,20 @@
-// Global variables
-let currentLayout = 'split';
+// Answer window (llm-response.html).
+//
+// The page shows one of three views, stacked in the same place so switching
+// never changes the layout: "empty" (nothing asked yet), "loading"
+// ("Thinking…") and "answer". Views and the two answer layouts (text + code
+// side by side, or one full-width panel) cross-fade instead of popping in.
+//
+// Main numbers every show-loading and display-llm-response message (seq).
+// After drawing one, the page reports back through resizeLlmWindowForContent
+// ({ phase, seq, height }): a hidden window is revealed only once its new
+// state is on screen, and the final answer's height lets main fit the window
+// once. Nothing is resized while text streams.
+
 let hasCode = false;
-let currentSkill = 'dsa';
-let isInteractive = false;
-let scrollableElements = [];
-let initialized = false;
+let view = 'empty';
+let layout = null;            // 'split' | 'full' | null (nothing rendered yet)
+let lastSeq = null;           // seq of the latest message from main
 
 // Syntax highlighting is throttled so repeated renders stay smooth:
 // at most once every HIGHLIGHT_INTERVAL_MS, plus a trailing run after
@@ -18,8 +28,9 @@ let lastHighlightAt = 0;
 // display-llm-response) or an error (llm-error and an isError
 // display-llm-response). The window shows the latest request that started
 // and ignores events for older ones. While text streams, the markdown is
-// re-rendered at most every STREAM_RENDER_INTERVAL_MS; Prism, copy buttons
-// and the window resize wait for the final answer.
+// re-rendered at most every STREAM_RENDER_INTERVAL_MS, and only the blocks
+// that changed are replaced; Prism and the copy buttons wait for the final
+// answer.
 const STREAM_RENDER_INTERVAL_MS = 80;
 let stream = null;            // { id, text, rendered, finished }
 let streamRenderTimer = null;
@@ -28,102 +39,248 @@ let lastStreamRenderAt = 0;
 // on two channels; the second one is not rendered again.
 let shownFinalKey = null;
 
-// Immediate logging to verify script execution
-console.log('[LLM-RESPONSE] Script tag executed');
+// "Thinking…" turns into a note that the provider is slow after this long.
+const SLOW_PROVIDER_MS = 15000;
+let slowTimer = null;
 
-window.onerror = function(msg, url, line, col, error) {
-    console.error('[LLM-RESPONSE] Window error:', msg, 'at line', line);
-    return false;
-};
+const EMPTY_ANSWER_MESSAGE = 'No answer came back from the AI provider. Try asking again.';
+const FAILED_REQUEST_MESSAGE = 'The AI request failed. Try asking again.';
 
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('[LLM-RESPONSE] DOMContentLoaded fired');
-    initLLMResponseWindow();
+window.addEventListener('error', (event) => {
+    console.error('[LLM-RESPONSE] Page error:', event.message, 'at line', event.lineno);
 });
 
-// Also try immediate init in case DOMContentLoaded already fired
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    console.log('[LLM-RESPONSE] Document already ready, initializing now');
-    setTimeout(initLLMResponseWindow, 0);
+initAnswerWindow();
+
+function initAnswerWindow() {
+    if (typeof window.renderMarkdown !== 'function') {
+        console.error('[LLM-RESPONSE] Markdown renderer missing; answers are shown as plain text');
+    }
+
+    const api = window.electronAPI;
+    if (!api) {
+        console.error('[LLM-RESPONSE] electronAPI not available');
+        return;
+    }
+
+    api.onShowLoading((_event, data) => {
+        const info = messageInfo(data);
+        if (info.appearing) holdAppear();
+        resetStreamDisplay();
+        showLoadingState({ instant: info.appearing });
+        reportDrawn('loading');
+    });
+
+    api.onTranscriptionLlmResponseStart((_event, data) => onStreamStart(data));
+    api.onTranscriptionLlmResponseChunk((_event, data) => onStreamChunk(data));
+
+    // Final answer and errors tied to the current request. They arrive
+    // before (or, while the screen is shared, instead of) the
+    // display-llm-response below.
+    api.onTranscriptionLlmResponse((_event, data) => {
+        if (!data || !isOpenStream(data.messageId)) return;
+        const response = typeof data.response === 'string' ? data.response : '';
+        if (showFinal(response, false)) reportDrawn('final');
+    });
+    api.onLlmError((_event, data) => {
+        if (!data || !isOpenStream(data.messageId)) return;
+        if (showFinal(String(data.error || FAILED_REQUEST_MESSAGE), true)) reportDrawn('final');
+    });
+
+    // The final answer or error to show (also for screenshot errors that
+    // have no stream). Always reported, even when nothing changes, because
+    // a hidden window waits for it.
+    api.onDisplayLlmResponse((_event, data) => {
+        const info = messageInfo(data);
+        if (info.appearing) holdAppear();
+        // The height is reported only when this message is what the window
+        // now shows for good; main fits the window to it.
+        let settled = false;
+        try {
+            if (!data || typeof data !== 'object') return;
+            const metadata = data.metadata || {};
+            // An answer to an older request than the one being shown.
+            if (metadata.messageId && stream && metadata.messageId !== stream.id) return;
+            const response = typeof data.content === 'string' ? data.content : '';
+            // Without a messageId (a screenshot that failed before it
+            // started) the message is shown, but an answer still
+            // streaming keeps going and replaces it.
+            const endsStream = !!metadata.messageId || !stream || stream.finished;
+            showFinal(response, !!metadata.isError, { endsStream, instant: info.appearing });
+            settled = endsStream;
+        } catch (err) {
+            console.error('[LLM-RESPONSE] Could not show the answer:', err && err.message);
+        } finally {
+            reportDrawn('final', { measure: settled });
+        }
+    });
 }
 
-function initLLMResponseWindow() {
-    if (initialized) return;
-    initialized = true;
+// seq and appearing from a show-loading or display-llm-response message.
+function messageInfo(data) {
+    if (data && Number.isSafeInteger(data.seq)) lastSeq = data.seq;
+    return { appearing: !!(data && data.appearing === true) };
+}
 
-    console.log('[LLM-RESPONSE] Initializing window...');
+// ---------- Views ----------
 
-    // Markdown comes from src/ui/markdown-render.js (marked); Prism
-    // highlighting runs afterwards on the sanitized DOM (scheduleHighlight).
-    if (typeof window.renderMarkdown !== 'function') {
-        console.error('[LLM-RESPONSE] no markdown renderer available, falling back to plain text');
+// Switch the visible view. `instant` skips the cross-fade (the window is
+// not on screen yet, so there is nothing to fade from).
+function setView(next, { instant = false } = {}) {
+    const ids = { empty: 'empty-state', loading: 'loading', answer: 'response-content' };
+    const els = Object.keys(ids).map(name => document.getElementById(ids[name]));
+    if (instant) suspendTransitions(els.concat(document.getElementById('answer-status')));
+    Object.keys(ids).forEach((name, index) => {
+        const el = els[index];
+        if (!el) return;
+        const on = name === next;
+        el.classList.toggle('is-off', !on);
+        if (on) el.removeAttribute('aria-hidden'); else el.setAttribute('aria-hidden', 'true');
+    });
+    view = next;
+}
+
+// Text + code side by side ('split'), or one full-width panel ('full').
+function setLayout(next, { instant = false } = {}) {
+    if (layout === next) return;
+    const split = document.getElementById('split-layout');
+    const full = document.getElementById('full-content');
+    if (instant) suspendTransitions([split, full]);
+    if (split) split.classList.toggle('is-off', next !== 'split');
+    if (full) full.classList.toggle('is-off', next !== 'full');
+    layout = next;
+}
+
+// Apply the class changes made to `elements` in this task without
+// transitions: they keep .no-motion until the new state has been styled.
+function suspendTransitions(elements) {
+    const list = elements.filter(Boolean);
+    list.forEach(el => el.classList.add('no-motion'));
+    requestAnimationFrame(() => {
+        void document.body.offsetHeight; // apply the new state first
+        list.forEach(el => el.classList.remove('no-motion'));
+    });
+}
+
+function showLoadingState({ instant = false } = {}) {
+    shownFinalKey = null;
+    setLoadingText(false);
+    setView('loading', { instant });
+    setStatusLabel('Thinking');
+    startSlowHint();
+}
+
+function startSlowHint() {
+    stopSlowHint();
+    slowTimer = setTimeout(() => {
+        slowTimer = null;
+        if (view === 'loading') setLoadingText(true);
+    }, SLOW_PROVIDER_MS);
+}
+
+function stopSlowHint() {
+    if (slowTimer) {
+        clearTimeout(slowTimer);
+        slowTimer = null;
     }
+}
 
-    console.log('[LLM-RESPONSE] electronAPI exists:', !!window.electronAPI);
-    console.log('[LLM-RESPONSE] onDisplayLlmResponse method:', typeof window.electronAPI?.onDisplayLlmResponse);
+function setLoadingText(slow) {
+    const text = document.getElementById('loading-text');
+    const hint = document.getElementById('loading-hint');
+    if (text) text.textContent = slow ? 'Still thinking…' : 'Thinking…';
+    if (hint) hint.classList.toggle('is-off', !slow);
+}
 
-    // Set up event listeners using electronAPI from preload script
-    if (window.electronAPI) {
-        console.log('[LLM-RESPONSE] Setting up IPC listeners...');
+// Header status label: "Thinking" while loading, "Writing" while an answer
+// streams, faded out otherwise (the last text stays so it can fade).
+function setStatusLabel(text) {
+    const status = document.getElementById('answer-status');
+    if (!status) return;
+    if (text) status.textContent = text;
+    status.classList.toggle('is-off', !text);
+}
 
-        // Set up show-loading event listener
-        window.electronAPI.onShowLoading(() => {
-            console.log('[LLM-RESPONSE] show-loading received');
-            showLoadingState();
-        });
+// ---------- Window appear ----------
 
-        window.electronAPI.onTranscriptionLlmResponseStart((_event, data) => onStreamStart(data));
-        window.electronAPI.onTranscriptionLlmResponseChunk((_event, data) => onStreamChunk(data));
+// The window is about to appear: put the page in the first frame of the
+// appear animation and hold it there until main has shown the window.
+let appearReleaseTimer = null;
+function holdAppear() {
+    const surface = document.querySelector('.main-container');
+    if (!surface) return;
+    surface.classList.remove('oc-appear', 'is-held');
+    void surface.offsetWidth; // restart the animation
+    surface.classList.add('oc-appear', 'is-held');
+    if (appearReleaseTimer) clearTimeout(appearReleaseTimer);
+    // Never stay held, even if main does not answer.
+    appearReleaseTimer = setTimeout(releaseAppear, 400);
+}
 
-        // Final answer and errors tied to the current request. They arrive
-        // before (or, while the screen is shared, instead of) the
-        // display-llm-response below.
-        window.electronAPI.onTranscriptionLlmResponse((_event, data) => {
-            if (!data || !isOpenStream(data.messageId)) return;
-            if (typeof data.response === 'string' && data.response) {
-                showFinal(data.response, false);
-            } else {
-                endStream();
-                hideLoadingState();
-            }
-        });
-        window.electronAPI.onLlmError((_event, data) => {
-            if (!data || !isOpenStream(data.messageId)) return;
-            showFinal(String(data.error || 'The AI request failed.'), true);
-        });
+function releaseAppear() {
+    if (appearReleaseTimer) {
+        clearTimeout(appearReleaseTimer);
+        appearReleaseTimer = null;
+    }
+    const surface = document.querySelector('.main-container');
+    if (surface) surface.classList.remove('is-held');
+}
 
-        // The final answer or error to show (also for screenshot errors that
-        // have no stream).
-        window.electronAPI.onDisplayLlmResponse((_event, data) => {
-            try {
-                if (!data || typeof data !== 'object') return;
-                const metadata = data.metadata || {};
-                // An answer to an older request than the one being shown.
-                if (metadata.messageId && stream && metadata.messageId !== stream.id) return;
+document.addEventListener('animationend', (event) => {
+    const surface = document.querySelector('.main-container');
+    if (!surface || !surface.classList.contains('oc-appear')) return;
+    if (event.target === surface || event.target.parentElement === surface) {
+        surface.classList.remove('oc-appear', 'is-held');
+    }
+});
 
-                const response = data.content || data.response;
-                if (!response || typeof response !== 'string') {
-                    console.error('[LLM-RESPONSE] No response content found!');
-                    if (metadata.messageId) endStream();
-                    hideLoadingState();
-                    return;
-                }
-                // Without a messageId (a screenshot that failed before it
-                // started) the message is shown, but an answer still
-                // streaming keeps going and replaces it.
-                const endsStream = !!metadata.messageId || !stream || stream.finished;
-                showFinal(response, !!metadata.isError, endsStream);
-            } catch (err) {
-                console.error('[LLM-RESPONSE] Error in handler:', err.message, err.stack);
-                hideLoadingState();
-            }
-        });
+// Tell main that the current state is drawn: after two animation frames the
+// new frame has been produced. A final answer that is on screen for good
+// (`measure`) also carries the window height its content needs; without it
+// main only reveals a window that is waiting, and resizes nothing.
+function reportDrawn(phase, { measure = phase === 'final' } = {}) {
+    const seq = lastSeq;
+    const api = window.electronAPI;
+    if (seq === null || !api || typeof api.resizeLlmWindowForContent !== 'function') {
+        releaseAppear();
+        return;
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        const report = { phase, seq };
+        if (phase === 'final' && measure) report.height = neededWindowHeight();
+        Promise.resolve()
+            .then(() => api.resizeLlmWindowForContent(report))
+            .catch(error => console.error('[LLM-RESPONSE] Could not report the answer size:', error && error.message))
+            .finally(releaseAppear);
+    }));
+}
 
-        console.log('[LLM-RESPONSE] IPC listeners set up successfully');
+// Height of the title bar plus what the visible view needs, in CSS pixels.
+function neededWindowHeight() {
+    const header = document.querySelector('.window-header');
+    const headerHeight = header ? header.getBoundingClientRect().height : 40;
+    const measure = (content, scroller) => {
+        if (!content || !scroller) return 0;
+        const style = getComputedStyle(scroller);
+        return content.getBoundingClientRect().height +
+            (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+    };
+    let contentHeight;
+    if (view === 'answer' && layout === 'split') {
+        contentHeight = Math.max(
+            measure(document.getElementById('text-content'), document.querySelector('.text-panel .panel-content')),
+            measure(document.getElementById('code-content'), document.querySelector('.code-panel .panel-content'))
+        );
+    } else if (view === 'answer') {
+        contentHeight = measure(document.getElementById('full-markdown'), document.querySelector('.full-content-inner'));
     } else {
-        console.error('[LLM-RESPONSE] electronAPI not available!');
+        const el = document.getElementById(view === 'loading' ? 'loading' : 'empty-state');
+        contentHeight = el ? el.scrollHeight : 0;
     }
-} // end initLLMResponseWindow
+    return Math.ceil(headerHeight + contentHeight);
+}
+
+// ---------- Streams ----------
 
 // True when messageId is the request being shown and it has not ended yet.
 function isOpenStream(messageId) {
@@ -142,15 +299,20 @@ function endStream() {
     if (stream) stream.finished = true;
 }
 
-function onStreamStart(data) {
-    const id = data && typeof data.messageId === 'string' ? data.messageId : '';
-    if (!id) return;
+// A new loading state: whatever the previous request still had queued must
+// not draw over it.
+function resetStreamDisplay() {
     cancelStreamRender();
-    // A trailing highlight from the previous answer must not run on this one.
     if (highlightTimer) {
         clearTimeout(highlightTimer);
         highlightTimer = null;
     }
+}
+
+function onStreamStart(data) {
+    const id = data && typeof data.messageId === 'string' ? data.messageId : '';
+    if (!id) return;
+    resetStreamDisplay();
     stream = { id, text: '', rendered: false, finished: false };
     shownFinalKey = null;
 }
@@ -188,73 +350,42 @@ function renderStreamNow() {
     if (!stream || stream.finished || !stream.text) return;
     lastStreamRenderAt = Date.now();
     const first = !stream.rendered;
-    const hadCode = hasCode;
+    stream.rendered = true;
+    // The first text replaces "Thinking…" and starts at the top.
+    renderAnswer(stream.text, { isError: false, final: false, fresh: first });
     if (first) {
-        // The first text replaces "Thinking…".
-        stream.rendered = true;
-        hideLoadingState();
+        stopSlowHint();
+        setView('answer');
     }
     setStatusLabel('Writing');
-    renderAnswer(stream.text, { isError: false, final: false, follow: true });
-    // Keyboard scrolling follows the layout (text only, or text + code).
-    if (first || hadCode !== hasCode) setupScrolling(false);
 }
 
 // Show the final answer or error. Replaces whatever is on screen: the
-// streamed text, "Thinking…" (a request that sent no chunks) or an older answer.
-function showFinal(text, isError, endsStream = true) {
+// streamed text, "Thinking…" (a request that sent no chunks) or an older
+// answer. Returns false when it was already on screen.
+function showFinal(text, isError, { endsStream = true, instant = false } = {}) {
     const streamed = !!(stream && !stream.finished && stream.rendered);
     if (endsStream) endStream();
-    const key = (isError ? 'error:' : 'answer:') + text;
-    const responseElement = document.getElementById('response-content');
-    const visible = !!responseElement && !responseElement.classList.contains('hidden');
-    hideLoadingState();
-    if (key === shownFinalKey && visible) return;
+    stopSlowHint();
+    let body = typeof text === 'string' ? text : '';
+    if (!body.trim()) {
+        body = EMPTY_ANSWER_MESSAGE;
+        isError = true;
+    }
+    const key = (isError ? 'error:' : 'answer:') + body;
+    if (key === shownFinalKey && view === 'answer') {
+        setStatusLabel(null);
+        return false;
+    }
     shownFinalKey = key;
     // A streamed answer keeps the reader's scroll position; a new one starts at the top.
-    renderAnswer(text, { isError, final: true, follow: streamed });
-    setupScrolling(!streamed);
-    setTimeout(verifyDisplayState, 500);
-}
-
-function showLoadingState() {
-    const loadingElement = document.getElementById('loading');
-    const responseElement = document.getElementById('response-content');
-
-    if (loadingElement) {
-        loadingElement.classList.remove('hidden');
-        loadingElement.style.display = ''; // Remove any forced display styles
-    }
-
-    if (responseElement) {
-        responseElement.classList.add('hidden');
-    }
-
-    shownFinalKey = null;
-    setStatusLabel('Thinking');
-    console.log('Loading state shown - should see Thinking...');
-}
-
-function hideLoadingState() {
-    const loadingElement = document.getElementById('loading');
-    if (loadingElement) {
-        loadingElement.classList.add('hidden');
-        loadingElement.style.display = 'none'; // Force hide
-        console.log('Loading state hidden');
-    } else {
-        console.error('Loading element not found!');
-    }
+    renderAnswer(body, { isError, final: true, fresh: !streamed, instant });
+    setView('answer', { instant });
     setStatusLabel(null);
+    return true;
 }
 
-// Header status label: "Thinking" while #loading shows, "Writing" while an
-// answer streams, hidden otherwise.
-function setStatusLabel(text) {
-    const status = document.getElementById('answer-status');
-    if (!status) return;
-    if (text) status.textContent = text;
-    status.classList.toggle('hidden', !text);
-}
+// ---------- Rendering ----------
 
 // The panels that scroll: text and code (split layout) and the full view.
 function scrollContainers() {
@@ -265,18 +396,27 @@ function scrollContainers() {
     ].filter(el => el !== null);
 }
 
-// Hidden panels count as at the bottom, so one that appears mid-stream
-// follows the text from the start.
-function isAtBottom(el) {
-    return el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+// A panel the reader has scrolled to the bottom of keeps following the
+// text. One still at the top stays there, so the first line (the one to
+// say first) does not scroll away while the rest streams in.
+function isFollowing(el) {
+    return el.scrollTop > 0 && el.scrollHeight - el.scrollTop - el.clientHeight < 24;
 }
 
-// One gentle rise-in when an answer first appears (not on re-renders).
-function playRise(element) {
-    if (!element) return;
-    element.classList.remove('oc-rise');
-    void element.offsetWidth; // restart the animation
-    element.classList.add('oc-rise');
+// Make target's children match `html`, keeping the leading children that
+// are already identical. While an answer streams only the last block or two
+// change, so the blocks above are never redrawn and cannot jump.
+function patchChildren(target, html, { math = false } = {}) {
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    const fragment = template.content;
+    if (math && window.renderMathInElement) window.renderMathInElement(fragment);
+    const current = Array.from(target.childNodes);
+    const next = Array.from(fragment.childNodes);
+    let same = 0;
+    while (same < current.length && same < next.length && current[same].isEqualNode(next[same])) same++;
+    for (let i = current.length - 1; i >= same; i--) target.removeChild(current[i]);
+    for (let i = same; i < next.length; i++) target.appendChild(next[i]);
 }
 
 function scheduleHighlight() {
@@ -298,7 +438,8 @@ function runHighlight() {
     const root = document.getElementById('response-content');
     if (!root || typeof Prism === 'undefined' || !Prism.highlightElement) return;
     // Only blocks that name a language; Prism would otherwise rewrite
-    // plain blocks for no visual gain.
+    // plain blocks for no visual gain. The page styles code the same before
+    // and after highlighting, so line heights do not change.
     root.querySelectorAll('pre code[class*="language-"]').forEach(codeEl => {
         try { Prism.highlightElement(codeEl); } catch (_) {}
     });
@@ -311,7 +452,7 @@ function normalizeLanguage(lang) {
     return aliases[l] || l.replace(/[^\w-]/g, '') || 'text';
 }
 
-// Display name for the code panel header; "CODE" when no language is given.
+// Display name for the code panel header; "Code" when no language is given.
 function languageLabel(lang) {
     const l = String(lang || '').toLowerCase();
     if (!l || l === 'text' || l === 'plain' || l === 'plaintext' || l === 'txt') return 'Code';
@@ -325,51 +466,26 @@ function renderAnswerMarkdown(text) {
     if (typeof window.renderMarkdown === 'function') {
         return window.renderMarkdown(text);
     }
-
     return escapeHtml(text).replace(/\n/g, '<br>');
 }
 
-function calculateContentMetrics(response, codeBlocks) {
-    // Count lines in the response
-    const lineCount = response.split('\n').length;
-
-    // Check for long lines (over 80 characters)
-    const hasLongLines = response.split('\n').some(line => line.length > 80);
-
-    // Count code blocks
-    const codeBlockCount = codeBlocks.length;
-
-    // Estimate content complexity
-    const hasCode = codeBlockCount > 0;
-    const isLongContent = lineCount > 30;
-    const hasMultipleCodeBlocks = codeBlockCount > 2;
-
-    return {
-        lineCount,
-        hasLongLines,
-        codeBlocks: codeBlockCount,
-        hasCode,
-        isLongContent,
-        hasMultipleCodeBlocks,
-        complexity: isLongContent || hasMultipleCodeBlocks ? 'high' : hasCode ? 'medium' : 'low'
-    };
-}
-
 // Render an answer: prose on the left and code on the right, or one panel
-// when there is no code. While streaming (final false) the code is shown
-// as plain text and nothing else runs; the final render adds copy buttons,
-// Prism highlighting and the window resize. With follow, panels that were
-// scrolled to the bottom stay there.
-function renderAnswer(response, { isError = false, final = true, follow = false } = {}) {
+// when there is no code. While streaming (final false) code is plain text;
+// the final render adds copy buttons and Prism highlighting. `fresh` (a new
+// answer) scrolls the panels back to the top before drawing; `instant`
+// switches the layout without a cross-fade.
+function renderAnswer(response, { isError = false, final = true, fresh = false, instant = false } = {}) {
     const responseElement = document.getElementById('response-content');
     if (!responseElement || !response) return;
 
     // Measured before the DOM changes.
-    const pinned = follow ? scrollContainers().filter(isAtBottom) : [];
-
-    if (responseElement.classList.contains('hidden')) {
-        responseElement.classList.remove('hidden');
-        playRise(responseElement);
+    const containers = scrollContainers();
+    const following = fresh ? [] : containers.filter(isFollowing);
+    if (fresh) {
+        containers.forEach(el => {
+            el.scrollTop = 0;
+            el.scrollLeft = 0;
+        });
     }
 
     // Split the response into its prose and its code blocks. A fence that
@@ -378,12 +494,13 @@ function renderAnswer(response, { isError = false, final = true, follow = false 
     hasCode = codeBlocks.length > 0;
 
     if (hasCode) {
-        // Split layout: text on left, code on right
-        displaySplitLayout(prose, codeBlocks, final);
+        renderSplitLayout(prose, codeBlocks, final);
     } else {
-        // Full layout: all content in one panel
-        displayFullLayout(prose, final);
+        renderFullLayout(prose, final);
     }
+    // The first code fence of a streamed answer switches to the split
+    // layout with a short cross-fade; behind "Thinking…" it is instant.
+    setLayout(hasCode ? 'split' : 'full', { instant: instant || view !== 'answer' });
 
     // Errors (e.g. screen capture failures) render as a callout.
     const errorTarget = document.getElementById(hasCode ? 'text-content' : 'full-markdown');
@@ -395,95 +512,7 @@ function renderAnswer(response, { isError = false, final = true, follow = false 
         if (on) el.setAttribute('role', 'alert'); else el.removeAttribute('role');
     });
 
-    pinned.forEach(el => el.scrollTo({ top: el.scrollHeight, behavior: 'instant' }));
-
-    if (!final) return;
-
-    // Request dynamic window sizing based on content
-    const contentMetrics = calculateContentMetrics(response, codeBlocks);
-    setTimeout(() => {
-        window.electronAPI.resizeLlmWindowForContent(contentMetrics)
-            .then(() => {
-                pinned.forEach(el => el.scrollTo({ top: el.scrollHeight, behavior: 'instant' }));
-            })
-            .catch(error => {
-                console.error('Failed to resize window:', error);
-            });
-    }, 200);
-}
-
-// resetPosition: scroll the panels back to the top (a new answer). A
-// streamed answer keeps where the reader is.
-function setupScrolling(resetPosition = true) {
-    // Set up scrollable elements based on current layout
-    setTimeout(() => {
-        if (hasCode) {
-            scrollableElements = [
-                document.querySelector('.text-panel .panel-content'),
-                document.querySelector('.code-panel .panel-content')
-            ].filter(el => el !== null);
-        } else {
-            scrollableElements = [
-                document.querySelector('.full-content-inner')
-            ].filter(el => el !== null);
-        }
-        // Reset scroll positions and ensure elements are focusable
-        scrollableElements.forEach(element => {
-            if (resetPosition) {
-                element.scrollTop = 0;
-                element.scrollLeft = 0;
-            }
-            element.setAttribute('tabindex', '0');
-        });
-
-        // Enable scrolling if interactive mode is on
-        if (isInteractive) {
-            enableScrolling();
-        }
-    }, 100);
-}
-
-function enableScrolling() {
-    scrollableElements.forEach(element => {
-        if (element) {
-            // Enable mouse/trackpad scrolling with smooth behavior
-            element.style.scrollBehavior = 'smooth';
-
-            // Add mouse enter handler to ensure focus for scrolling
-            element.addEventListener('mouseenter', handleMouseEnter, { passive: true });
-            element.addEventListener('mouseleave', handleMouseLeave, { passive: true });
-
-            // Add wheel event for enhanced scrolling
-            element.addEventListener('wheel', handleWheelScroll, { passive: false });
-
-        }
-    });
-}
-
-function disableScrolling() {
-    scrollableElements.forEach(element => {
-        if (element) {
-            element.removeEventListener('mouseenter', handleMouseEnter);
-            element.removeEventListener('mouseleave', handleMouseLeave);
-            element.removeEventListener('wheel', handleWheelScroll);
-        }
-    });
-}
-
-function handleMouseEnter(e) {
-    // Focus the element for keyboard scrolling and ensure it's ready for mouse scrolling
-    e.target.focus({ preventScroll: true });
-    e.target.style.cursor = 'grab';
-}
-
-function handleMouseLeave(e) {
-    e.target.style.cursor = 'default';
-}
-
-function handleWheelScroll(e) {
-    // Allow natural scrolling behavior
-    // Don't prevent default to maintain smooth native scrolling
-    console.log('Wheel scroll detected on element');
+    following.forEach(el => el.scrollTo({ top: el.scrollHeight, behavior: 'instant' }));
 }
 
 // Split an answer into its prose and its fenced code blocks (``` or ~~~
@@ -553,131 +582,91 @@ function splitCodeBlocks(text) {
 function attachCopy(btn, text) {
     btn.addEventListener('click', async (e) => {
         e.stopPropagation();
+        let ok = false;
         try {
-            let ok = false;
             if (window.electronAPI && typeof window.electronAPI.copyToClipboard === 'function') {
                 ok = await window.electronAPI.copyToClipboard(text);
             }
-            if (!ok) {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(text);
-                    ok = true;
-                } else {
-                    const ta = document.createElement('textarea');
-                    ta.value = text;
-                    document.body.appendChild(ta);
-                    ta.select();
-                    document.execCommand('copy');
-                    ta.remove();
-                    ok = true;
-                }
+            if (!ok && navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                ok = true;
             }
-            if (ok) {
-                btn.classList.add('copied');
-                const original = btn.textContent;
-                btn.textContent = 'Copied';
-                setTimeout(() => { btn.classList.remove('copied'); btn.textContent = original || 'Copy'; }, 1200);
-            }
-        } catch (err) { console.warn('Copy failed', err); }
-    })
-}
-
-function renderCopyButtonsInFullMarkdown(container) {
-    // Add copy buttons to all code blocks in full markdown view
-    const pres = container.querySelectorAll('pre');
-    pres.forEach(pre => {
-        // Avoid duplicate buttons
-        if (pre.querySelector('.copy-btn')) return;
-        const code = pre.querySelector('code');
-        const text = code ? code.textContent : pre.textContent;
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'copy-btn oc-btn oc-btn--ghost';
-        btn.textContent = 'Copy';
-        btn.setAttribute('aria-label', 'Copy code');
-        attachCopy(btn, text || '');
-        pre.style.position = 'relative';
-        pre.appendChild(btn);
+        } catch (err) {
+            console.warn('[LLM-RESPONSE] Copy failed', err && err.message);
+            ok = false;
+        }
+        flashButton(btn, ok ? 'Copied' : 'Copy failed', ok);
     });
 }
 
-function displaySplitLayout(textContent, codeBlocks, final = true) {
-    // Show split layout, hide full layout
-    document.getElementById('split-layout').classList.remove('hidden');
-    document.getElementById('full-content').classList.add('hidden');
-
-    // Render text content (the prose from splitCodeBlocks, fences already removed)
-    const textHtml = sanitizeHtml(renderAnswerMarkdown(textContent));
-    document.getElementById('text-content').innerHTML = textHtml;
-    if (window.renderMathInElement) window.renderMathInElement(document.getElementById('text-content'));
-
-    // Render code blocks
-    const codeContainer = document.getElementById('code-content');
-    codeContainer.innerHTML = '';
-
-    if (codeBlocks.length === 0) {
-        codeContainer.innerHTML = '<div class="no-code">No code examples found</div>';
-    } else {
-        codeBlocks.forEach((block, index) => {
-            const codeBlock = document.createElement('div');
-            codeBlock.className = 'code-block';
-            codeBlock.innerHTML = `
-                <div class="code-header"><span class="oc-label">${escapeHtml(languageLabel(block.language))}</span></div>
-                <div class="code-content">
-                    <pre><code class="language-${escapeHtml(normalizeLanguage(block.language))}">${escapeHtml(block.code)}</code></pre>
-                </div>
-            `;
-            // Copy buttons only on the final answer: mid-stream the code
-            // is still incomplete.
-            if (final) {
-                const btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'copy-btn oc-btn oc-btn--ghost';
-                btn.textContent = 'Copy';
-                btn.setAttribute('aria-label', 'Copy code');
-                attachCopy(btn, block.code || '');
-                codeBlock.querySelector('.code-header').appendChild(btn);
-            }
-
-            codeContainer.appendChild(codeBlock);
-        });
-    }
-
-    // Highlight code once, on the final answer (throttled)
-    if (final) scheduleHighlight();
+function flashButton(btn, label, ok) {
+    if (btn._resetTimer) clearTimeout(btn._resetTimer);
+    btn.classList.toggle('copied', ok);
+    btn.textContent = label;
+    btn._resetTimer = setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.textContent = 'Copy';
+        btn._resetTimer = null;
+    }, 1200);
 }
 
-function displayFullLayout(text, final = true) {
-    // Show full layout, hide split layout
-    document.getElementById('split-layout').classList.add('hidden');
-    document.getElementById('full-content').classList.remove('hidden');
+function makeCopyButton(text) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copy-btn oc-btn oc-btn--ghost';
+    btn.textContent = 'Copy';
+    btn.setAttribute('aria-label', 'Copy code');
+    attachCopy(btn, text || '');
+    return btn;
+}
 
-    // Render full markdown (the prose from splitCodeBlocks, so an empty
-    // fence leaves no stray language word here either)
-    const html = sanitizeHtml(renderAnswerMarkdown(text));
-    const full = document.getElementById('full-markdown');
-    full.innerHTML = html;
-    if (window.renderMathInElement) window.renderMathInElement(full);
+// The code panel's markup. Identical while streaming and at the end, so
+// blocks that are already complete are kept as they are.
+function codeBlocksHtml(codeBlocks) {
+    return codeBlocks.map(block =>
+        '<div class="code-block">' +
+            '<div class="code-header"><span class="oc-label">' + escapeHtml(languageLabel(block.language)) + '</span></div>' +
+            '<div class="code-content"><pre><code class="language-' + escapeHtml(normalizeLanguage(block.language)) + '">' +
+                escapeHtml(block.code) +
+            '</code></pre></div>' +
+        '</div>'
+    ).join('');
+}
+
+function renderSplitLayout(textContent, codeBlocks, final) {
+    const textEl = document.getElementById('text-content');
+    const codeEl = document.getElementById('code-content');
+    if (!textEl || !codeEl) return;
+
+    // The prose from splitCodeBlocks, fences already removed.
+    patchChildren(textEl, sanitizeHtml(renderAnswerMarkdown(textContent)), { math: true });
+    patchChildren(codeEl, codeBlocksHtml(codeBlocks));
 
     if (!final) return;
-
-    // Highlight any code if Prism is available (throttled)
+    // Copy buttons only on the final answer: mid-stream the code is still
+    // incomplete. The header is as tall as the button, so nothing shifts.
+    codeEl.querySelectorAll('.code-block').forEach((blockEl, index) => {
+        const header = blockEl.querySelector('.code-header');
+        if (!header || header.querySelector('.copy-btn') || !codeBlocks[index]) return;
+        header.appendChild(makeCopyButton(codeBlocks[index].code));
+    });
     scheduleHighlight();
+}
 
-    // Add copy buttons to code blocks in full view
-    const pres = full.querySelectorAll('pre');
-    pres.forEach(pre => {
+function renderFullLayout(text, final) {
+    const full = document.getElementById('full-markdown');
+    if (!full) return;
+    // The prose from splitCodeBlocks, so an empty fence leaves no stray
+    // language word here either.
+    patchChildren(full, sanitizeHtml(renderAnswerMarkdown(text)), { math: true });
+
+    if (!final) return;
+    scheduleHighlight();
+    // Copy buttons for indented code blocks, placed over the block.
+    full.querySelectorAll('pre').forEach(pre => {
         if (pre.querySelector('.copy-btn')) return;
         const code = pre.querySelector('code');
-        const text = code ? code.textContent : pre.textContent;
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'copy-btn oc-btn oc-btn--ghost';
-        btn.textContent = 'Copy';
-        btn.setAttribute('aria-label', 'Copy code');
-        attachCopy(btn, text || '');
-        pre.style.position = 'relative';
-        pre.appendChild(btn);
+        pre.appendChild(makeCopyButton(code ? code.textContent : pre.textContent));
     });
 }
 
@@ -689,134 +678,28 @@ function escapeHtml(text) {
     return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// ---------- Closing ----------
 
-// Handle window focus
-window.addEventListener('focus', () => {
-    console.log('LLM Response window focused');
-});
-
-// Handle window close
-window.addEventListener('beforeunload', () => {
-    console.log('LLM Response window closing');
-});
-
-// Add keyboard scrolling support for when interactive
-document.addEventListener('keydown', (e) => {
-    if (!isInteractive) return;
-
-    const activeElement = document.activeElement;
-    let targetElement = null;
-
-    // Find the currently focused scrollable element
-    for (let element of scrollableElements) {
-        if (element === activeElement || element.contains(activeElement)) {
-            targetElement = element;
-            break;
+function closeAnswerWindow() {
+    try {
+        if (window.electronAPI && window.electronAPI.closeWindow) {
+            Promise.resolve(window.electronAPI.closeWindow()).catch(() => window.close());
+        } else {
+            window.close();
         }
-    }
-
-    // Default to first scrollable element if none focused
-    if (!targetElement && scrollableElements.length > 0) {
-        targetElement = scrollableElements[0];
-    }
-
-    if (!targetElement) return;
-
-    const scrollAmount = 50; // Pixels to scroll
-
-    switch(e.key) {
-        case 'ArrowUp':
-            e.preventDefault();
-            targetElement.scrollBy({ top: -scrollAmount, behavior: 'smooth' });
-            break;
-        case 'ArrowDown':
-            e.preventDefault();
-            targetElement.scrollBy({ top: scrollAmount, behavior: 'smooth' });
-            break;
-        case 'ArrowLeft':
-            e.preventDefault();
-            targetElement.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
-            break;
-        case 'ArrowRight':
-            e.preventDefault();
-            targetElement.scrollBy({ left: scrollAmount, behavior: 'smooth' });
-            break;
-        case 'PageUp':
-            e.preventDefault();
-            targetElement.scrollBy({ top: -targetElement.clientHeight * 0.8, behavior: 'smooth' });
-            break;
-        case 'PageDown':
-            e.preventDefault();
-            targetElement.scrollBy({ top: targetElement.clientHeight * 0.8, behavior: 'smooth' });
-            break;
-        case 'Home':
-            e.preventDefault();
-            targetElement.scrollTo({ top: 0, behavior: 'smooth' });
-            break;
-        case 'End':
-            e.preventDefault();
-            targetElement.scrollTo({ top: targetElement.scrollHeight, behavior: 'smooth' });
-            break;
-    }
-});
-
-// Add verification function to ensure content is properly displayed
-function verifyDisplayState() {
-    // A newer request is loading or streaming; its own events set the display.
-    if (stream && !stream.finished) return;
-    const loadingElement = document.getElementById('loading');
-    const responseElement = document.getElementById('response-content');
-
-    const isLoadingHidden = loadingElement ? loadingElement.classList.contains('hidden') : true;
-    const isContentVisible = responseElement ? !responseElement.classList.contains('hidden') : false;
-
-    console.log('Display state verification:', {
-        loadingHidden: isLoadingHidden,
-        contentVisible: isContentVisible,
-        windowVisible: !document.hidden
-    });
-
-    if (!isLoadingHidden || !isContentVisible) {
-        console.warn('Display state inconsistent - forcing correction');
-        if (loadingElement) {
-            loadingElement.classList.add('hidden');
-            loadingElement.style.display = 'none';
-        }
-        if (responseElement) {
-            responseElement.classList.remove('hidden');
-        }
-        setStatusLabel(null);
+    } catch (_) {
+        try { window.close(); } catch (__) {}
     }
 }
 
-// Add global debugging function
-window.debugLLMWindow = function() {
-    console.log('=== LLM Window Debug Info ===');
-    console.log('Current layout:', currentLayout);
-    console.log('Has code:', hasCode);
-    console.log('Is interactive:', isInteractive);
-    console.log('Scrollable elements:', scrollableElements.length);
-
-    const loadingElement = document.getElementById('loading');
-    const responseElement = document.getElementById('response-content');
-};
-
-// Close button handler
-(function(){
+(function () {
     const btn = document.getElementById('close-window-btn');
-    if (btn) {
-        btn.addEventListener('click', () => {
-            try {
-                if (window.electronAPI && window.electronAPI.closeWindow) {
-                    window.electronAPI.closeWindow();
-                } else if (window.api && window.api.send) {
-                    window.api.send('quit-app');
-                } else {
-                    window.close();
-                }
-            } catch (e) {
-                try { window.close(); } catch (_) {}
-            }
-        });
-    }
+    if (btn) btn.addEventListener('click', closeAnswerWindow);
+    // Escape closes the panel when it has keyboard focus.
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !e.defaultPrevented) {
+            e.preventDefault();
+            closeAnswerWindow();
+        }
+    });
 })();
