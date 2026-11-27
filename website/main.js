@@ -514,9 +514,64 @@
     applyMotionPref();
   }
 
+  /* ---------- Animated app icon ---------- */
+
+  /* Plays only while on screen and when motion is allowed. Otherwise the
+     video is paused and hidden, and the poster image underneath shows. */
+  function initAppIcons() {
+    var icons = $$('.app-icon').map(function (box) {
+      return { box: box, video: $('video', box), visible: false };
+    }).filter(function (icon) { return icon.video; });
+    if (!icons.length) return;
+
+    function sync(icon) {
+      var v = icon.video;
+      var play = !reduceMQ.matches && icon.visible && !icon.failed;
+      icon.box.classList.toggle('is-static', reduceMQ.matches || !!icon.failed);
+      if (!play) {
+        if (!v.paused) v.pause();
+        return;
+      }
+      if (!v.paused) return;
+      var p = v.play();
+      // Autoplay can be refused (for example in iOS Low Power Mode): keep the poster.
+      if (p && p.catch) p.catch(function () { icon.failed = true; sync(icon); });
+    }
+
+    icons.forEach(function (icon) {
+      var v = icon.video;
+      v.removeAttribute('autoplay');
+      if (reduceMQ.matches) v.pause();
+      v.addEventListener('error', function () { icon.failed = true; sync(icon); });
+      // A failed webm source just falls back to mp4; only the last one counts.
+      var sources = $$('source', v);
+      if (sources.length) {
+        sources[sources.length - 1].addEventListener('error', function () { icon.failed = true; sync(icon); });
+      }
+    });
+
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          icons.forEach(function (icon) {
+            if (icon.box === entry.target) { icon.visible = entry.isIntersecting; sync(icon); }
+          });
+        });
+      });
+      icons.forEach(function (icon) { io.observe(icon.box); });
+    } else {
+      icons.forEach(function (icon) { icon.visible = true; sync(icon); });
+    }
+
+    function onMotionChange() { icons.forEach(sync); }
+    if (reduceMQ.addEventListener) reduceMQ.addEventListener('change', onMotionChange);
+    else if (reduceMQ.addListener) reduceMQ.addListener(onMotionChange);
+  }
+
   function init() {
     initReveal();
     initCopy();
+    initAppIcons();
     initDemo();
   }
 
