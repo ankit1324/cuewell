@@ -81,6 +81,7 @@
     },
     "mac": {
       "category": "public.app-category.utilities",
+      "icon": "assests/icons/app-icon.icns",
       "target": [
         {
           "target": "dmg",
@@ -107,6 +108,7 @@
       }
     },
     "win": {
+      "icon": "assests/icons/app-icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -137,7 +139,7 @@
           ]
         }
       ],
-      "icon": "assests/icons/app-icon.png",
+      "icon": "assests/icons/icon-512.png",
       "category": "Utility"
     },
     "deb": {

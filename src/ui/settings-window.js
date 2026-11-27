@@ -238,7 +238,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (answerLengthSelect) answerLengthSelect.value = settings.answerLength || 'auto';
 
         // Handle icon selection
-        const selectedIcon = settings.selectedIcon || settings.appIcon;
+        // With no saved icon, show the Super Interview icon as the default choice.
+        const selectedIcon = settings.selectedIcon || settings.appIcon || 'superinterview';
         if (selectedIcon && iconGrid) {
             const iconOptions = iconGrid.querySelectorAll('.icon-option');
             iconOptions.forEach(option => {
@@ -522,6 +523,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!iconGrid) return;
 
         const icons = [
+            { key: 'superinterview', name: 'Super Interview', src: './assests/icons/app-icon.png' },
             { key: 'terminal', name: 'Terminal', src: './assests/icons/terminal.png' },
             { key: 'activity', name: 'Activity', src: './assests/icons/activity.png' },
             { key: 'settings', name: 'Settings', src: './assests/icons/settings.png' }

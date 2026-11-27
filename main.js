@@ -249,7 +249,7 @@ const MODEL_SETTING_FIELDS = [
 ];
 
 const CODING_LANGUAGES = ["cpp", "c", "python", "java", "javascript"];
-const APP_ICON_KEYS = ["terminal", "activity", "settings"];
+const APP_ICON_KEYS = ["superinterview", "terminal", "activity", "settings"];
 
 // Which settings fields each window may save. Anything else in the payload
 // rejects the whole save. The toolbar only saves its language picker.
@@ -1961,8 +1961,8 @@ class ApplicationController {
       activeSkill: this.activeSkill || promptLoader.getDefaultMode(),
       modes: promptLoader.getModes(),
       answerLength: this.answerLength || "auto",
-      appIcon: this.appIcon || "terminal",
-      selectedIcon: this.appIcon || "terminal",
+      appIcon: this.appIcon || "superinterview",
+      selectedIcon: this.appIcon || "superinterview",
       windowGap: windowManager.windowGap,
 
       speechProvider: speechService.provider || "whisper",
@@ -2569,6 +2569,7 @@ class ApplicationController {
 
       // Icon mapping for available icons in assests/icons folder
       const iconPaths = {
+        superinterview: "assests/icons/app-icon.png",
         terminal: "assests/icons/terminal.png",
         activity: "assests/icons/activity.png",
         settings: "assests/icons/settings.png",
@@ -2576,6 +2577,7 @@ class ApplicationController {
 
       // App name mapping for stealth mode
       const appNames = {
+        superinterview: "Super Interview",
         terminal: "Terminal ",
         activity: "Activity Monitor ",
         settings: "System Settings ",
@@ -2622,7 +2624,7 @@ class ApplicationController {
       }
 
       // Update app name for stealth mode
-      this.updateAppName(appName, iconKey);
+      this.updateAppName(appName, iconKey, fullIconPath);
 
       logger.info("App icon and name updated successfully", {
         iconKey,
@@ -2643,7 +2645,7 @@ class ApplicationController {
     }
   }
 
-  updateAppName(appName, iconKey) {
+  updateAppName(appName, iconKey, iconPath) {
     try {
       const { app } = require("electron");
 
@@ -2660,8 +2662,9 @@ class ApplicationController {
           app.dock.setBadge("");
           // Force dock refresh
           setTimeout(() => {
+            // The icon file is not always named after its key (superinterview).
             app.dock.setIcon(
-              require("path").resolve(__dirname, `assests/icons/${iconKey}.png`)
+              iconPath || require("path").resolve(__dirname, `assests/icons/${iconKey}.png`)
             );
           }, 50);
         }
