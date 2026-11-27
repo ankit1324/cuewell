@@ -1,7 +1,7 @@
 name: Deploy website
 
 # Publishes the landing page in website/ to GitHub Pages
-# (https://ankit1324.github.io/cuewell/) whenever it changes on main.
+# (https://cuewell.chaudharyankit.in/) whenever it changes on main.
 
 on:
   push:

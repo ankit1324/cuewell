@@ -2,7 +2,7 @@
   "name": "cuewell",
   "version": "1.0.0",
   "description": "AI interview copilot",
-  "homepage": "https://github.com/ankit1324/cuewell",
+  "homepage": "https://cuewell.chaudharyankit.in/",
   "desktopName": "cuewell.desktop",
   "main": "main.js",
   "scripts": {
