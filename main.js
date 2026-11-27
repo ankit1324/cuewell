@@ -1288,12 +1288,13 @@ class ApplicationController {
     }
 
     const startTime = Date.now();
+    // Hoisted so the catch block can end the stream the start event opened.
+    let messageId = null;
 
     try {
       // Capture first: on Linux windows can't be hidden from capture, so a
       // loading window shown before it would be in the screenshot.
       const capture = await captureService.captureAndProcess();
-      windowManager.showLLMLoading();
 
       if (!capture.imageBuffer || !capture.imageBuffer.length) {
         this.showScreenshotError("Failed to capture screenshot image");
@@ -1307,12 +1308,17 @@ class ApplicationController {
       const skillsRequiringProgrammingLanguage = ['dsa'];
       const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
 
+      // The start event goes out before show-loading, as in the chat and
+      // voice paths, so the answer window knows which request it is waiting
+      // for before any chunk can arrive.
       this._responseSeq = (this._responseSeq || 0) + 1;
-      const messageId = `img-${Date.now()}-${this._responseSeq}`;
-      windowManager.broadcastToAllWindows("transcription-llm-response-start", {
+      messageId = `img-${Date.now()}-${this._responseSeq}`;
+      this.sendToAnswerWindows("transcription-llm-response-start", {
         messageId,
+        source: "screenshot",
         skill: this.activeSkill
       });
+      windowManager.showLLMLoading();
 
       const llmResult = await llmService.processImageWithSkillStream(
         capture.imageBuffer,
@@ -1321,7 +1327,7 @@ class ApplicationController {
         sessionHistory.recent,
         needsProgrammingLanguage ? this.codingLanguage : null,
         (delta) => {
-          windowManager.broadcastToAllWindows("transcription-llm-response-chunk", {
+          this.sendToAnswerWindows("transcription-llm-response-chunk", {
             messageId,
             delta
           });
@@ -1342,7 +1348,8 @@ class ApplicationController {
         skill: this.activeSkill,
         processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
-        isImageAnalysis: true
+        isImageAnalysis: true,
+        messageId
       });
     } catch (error) {
       logger.error("Screenshot OCR process failed", {
@@ -1353,9 +1360,14 @@ class ApplicationController {
       // A capture that is already running will update the response window
       // itself, so a second press must not cover it with an error.
       if (error.message !== "Capture already in progress") {
-        this.showScreenshotError(error.message);
+        this.showScreenshotError(error.message, messageId);
       }
       this.broadcastOCRError(error.message);
+      // The answer was already announced (and may be half streamed): end
+      // its chat bubble with the error instead of leaving it open.
+      if (messageId) {
+        this.broadcastLLMError(error.message, messageId);
+      }
       
       sessionManager.addConversationEvent({
         role: 'system',
@@ -1373,7 +1385,7 @@ class ApplicationController {
    * window only listens for display-llm-response, so the message is sent as
    * a regular response.
    */
-  showScreenshotError(errorMessage) {
+  showScreenshotError(errorMessage, messageId = null) {
     // capture.service throws this when desktopCapturer returns no screens,
     // which on macOS means Screen Recording permission is missing.
     const message = process.platform === "darwin" && errorMessage === "No screen sources available for capture"
@@ -1383,6 +1395,7 @@ class ApplicationController {
       skill: this.activeSkill,
       isImageAnalysis: true,
       isError: true,
+      messageId,
     });
   }
 
@@ -1398,8 +1411,9 @@ class ApplicationController {
 
       this._responseSeq = (this._responseSeq || 0) + 1;
       messageId = `chat-${Date.now()}-${this._responseSeq}`;
-      windowManager.broadcastToAllWindows("transcription-llm-response-start", {
+      this.sendToAnswerWindows("transcription-llm-response-start", {
         messageId,
+        source: "chat",
         skill: this.activeSkill
       });
       windowManager.showLLMLoading();
@@ -1410,7 +1424,7 @@ class ApplicationController {
         sessionHistory.recent,
         needsProgrammingLanguage ? this.codingLanguage : null,
         (delta) => {
-          windowManager.broadcastToAllWindows("transcription-llm-response-chunk", {
+          this.sendToAnswerWindows("transcription-llm-response-chunk", {
             messageId,
             delta
           });
@@ -1438,6 +1452,7 @@ class ApplicationController {
         skill: this.activeSkill,
         processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
+        messageId,
       });
     } catch (error) {
       logger.error("LLM processing failed", {
@@ -1449,6 +1464,7 @@ class ApplicationController {
       windowManager.showLLMResponse(error.message, {
         skill: this.activeSkill,
         isError: true,
+        messageId,
       });
       sessionManager.addConversationEvent({
         role: 'system',
@@ -1543,6 +1559,9 @@ class ApplicationController {
     // Hoisted so the catch block can tie the error to the same request the
     // streaming start event announced.
     let messageId = null;
+    // Read once so start, chunks and the final answer or error all go to the
+    // same windows even if the setting changes mid-answer.
+    const voiceTarget = this.getVoiceResponseTarget();
     try {
       // Validate input text
       if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -1577,9 +1596,10 @@ class ApplicationController {
       messageId = `tr-${Date.now()}-${this._responseSeq}`;
       this.sendToVoiceResponseWindows("transcription-llm-response-start", {
         messageId,
+        source: "voice",
         skill: this.activeSkill
-      });
-      if (this.shouldShowVoiceOverlay()) {
+      }, voiceTarget);
+      if (this.shouldShowVoiceOverlay(voiceTarget)) {
         windowManager.showLLMLoading();
       }
       const llmResult = await llmService.processTranscriptionWithIntelligentResponseStream(
@@ -1591,7 +1611,7 @@ class ApplicationController {
           this.sendToVoiceResponseWindows("transcription-llm-response-chunk", {
             messageId,
             delta
-          });
+          }, voiceTarget);
         }
       );
       llmResult.metadata = { ...llmResult.metadata, messageId };
@@ -1604,13 +1624,14 @@ class ApplicationController {
         isTranscriptionResponse: true
       });
 
-      this.sendTranscriptionLLMResponseToVoiceTargets(llmResult);
-      if (this.shouldShowVoiceOverlay()) {
+      this.sendTranscriptionLLMResponseToVoiceTargets(llmResult, voiceTarget);
+      if (this.shouldShowVoiceOverlay(voiceTarget)) {
         windowManager.showLLMResponse(llmResult.response, {
           skill: this.activeSkill,
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
-          isTranscriptionResponse: true
+          isTranscriptionResponse: true,
+          messageId
         });
       }
 
@@ -1635,12 +1656,13 @@ class ApplicationController {
         error: error.message,
         messageId,
         timestamp: new Date().toISOString(),
-      });
-      if (this.shouldShowVoiceOverlay()) {
+      }, voiceTarget);
+      if (this.shouldShowVoiceOverlay(voiceTarget)) {
         windowManager.showLLMResponse(error.message, {
           skill: this.activeSkill,
           isTranscriptionResponse: true,
           isError: true,
+          messageId,
         });
       }
 
@@ -1711,6 +1733,20 @@ class ApplicationController {
     windowManager.broadcastToAllWindows("transcription-llm-response", broadcastData);
   }
 
+  /**
+   * Streaming events (start/chunk) for typed chat and screenshots go only to
+   * the two windows that render answers, not to the toolbar, settings or
+   * onboarding, and without broadcastToAllWindows' per-send log line.
+   */
+  sendToAnswerWindows(channel, data) {
+    for (const type of ["chat", "llmResponse"]) {
+      const win = windowManager.getWindow(type);
+      if (win && !win.isDestroyed()) {
+        win.webContents.send(channel, data);
+      }
+    }
+  }
+
   sendToChatWindow(channel, data) {
     const chatWindow = windowManager.getWindow("chat");
     if (!chatWindow || chatWindow.isDestroyed()) {
@@ -1725,12 +1761,11 @@ class ApplicationController {
     return ['chat', 'overlay', 'both'].includes(configured) ? configured : 'both';
   }
 
-  shouldShowVoiceOverlay() {
-    return ['overlay', 'both'].includes(this.getVoiceResponseTarget());
+  shouldShowVoiceOverlay(target = this.getVoiceResponseTarget()) {
+    return ['overlay', 'both'].includes(target);
   }
 
-  sendToVoiceResponseWindows(channel, data) {
-    const target = this.getVoiceResponseTarget();
+  sendToVoiceResponseWindows(channel, data, target = this.getVoiceResponseTarget()) {
     if (target === 'chat' || target === 'both') {
       this.sendToChatWindow(channel, data);
     }
@@ -1742,7 +1777,7 @@ class ApplicationController {
     }
   }
 
-  sendTranscriptionLLMResponseToVoiceTargets(llmResult) {
+  sendTranscriptionLLMResponseToVoiceTargets(llmResult, target = this.getVoiceResponseTarget()) {
     const data = {
       response: llmResult.response,
       metadata: llmResult.metadata,
@@ -1750,7 +1785,7 @@ class ApplicationController {
       skill: this.activeSkill,
       isTranscriptionResponse: true
     };
-    this.sendToVoiceResponseWindows("transcription-llm-response", data);
+    this.sendToVoiceResponseWindows("transcription-llm-response", data, target);
   }
 
   onWindowAllClosed() {

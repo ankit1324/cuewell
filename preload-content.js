@@ -69,6 +69,8 @@ const PAGES = {
     onTranscriptionReceived: listen('transcription-received'),
     onInterimTranscription: listen('interim-transcription'),
     onTranscriptionLlmResponse: listen('transcription-llm-response'),
+    onTranscriptionLlmResponseStart: listen('transcription-llm-response-start'),
+    onTranscriptionLlmResponseChunk: listen('transcription-llm-response-chunk'),
     onLlmResponse: listen('llm-response'),
     onLlmError: listen('llm-error'),
     onSpeechStatus: listen('speech-status'),
@@ -85,7 +87,13 @@ const PAGES = {
     copyToClipboard,
     resizeLlmWindowForContent: (contentMetrics) => ipcRenderer.invoke('resize-llm-window-for-content', contentMetrics),
     onDisplayLlmResponse: listen('display-llm-response'),
-    onShowLoading: listen('show-loading')
+    onShowLoading: listen('show-loading'),
+    // Live answer: start/chunk while it streams, then the final text or an
+    // error, all tied together by messageId.
+    onTranscriptionLlmResponseStart: listen('transcription-llm-response-start'),
+    onTranscriptionLlmResponseChunk: listen('transcription-llm-response-chunk'),
+    onTranscriptionLlmResponse: listen('transcription-llm-response'),
+    onLlmError: listen('llm-error')
   })
 }
 

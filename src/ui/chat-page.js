@@ -26,6 +26,18 @@ let chatHistory = [];
 const recentResponseHashes = new Set();
 const RECENT_HASH_LIMIT = 50;
 
+// Live answers. Main sends transcription-llm-response-start, then -chunk
+// events, then transcription-llm-response (or llm-error), all with the same
+// messageId. Each request gets one assistant row: the "Thinking…" row
+// becomes the streaming text, and the final answer replaces it in place,
+// with its code split out into snippet cards. Markdown is re-rendered at
+// most every STREAM_RENDER_INTERVAL_MS while text streams; Prism runs only
+// on the final snippets.
+const STREAM_RENDER_INTERVAL_MS = 80;
+const streams = new Map(); // messageId -> { el, text, timer, lastRenderAt, live }
+const finishedStreamIds = new Set();
+const FINISHED_ID_LIMIT = 100;
+
 function hashString(str) {
   try {
     let h = 2166136261 >>> 0; // FNV-1a
@@ -59,6 +71,9 @@ function clearChatHistory(skipConfirm = false) {
   }
   chatHistory = [];
   saveHistory();
+  // Answers still streaming continue in a new row if more text arrives.
+  streams.forEach(entry => { if (entry.timer) clearTimeout(entry.timer); });
+  streams.clear();
   // Clear DOM
   if (chatMessages) chatMessages.innerHTML = '';
 }
@@ -136,10 +151,21 @@ function addMessage(text, type = 'user', skipPersist = false) {
     return;
   }
 
+  chatMessages.appendChild(buildMessage(text, type, !skipPersist));
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  if (!skipPersist) {
+    chatHistory.push({ kind: 'message', type, text });
+    saveHistory();
+  }
+}
+
+// One message row; `rise` plays the entry animation.
+function buildMessage(text, type, rise) {
   const messageDiv = document.createElement('div');
   messageDiv.className = `message ${type}`;
   // Rise in only for new messages, not when replaying saved history.
-  if (!skipPersist) messageDiv.classList.add('oc-rise');
+  if (rise) messageDiv.classList.add('oc-rise');
 
   const timeDiv = document.createElement('div');
   timeDiv.className = 'message-time';
@@ -163,14 +189,7 @@ function addMessage(text, type = 'user', skipPersist = false) {
     messageDiv.appendChild(timeDiv);
   }
   messageDiv.appendChild(textDiv);
-
-  chatMessages.appendChild(messageDiv);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-
-  if (!skipPersist) {
-    chatHistory.push({ kind: 'message', type, text });
-    saveHistory();
-  }
+  return messageDiv;
 }
 
 // Markdown formatter (src/ui/markdown-render.js, backed by marked)
@@ -181,13 +200,32 @@ function formatMarkdown(text) {
   return escapeHtml(text).replace(/\n/g, '<br>');
 }
 
-// Show thinking indicator. One at a time: voice can send several
-// fragments for one answer, and each would otherwise add its own.
-function showThinkingIndicator() {
-  if (chatMessages.querySelector('.message.thinking')) return;
+// A "Thinking…" row that no request has claimed yet, added by a typed send
+// (origin "chat") or a heard fragment ("voice"). Claimed rows carry
+// data-message-id and belong to that request's stream. The oldest one is
+// returned: requests from one origin start in the order they were asked.
+function unclaimedThinking(origin) {
+  return chatMessages.querySelector(`.message.thinking[data-origin="${origin}"]:not([data-message-id])`);
+}
+
+// Show thinking indicator for a question. Each typed message gets its own
+// row. Voice keeps one unclaimed row, since several fragments can make one
+// question; it moves below the newest fragment.
+function showThinkingIndicator(origin = 'chat') {
+  const waiting = origin === 'voice' ? unclaimedThinking('voice') : null;
+  if (waiting) {
+    chatMessages.appendChild(waiting);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return waiting;
+  }
+  return addThinkingRow(origin);
+}
+
+function addThinkingRow(origin) {
   const thinkingDiv = document.createElement('div');
   thinkingDiv.className = 'message assistant thinking';
   thinkingDiv.id = 'thinking-indicator';
+  if (origin) thinkingDiv.dataset.origin = origin;
 
   const timeDiv = document.createElement('div');
   timeDiv.className = 'message-time';
@@ -205,11 +243,137 @@ function showThinkingIndicator() {
 
   chatMessages.appendChild(thinkingDiv);
   chatMessages.scrollTop = chatMessages.scrollHeight;
+  return thinkingDiv;
 }
 
-// Hide thinking indicator
+// Hide the unclaimed thinking indicators. A claimed one is replaced by its
+// own request's answer or error.
 function hideThinkingIndicator() {
-  chatMessages.querySelectorAll('.message.thinking').forEach(el => el.remove());
+  chatMessages.querySelectorAll('.message.thinking:not([data-message-id])').forEach(el => el.remove());
+}
+
+function isNearBottom() {
+  return chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 24;
+}
+
+function rememberFinished(messageId) {
+  finishedStreamIds.add(messageId);
+  if (finishedStreamIds.size > FINISHED_ID_LIMIT) {
+    finishedStreamIds.delete(finishedStreamIds.values().next().value);
+  }
+}
+
+function rememberResponseHash(h) {
+  recentResponseHashes.add(h);
+  if (recentResponseHashes.size > RECENT_HASH_LIMIT) {
+    recentResponseHashes.delete(recentResponseHashes.values().next().value);
+  }
+}
+
+// The stream for messageId, opened on its start event (or its first chunk
+// if the start was missed). Claims the "Thinking…" row its question added
+// (source "chat" or "voice"), or adds one at the end (screenshots).
+function openStream(messageId, source) {
+  if (!chatMessages || typeof messageId !== 'string' || !messageId) return null;
+  if (streams.has(messageId)) return streams.get(messageId);
+  if (finishedStreamIds.has(messageId)) return null;
+  const claimable = source === 'chat' || source === 'voice';
+  const el = (claimable && unclaimedThinking(source)) || addThinkingRow(null);
+  el.dataset.messageId = messageId;
+  el.removeAttribute('id');
+  const entry = { el, text: '', timer: null, lastRenderAt: 0, live: false };
+  streams.set(messageId, entry);
+  return entry;
+}
+
+// Close the stream: its row is replaced by the caller.
+function closeStream(messageId) {
+  const entry = streams.get(messageId);
+  if (!entry) return null;
+  if (entry.timer) clearTimeout(entry.timer);
+  streams.delete(messageId);
+  rememberFinished(messageId);
+  return entry;
+}
+
+function appendStreamDelta(messageId, delta) {
+  if (typeof delta !== 'string' || !delta) return;
+  const entry = openStream(messageId);
+  if (!entry) return;
+  entry.text += delta;
+  if (entry.timer) return;
+  const wait = STREAM_RENDER_INTERVAL_MS - (Date.now() - entry.lastRenderAt);
+  if (wait <= 0) renderStream(entry);
+  else entry.timer = setTimeout(() => renderStream(entry), wait);
+}
+
+function renderStream(entry) {
+  entry.timer = null;
+  if (!entry.el.isConnected || !entry.text) return;
+  entry.lastRenderAt = Date.now();
+  const follow = isNearBottom();
+  const textDiv = entry.el.querySelector('.message-text');
+  if (!entry.live) {
+    // The first text replaces "Thinking…".
+    entry.live = true;
+    entry.el.classList.remove('thinking');
+    entry.el.classList.add('streaming');
+    textDiv.classList.add('oc-prose');
+  }
+  // Code stays inline while streaming; the final answer splits it out.
+  textDiv.innerHTML = sanitizeHtml(formatMarkdown(entry.text));
+  if (window.renderMathInElement) window.renderMathInElement(textDiv);
+  if (follow) chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// The final answer for messageId: its prose replaces the streaming row and
+// each code block follows it as a snippet card.
+function finishStream(messageId, response) {
+  const entry = closeStream(messageId);
+  if (!entry) {
+    // No row for this request (e.g. the page loaded mid-answer).
+    if (!finishedStreamIds.has(messageId)) {
+      hideThinkingIndicator();
+      rememberFinished(messageId);
+      renderAssistantResponse(response);
+    }
+    return;
+  }
+  const text = typeof response === 'string' ? response : '';
+  // Recorded so the same answer arriving again without an id is skipped.
+  if (text.trim()) rememberResponseHash(hashString(text.trim()));
+
+  const follow = isNearBottom();
+  const { text: prose, blocks } = splitCodeBlocks(text);
+  let anchor = entry.el.nextSibling;
+  if (prose && prose.trim().length) {
+    const row = buildMessage(prose, 'assistant', false);
+    entry.el.replaceWith(row);
+    anchor = row.nextSibling;
+    chatHistory.push({ kind: 'message', type: 'assistant', text: prose });
+    saveHistory();
+  } else {
+    entry.el.remove();
+  }
+  blocks.forEach(b => addCodeSnippet(b.language, b.code, false, { before: anchor, scroll: false }));
+  if (follow) chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// The request failed: its row (thinking or half streamed) becomes the error.
+function failStream(messageId, message) {
+  const entry = closeStream(messageId);
+  if (!entry) {
+    // An error after this request's answer was shown changes nothing.
+    if (messageId && finishedStreamIds.has(messageId)) return;
+    hideThinkingIndicator();
+    addMessage(message, 'error');
+    return;
+  }
+  const follow = isNearBottom();
+  entry.el.replaceWith(buildMessage(message, 'error', false));
+  chatHistory.push({ kind: 'message', type: 'error', text: message });
+  saveHistory();
+  if (follow) chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
 // Minimalist Listening Animation Functions
@@ -303,7 +467,9 @@ function handleTranscription(text) {
     // Shown right away: a delayed indicator could appear after a fast
     // error or answer had already cleared it, and then never go away.
     addMessage(text.trim(), 'transcription');
-    showThinkingIndicator();
+    // Main skips utterances shorter than 2 characters without a reply, so
+    // they get no "Thinking…" row that nothing would remove.
+    if (text.trim().length >= 2) showThinkingIndicator('voice');
   } else {
     console.warn('Invalid or empty transcription text - ignoring:', text);
   }
@@ -413,7 +579,9 @@ function attachCopy(btn, codeText) {
     }
   });
 }
-function addCodeSnippet(language, code, skipPersist = false) {
+// options.before: insert ahead of this node (default: at the end);
+// options.scroll: scroll to the bottom afterwards (default true).
+function addCodeSnippet(language, code, skipPersist = false, options = {}) {
   if (!chatMessages) return;
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message assistant snippet';
@@ -457,8 +625,8 @@ function addCodeSnippet(language, code, skipPersist = false) {
 
   messageDiv.appendChild(buildMessageHead('assistant', timeDiv));
   messageDiv.appendChild(textDiv);
-  chatMessages.appendChild(messageDiv);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
+  chatMessages.insertBefore(messageDiv, options.before || null);
+  if (options.scroll !== false) chatMessages.scrollTop = chatMessages.scrollHeight;
 
   try { if (window.Prism && Prism.highlightElement) { Prism.highlightElement(codeEl); } } catch (_) {}
 
@@ -473,11 +641,7 @@ function renderAssistantResponse(response) {
   const normalized = response.trim();
   const h = hashString(normalized);
   if (recentResponseHashes.has(h)) return;
-  recentResponseHashes.add(h);
-  if (recentResponseHashes.size > RECENT_HASH_LIMIT) {
-    const first = recentResponseHashes.values().next().value;
-    recentResponseHashes.delete(first);
-  }
+  rememberResponseHash(h);
 
   const { text: textOnly, blocks } = splitCodeBlocks(response);
   // Add text response first (if any)
@@ -540,14 +704,28 @@ if (whysperAPI) {
   // A request failed: say why instead of leaving "Thinking…" forever.
   if (whysperAPI.onLlmError) {
     whysperAPI.onLlmError((event, data) => {
-      try { hideThinkingIndicator(); } catch (_) {}
-      addMessage((data && data.error) || 'The AI request failed.', 'error');
+      const message = String((data && data.error) || 'The AI request failed.');
+      failStream(data && data.messageId, message);
     });
   }
 
-  // Replace transcription LLM handler to store text + snippets
+  if (whysperAPI.onTranscriptionLlmResponseStart) {
+    whysperAPI.onTranscriptionLlmResponseStart((event, data) => {
+      if (data) openStream(data.messageId, data.source);
+    });
+  }
+  if (whysperAPI.onTranscriptionLlmResponseChunk) {
+    whysperAPI.onTranscriptionLlmResponseChunk((event, data) => {
+      if (data) appendStreamDelta(data.messageId, data.delta);
+    });
+  }
+
+  // Final answer: text + snippets, replacing the streamed row.
   whysperAPI.onTranscriptionLlmResponse((event, data) => {
-    if (data && data.response) {
+    if (!data) return;
+    if (typeof data.messageId === 'string' && data.messageId) {
+      finishStream(data.messageId, data.response);
+    } else if (data.response) {
       try { hideThinkingIndicator(); } catch (_) {}
       renderAssistantResponse(data.response);
     }
@@ -586,6 +764,28 @@ if (micButton) {
   });
 }
 
+// Send a typed message to the main process (session memory + LLM). The
+// answer arrives as stream events; a rejected message ends "Thinking…" here.
+// thinkingRow is the row showThinkingIndicator added for this message.
+async function sendTypedMessage(text, thinkingRow) {
+  const fail = (message) => {
+    // Removed only if no answer has claimed it.
+    if (thinkingRow && !thinkingRow.dataset.messageId) thinkingRow.remove();
+    addMessage(message, 'error');
+  };
+  try {
+    if (whysperAPI && whysperAPI.sendChatMessage) {
+      const result = await whysperAPI.sendChatMessage(text);
+      if (result && result.success === false) {
+        fail(String(result.error || 'The message could not be sent.'));
+      }
+    }
+  } catch (error) {
+    console.error('Failed to send chat message to main process:', error);
+    fail('The message could not be sent.');
+  }
+}
+
 if (sendButton) {
   sendButton.addEventListener('click', async () => {
     const text = messageInput.value.trim();
@@ -593,16 +793,7 @@ if (sendButton) {
       addMessage(text, 'user');
       messageInput.value = '';
 
-      showThinkingIndicator();
-
-      // Send to main process for session memory storage and LLM processing
-      try {
-        if (whysperAPI && whysperAPI.sendChatMessage) {
-          await whysperAPI.sendChatMessage(text);
-        }
-      } catch (error) {
-        console.error('Failed to send chat message to main process:', error);
-      }
+      await sendTypedMessage(text, showThinkingIndicator('chat'));
     }
   });
 }
@@ -629,14 +820,7 @@ if (messageInput) {
         addMessage(text, 'user');
         messageInput.value = '';
         autoGrow(messageInput);
-        showThinkingIndicator();
-        try {
-          if (whysperAPI && whysperAPI.sendChatMessage) {
-            await whysperAPI.sendChatMessage(text);
-          }
-        } catch (error) {
-          console.error('Failed to send chat message to main process:', error);
-        }
+        await sendTypedMessage(text, showThinkingIndicator('chat'));
       }
     }
     // If Shift+Enter, allow default to insert newline
