@@ -1,15 +1,15 @@
 name: Build & Release
 
+# Builds Cuewell on each OS's own runner (macOS, Windows, Linux). A pushed
+# version tag (v1.2.3) also publishes a GitHub release with the installers.
+# Builds are not code signed; see the README.
+
 on:
   push:
     tags:
       - 'v*'
+  # Manual runs build and upload the artifacts only; they never publish.
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'Build only (skip release creation)'
-        required: false
-        default: 'false'
 
 # Read-only by default; only the release job can write (to publish).
 permissions:
@@ -17,22 +17,31 @@ permissions:
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
+    name: Build (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
         include:
-          - os: ubuntu-latest
-            script: linux
+          - name: macOS
+            os: macos-latest
+            script: mac
             artifact_glob: |
-              dist/*.AppImage
-              dist/*.deb
-          - os: windows-latest
+              dist/Cuewell-*-mac-*.dmg
+              dist/Cuewell-*-mac-*.zip
+          - name: Windows
+            os: windows-latest
             script: win
             artifact_glob: |
-              dist/*.exe
+              dist/Cuewell-*-win-*-setup.exe
+              dist/Cuewell-*-win-*-portable.exe
+          - name: Linux
+            os: ubuntu-latest
+            script: linux
+            artifact_glob: |
+              dist/Cuewell-*-linux-*.AppImage
+              dist/Cuewell-*-linux-*.deb
 
     steps:
       - name: Checkout
@@ -43,48 +52,30 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          # package.json requires Node 22.12 or newer; '22' is the latest 22.x.
           node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      # electron-builder reads `version` from package.json for artifact
-      # naming (e.g. Cuewell-Setup-1.0.0.exe). When we build from a
-      # git tag (v1.0.7) the package.json still says 1.0.0 by default,
-      # so artifact names drift from the release tag. Sync them here.
-      # `npm pkg set` is cross-platform and doesn't touch git.
+      # electron-builder names artifacts after package.json's version
+      # (Cuewell-1.0.0-win-x64-setup.exe). Match it to the tag (v1.2.3) so
+      # artifact names agree with the release. `npm pkg set` does not touch git.
       - name: Sync package.json version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Tag version: $VERSION"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Tag $GITHUB_REF_NAME is not a version like v1.2.3"
+            exit 1
+          fi
           CURRENT=$(node -p "require('./package.json').version")
-          echo "Current package.json version: $CURRENT"
+          echo "Tag version: $VERSION, package.json version: $CURRENT"
           if [ "$VERSION" != "$CURRENT" ]; then
             npm pkg set "version=$VERSION"
-            echo "Updated package.json to $VERSION"
-          else
-            echo "Version already matches tag"
           fi
-
-      # Linux: install LinuxBuild dependencies so electron-builder can produce .deb / .AppImage
-      - name: Install Linux build dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            fakeroot dpkg rpm \
-            libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 \
-            xauth xvfb libasound2t64 ffmpeg \
-            python3 python3-venv python3-pip
-
-      # Windows: enable long paths for electron-builder
-      - name: Enable Windows long paths
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: git config --system core.longpaths true
 
       - name: Build
         shell: bash
@@ -98,12 +89,16 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run build:${{ matrix.script }} -- --publish never
 
+      - name: List build output
+        shell: bash
+        run: ls -la dist
+
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: cuewell-${{ matrix.os }}
+          name: cuewell-${{ matrix.script }}
           path: ${{ matrix.artifact_glob }}
-          if-no-files-found: warn
+          if-no-files-found: error
 
   release:
     name: Create GitHub Release
@@ -177,35 +172,37 @@ jobs:
             cat CHANGELOG_SECTION.md
           } > WHATS_CHANGED.md
 
-          # Write combined body to file (multiline-safe)
+          # Write combined body to file (multiline-safe). The heredoc is quoted
+          # so backticks stay literal; __REPO_URL__ is filled in afterwards.
           cat > RELEASE_BODY.md << 'BODY_EOF'
           ## Installation
 
-          Choose the artifact for your platform:
+          Download the file for your system:
 
-          | Platform | File | Notes |
+          | System | File | Notes |
           |---|---|---|
-          | **Windows** | `Cuewell-Setup-*.exe` | NSIS installer — installs app + adds to Start Menu |
-          | **Linux** | `*.deb` | Debian/Ubuntu — auto-pulls system deps (Python, ffmpeg, GTK) |
-          | **Linux** | `*.AppImage` | Universal — no install, just `chmod +x` and run |
+          | **Windows 10 or later (64-bit)** | `Cuewell-*-win-x64-setup.exe` | Installer. Installs for your account only (no admin needed) and adds Start menu and desktop shortcuts. |
+          | **Windows** | `Cuewell-*-win-x64-portable.exe` | Runs without installing. |
+          | **macOS 13 or later, Apple silicon** | `Cuewell-*-mac-arm64.dmg` | Drag Cuewell to Applications. |
+          | **macOS 13 or later, Intel** | `Cuewell-*-mac-x64.dmg` | Drag Cuewell to Applications. |
+          | **Debian, Ubuntu** | `Cuewell-*-linux-amd64.deb` | `sudo apt install ./Cuewell-*-linux-amd64.deb` |
+          | **Other Linux (64-bit)** | `Cuewell-*-linux-x86_64.AppImage` | `chmod +x` the file, then run it. |
 
-          > **macOS:** no pre-built build is shipped. The app is unsigned/un-notarized, so macOS Gatekeeper blocks it as "damaged". Run Cuewell from source instead:
-          > ```bash
-          > git clone <your-repo-url> && cd cuewell && ./setup.sh
-          > ```
-          > Requires Node.js 22.12+. See the [README](<your-repo-url>#quick-start) for details.
+          These builds are **not code signed**:
 
-          ## First Run
+          - **Windows:** SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**.
+          - **macOS:** the first launch is blocked. Open **System Settings > Privacy & Security**, scroll down and choose **Open Anyway** for Cuewell. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Cuewell.app` in Terminal, or run Cuewell from source with `./setup.sh`.
+          - **Linux:** privacy mode (hiding the windows from screen sharing) is not available.
 
-          On first launch, Cuewell opens the **Settings** window automatically for your **Google Gemini API key**.
-          Get a free key from [Google AI Studio](https://aistudio.google.com/). You can also edit `.env` directly.
+          ## First run
 
-          ## Optional: Local Whisper (offline speech)
+          Cuewell opens a setup wizard on first launch. Choose an AI provider (Gemini, Claude, OpenAI, OpenRouter, Groq, DeepSeek or a local Ollama model), enter its key, and optionally set up voice input.
 
-          Install **Python 3.10+** and **ffmpeg**, then run:
-          ```bash
-          ./setup.sh --skip-install-system-deps
-          ```
+          ## Optional: local Whisper (offline voice)
+
+          The setup wizard can install Whisper for you. It needs **Python 3.10 or newer** (3.12 recommended) and 3 to 5 GB of disk space. On Linux, voice input also needs `arecord` (alsa-utils) or `sox`; the .deb installs it.
+
+          See the [README](__REPO_URL__#readme) for details.
 
           ## Checksums
 
@@ -222,6 +219,8 @@ jobs:
             echo "**Full Changelog**: ${RANGE_LABEL}"
           } >> RELEASE_BODY.md
 
+          sed -i "s#__REPO_URL__#${REPO_URL}#g" RELEASE_BODY.md
+
           echo "=== Final release body ==="
           cat RELEASE_BODY.md
 
@@ -233,19 +232,19 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p release
-          # Pick only the primary installer per platform. This intentionally drops:
-          #   - Windows portable EXE (we ship the NSIS installer)
-          #   - .blockmap files (electron-updater diff metadata)
-          #   - latest-*.yml (electron-updater channel metadata)
-          #   - Source archives (GitHub auto-generates these from the tag)
-          #
-          # The order below is the order files appear in the release page.
-          find artifacts -type f -name 'Cuewell-Setup-*.exe' \
-            -exec cp -v {} release/ \;
-          find artifacts -type f -name 'cuewell_*_amd64.deb' \
-            -exec cp -v {} release/ \;
-          find artifacts -type f -name '*.AppImage' \
-            -exec cp -v {} release/ \;
+          # Installers only. This drops .blockmap files and latest-*.yml
+          # (electron-updater metadata) and the macOS .zip files (used for
+          # auto-update only). The order below is the order on the release page.
+          for pattern in 'Cuewell-*-win-*-setup.exe' 'Cuewell-*-win-*-portable.exe' \
+                         'Cuewell-*-mac-*.dmg' \
+                         'Cuewell-*-linux-*.deb' 'Cuewell-*-linux-*.AppImage'; do
+            found=$(find artifacts -type f -name "$pattern")
+            if [ -z "$found" ]; then
+              echo "::error::No artifact matches $pattern"
+              exit 1
+            fi
+            find artifacts -type f -name "$pattern" -exec cp -v {} release/ \;
+          done
           echo "--- Files selected for release ---"
           ls -la release/
 
@@ -265,4 +264,4 @@ jobs:
           body_path: RELEASE_BODY.md
           files: |
             release/*
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true

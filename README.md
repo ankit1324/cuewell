@@ -21,7 +21,9 @@ Cuewell is free and open source (Apache-2.0), built on Electron, and maintained 
 
 ## Quick start
 
-You need Node.js 22.12 or newer. For local voice you also need Python 3 (see [Requirements](#requirements)).
+You need Node.js 22.12 or newer. For local voice you also need Python 3.10 or newer (see [Requirements](#requirements)).
+
+**macOS and Linux:**
 
 ```bash
 git clone <repo-url>   # TODO(owner): replace with the repository URL
@@ -29,7 +31,15 @@ cd cuewell
 ./setup.sh
 ```
 
-`setup.sh` checks your Node version, creates `.env` from `env.example`, installs Node dependencies, sets up local Whisper in `.venv-whisper`, runs a short speech test and starts the app.
+**Windows (PowerShell):**
+
+```powershell
+git clone <repo-url>   # TODO(owner): replace with the repository URL
+cd cuewell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+Both scripts check your Node version, create `.env` from `env.example` (readable by your account only), install Node dependencies, set up local Whisper in `.venv-whisper`, run a short speech test and start the app. If Python is missing, they skip Whisper and tell you how to install it; you can also set Whisper up later from the onboarding wizard.
 
 On first launch, the onboarding wizard opens. It walks you through:
 
@@ -37,7 +47,7 @@ On first launch, the onboarding wizard opens. It walks you through:
 2. Choosing a speech provider: local Whisper, Azure Speech, or skip.
 3. For Whisper: detecting it, installing it into a virtual environment if needed, and downloading a model.
 
-After setup, start the app with `npm start` (or `npm run dev`, which also disables the GPU). On Windows, run these from Git Bash: the scripts use the `env` command, which `cmd.exe` does not have.
+After setup, start the app with `npm start` (or `npm run dev`, which also disables the GPU). Both work from any terminal, including PowerShell and `cmd.exe`.
 
 ### setup.sh options
 
@@ -45,25 +55,45 @@ After setup, start the app with `npm start` (or `npm run dev`, which also disabl
 ./setup.sh --no-run               # Set up only, do not launch
 ./setup.sh --ci                   # Use npm ci instead of npm install
 ./setup.sh --skip-whisper         # Skip the local Whisper setup
-./setup.sh --install-system-deps  # Install sox (Linux); not needed on macOS
+./setup.sh --install-system-deps  # Linux: install arecord (alsa-utils) for voice input
 ./setup.sh --build                # Build a distributable for this OS, then start the app
 ./setup.sh --build --no-run       # Build only
 ```
 
-On Windows, run `setup.sh` from Git Bash. Under WSL the app runs as a Linux app, so privacy mode has no effect.
+`setup.sh` also runs from Git Bash on Windows. Under WSL the app runs as a Linux app, so privacy mode has no effect.
+
+### setup.ps1 options (Windows)
+
+```powershell
+.\setup.ps1 -NoRun          # Set up only, do not launch
+.\setup.ps1 -Ci             # Use npm ci instead of npm install
+.\setup.ps1 -SkipWhisper    # Skip the local Whisper setup
+.\setup.ps1 -Build -NoRun   # Build the installer and portable app only
+.\setup.ps1 -Help           # Show all options
+```
+
+`setup.ps1` finds Python through the `py` launcher, preferring 3.12, then 3.11, 3.10 and 3.13. Install Python from [python.org](https://www.python.org/downloads/) (turn on "Add python.exe to PATH") or with `winget install Python.Python.3.12`. If PowerShell refuses to run the script, the `-ExecutionPolicy Bypass` form above runs it without changing your system policy.
 
 ## Requirements
 
 | | |
 |---|---|
-| Node.js | 22.12 or newer (`setup.sh` checks this; `package.json` declares it) |
+| Node.js | 22.12 or newer (`setup.sh` and `setup.ps1` check this; `package.json` declares it) |
 | macOS | 13 (Ventura) or later |
 | Windows | 10 or later, 64-bit |
-| Linux | Runs, but privacy mode has no effect (see below) |
+| Linux | 64-bit, X11 or XWayland. Privacy mode has no effect (see below) |
 | Local Whisper | Python 3.10 or newer (3.12 recommended), about 3 to 5 GB of disk for Whisper and its dependencies |
 | Azure Speech | An Azure Speech resource key and region |
 
-ffmpeg is usually not needed: the app records PCM WAV, and its Python Whisper worker reads it directly. If that worker is unavailable, the app falls back to the `whisper` command-line tool, which needs ffmpeg. On Linux, microphone capture needs `arecord` or `sox`.
+How each system records the microphone:
+
+| | Recorder | What you need |
+|---|---|---|
+| macOS | Built in (the app's own audio capture) | Microphone permission |
+| Windows | Built in (the app's own audio capture) | Microphone access on in Settings > Privacy & security > Microphone |
+| Linux | `arecord` (alsa-utils), or `sox` | `sudo apt install alsa-utils` (the `.deb` installs it for you). Without either, voice input shows an error that names the missing package. |
+
+ffmpeg is usually not needed: the app records PCM WAV, and its Python Whisper worker reads it directly. If that worker is unavailable, the app falls back to the `whisper` command-line tool, which needs ffmpeg.
 
 ## Building
 
@@ -73,14 +103,24 @@ npm run build:win     # NSIS installer and portable .exe (x64)
 npm run build:linux   # AppImage and .deb (x64)
 ```
 
-Output goes to `dist/`. `./setup.sh --build --no-run` runs the right one for your OS.
+Output goes to `dist/`. `./setup.sh --build --no-run` (or `.\setup.ps1 -Build -NoRun` on Windows) runs the right one for your OS. Windows and Linux builds can also be made on a Mac; macOS builds need a Mac.
+
+| System | Files in `dist/` |
+|---|---|
+| macOS | `Cuewell-<version>-mac-arm64.dmg`, `Cuewell-<version>-mac-x64.dmg`, and a `.zip` of each |
+| Windows | `Cuewell-<version>-win-x64-setup.exe` (installer), `Cuewell-<version>-win-x64-portable.exe` (no install) |
+| Linux | `Cuewell-<version>-linux-amd64.deb`, `Cuewell-<version>-linux-x86_64.AppImage` |
+
+The Windows installer installs for the current user only (no admin prompt), lets you choose the folder, adds Start menu and desktop shortcuts, and can start Cuewell when it finishes. Uninstalling keeps your settings, keys and Whisper files in the app data folder.
+
+On Debian and Ubuntu, install the `.deb` with `sudo apt install ./Cuewell-<version>-linux-amd64.deb`; it adds Cuewell to the app menu and the `cuewell` command. For the AppImage, run `chmod +x Cuewell-<version>-linux-x86_64.AppImage`, then run the file. Some distributions need `libfuse2` for AppImages.
 
 Builds are **not code signed or notarized** today. That means:
 
-- **macOS:** a build copied or downloaded to another Mac is blocked by Gatekeeper ("damaged" or "cannot be opened"). Running from source with `./setup.sh` avoids this.
+- **macOS:** the first launch of a downloaded build is blocked. Open System Settings > Privacy & Security and choose **Open Anyway**. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Cuewell.app`, or run from source with `./setup.sh`.
 - **Windows:** SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**, only if you built or trust the file.
 
-No pre-built downloads are linked from this README. The workflow in `.github/workflows/release.yml` builds Windows and Linux artifacts from a version tag.
+No pre-built downloads are linked from this README. The workflow in `.github/workflows/release.yml` builds macOS, Windows and Linux artifacts on each system's own GitHub runner, and publishes them as a GitHub release when a version tag (`v1.2.3`) is pushed.
 
 ## Shortcuts
 
@@ -266,10 +306,11 @@ src/services/             Screen capture, LLM, speech and Whisper worker service
 src/services/providers/   Claude and OpenAI-compatible provider adapters
 src/ui/                   Renderer scripts for each window
 lib/                      Markdown rendering and HTML sanitizing
-scripts/                  Whisper worker (Python), speech test, installer hooks
+scripts/                  Start script, Whisper worker (Python), speech test, installer hook
 assests/                  Icons, fonts and vendored Font Awesome (the folder name is spelled this way)
 website/                  Landing page; not included in app builds
-setup.sh, env.example     Setup script and configuration template
+setup.sh, setup.ps1       Setup scripts (macOS/Linux, Windows)
+env.example               Configuration template
 ```
 
 ## Contributing

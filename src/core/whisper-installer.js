@@ -22,7 +22,13 @@ const fs = require('fs');
 const path = require('path');
 
 const PROBE_TIMEOUT_MS = 30000; // first `import whisper` (torch) is slow on a cold cache
-const INSTALL_TIMEOUT_MS = 300000; // pip downloads can be slow on cold cache
+// pip downloads PyTorch with openai-whisper: about 200 MB on Windows and macOS,
+// and 2 GB or more with the CUDA libraries on Linux. Allow a slow connection.
+const INSTALL_TIMEOUT_MS = 30 * 60 * 1000;
+
+// Python versions to try, most preferred first. PyTorch and numba (both
+// openai-whisper dependencies) ship wheels for these; 3.12 is the best tested.
+const PREFERRED_PYTHON_VERSIONS = ['3.12', '3.11', '3.10', '3.13'];
 
 // The openai-whisper release this app is tested with. Keep in sync with
 // WHISPER_PIP_SPEC in setup.sh.
@@ -268,31 +274,20 @@ class WhisperInstaller {
     };
 
     log('→ Detecting Python on the system…');
-    const python = this._detectPython();
-    if (!python) {
-      const msg = this.platform === 'win32'
-        ? 'Python 3.10+ not found. Install from python.org and make sure "Add Python to PATH" is checked.'
-        : 'python3 not found. Install with your package manager (e.g. `sudo apt install python3 python3-venv`).';
+    // Catch a missing or too-old Python before pip runs: its errors for
+    // that case are cryptic.
+    const found = await this._findPython();
+    if (!found.python) {
+      const msg = found.tooOld
+        ? `Python ${found.tooOld} is too old. Whisper needs Python 3.10 or newer (3.12 recommended). ${this._pythonInstallHint()}`
+        : `Python 3.10 or newer was not found. ${this._pythonInstallHint()}`;
       log(`! ${msg}`);
       return { ok: false, command: null, message: msg, logs: msg };
     }
-    log(`✓ Found Python: ${python}`);
-
-    // openai-whisper requires Python 3.9+ (3.10+ recommended for best
-    // performance). Catch version mismatch BEFORE attempting pip
-    // install — the pip error is cryptic and confusing.
-    const version = await this._getPythonVersion(python);
-    if (!version) {
-      log('! Could not determine Python version');
-      return { ok: false, command: null, message: 'Could not determine Python version', logs: '' };
-    }
-    log(`→ Python version: ${version}`);
-    if (!this._isPythonVersionOk(version)) {
-      const msg = `Python ${version} is too old. openai-whisper requires Python 3.9 or newer. Please upgrade Python and retry.`;
-      log(`! ${msg}`);
-      return { ok: false, command: null, message: msg, logs: msg };
-    }
-    log('✓ Python version OK');
+    const python = found.python;
+    // [cmd, ...args], e.g. ['py', '-3.12'] for the Windows launcher.
+    const pythonArgs = found.args;
+    log(`✓ Found Python ${found.version}: ${[python, ...pythonArgs].join(' ')}`);
 
     const vp = this.venvPaths;
     const venvExists = fs.existsSync(vp.python);
@@ -303,7 +298,7 @@ class WhisperInstaller {
       // python3 exists but the stdlib `venv`/`ensurepip` modules ship
       // separately as python3-venv. Detect this explicitly so the user gets an
       // actionable apt hint instead of a cryptic "ensurepip is not available".
-      const preflight = await this.runExec(python, ['-c', 'import ensurepip, venv'], {
+      const preflight = await this.runExec(python, [...pythonArgs, '-c', 'import ensurepip, venv'], {
         timeout: 15000,
       });
       if (!preflight.ok) {
@@ -315,7 +310,7 @@ class WhisperInstaller {
       }
 
       log(`→ Creating venv at ${this.venvPath}…`);
-      const venvResult = await this.runExec(python, ['-m', 'venv', this.venvPath], {
+      const venvResult = await this.runExec(python, [...pythonArgs, '-m', 'venv', this.venvPath], {
         timeout: 60000,
         onProgress: log,
       });
@@ -423,7 +418,7 @@ class WhisperInstaller {
           title: 'Install via a project-local Python venv',
           steps: [
             'Python 3.10+ must be on PATH (download from python.org if missing).',
-            "We'll create <code>.venv-whisper\\</code> in the app directory — no admin needed.",
+            "We'll create <code>.venv-whisper\\</code> in the app data folder — no admin needed.",
             'openai-whisper installs into the venv via pip (live progress shown below).',
             'First transcription downloads the <code>small</code> model (~461 MB).',
           ],
@@ -433,7 +428,7 @@ class WhisperInstaller {
           title: 'Install via a project-local Python venv',
           steps: [
             'Uses your existing Python 3 (install via Homebrew if missing).',
-            "We'll create <code>.venv-whisper/</code> in the app directory.",
+            "We'll create <code>.venv-whisper/</code> in the app data folder.",
             'openai-whisper installs into the venv — no <code>sudo</code> required.',
             'First transcription downloads the <code>small</code> model (~461 MB).',
           ],
@@ -443,7 +438,7 @@ class WhisperInstaller {
           title: 'Install via a project-local Python venv',
           steps: [
             'Uses your system Python 3.',
-            "We'll create <code>.venv-whisper/</code> in the app directory.",
+            "We'll create <code>.venv-whisper/</code> in the app data folder.",
             'This avoids the "externally-managed-environment" pip error on Ubuntu 23.04+, Debian 12+, Fedora 38+.',
             'First transcription downloads the <code>small</code> model (~461 MB).',
           ],
@@ -521,47 +516,106 @@ class WhisperInstaller {
   }
 
   /**
-   * Find a Python interpreter. Returns the resolved command name (which
-   * may be a full path) or null if nothing usable is on PATH.
+   * Paths printed by `where` / `which` for a command name. Paths under
+   * …\WindowsApps\ go last: that folder holds real app execution aliases
+   * (the python.org install manager and Microsoft Store Python put py.exe
+   * and python.exe there) and also the Store "python" stub, which only
+   * prints an install hint. _findPython() runs each candidate, so the stub
+   * fails its version check and is skipped.
    */
-  _detectPython() {
-    const candidates = this.platform === 'win32'
-      ? ['py', 'python', 'python3']
-      : ['python3', 'python'];
-    for (const c of candidates) {
-      try {
-        const which = require('child_process').spawnSync(
-          this.platform === 'win32' ? 'where' : 'which',
-          [c],
-          { windowsHide: true, encoding: 'utf8', env: childProcessEnv() },
-        );
-        if (which.status === 0) {
-          const lines = (which.stdout || '')
-            .toString()
-            .split(/\r?\n/)
-            .map((l) => l.trim())
-            .filter(Boolean)
-            // Skip the Microsoft Store python stub (…\WindowsApps\python.exe):
-            // it's a launcher that opens the Store and fails `-m venv` with a
-            // cryptic error, so prefer any real interpreter instead.
-            .filter((l) => !/WindowsApps/i.test(l));
-          if (lines.length > 0) {
-            return lines[0];
-          }
-          // `py` is a valid launcher even when `where` prints no usable path.
-          if (c === 'py') return c;
-        }
-      } catch (_) { /* ignore */ }
+  _whichAll(name) {
+    try {
+      const r = require('child_process').spawnSync(
+        this.platform === 'win32' ? 'where' : 'which',
+        [name],
+        { windowsHide: true, encoding: 'utf8', timeout: 5000, env: childProcessEnv() },
+      );
+      if (r.status !== 0) return [];
+      return (r.stdout || '')
+        .toString()
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .sort((a, b) => Number(/[\\/]WindowsApps[\\/]/i.test(a)) - Number(/[\\/]WindowsApps[\\/]/i.test(b)));
+    } catch (_) {
+      return [];
     }
-    return null;
+  }
+
+  /**
+   * Python interpreters to try, most preferred first, as { cmd, args }.
+   *   - Windows: the `py` launcher with a pinned version (py -3.12, …),
+   *     then python.exe / python3.exe on PATH.
+   *   - macOS / Linux: python3.12, python3.11, … then python3 and python.
+   */
+  _pythonCandidates() {
+    const out = [];
+    const seen = new Set();
+    const add = (cmd, args = []) => {
+      const key = [cmd, ...args].join(' ').toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ cmd, args });
+    };
+    if (this.platform === 'win32') {
+      const launcher = this._whichAll('py')[0];
+      if (launcher) {
+        for (const v of PREFERRED_PYTHON_VERSIONS) add(launcher, [`-${v}`]);
+        add(launcher, ['-3']);
+      }
+      for (const name of ['python', 'python3']) {
+        for (const p of this._whichAll(name)) add(p);
+      }
+    } else {
+      for (const v of PREFERRED_PYTHON_VERSIONS) {
+        const p = this._whichAll(`python${v}`)[0];
+        if (p) add(p);
+      }
+      for (const name of ['python3', 'python']) {
+        const p = this._whichAll(name)[0];
+        if (p) add(p);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The first usable Python 3.10+ interpreter, in the order of
+   * _pythonCandidates(). Resolves to { python, args, version }, or to
+   * { python: null, tooOld } where tooOld is the newest version found that is
+   * below 3.10 (or null when no Python was found at all).
+   */
+  async _findPython() {
+    let tooOld = null;
+    for (const candidate of this._pythonCandidates()) {
+      // eslint-disable-next-line no-await-in-loop
+      const version = await this._getPythonVersion(candidate.cmd, candidate.args);
+      if (!version) continue;
+      if (this._isPythonVersionOk(version)) {
+        return { python: candidate.cmd, args: candidate.args, version };
+      }
+      if (!tooOld) tooOld = version;
+    }
+    return { python: null, args: [], version: null, tooOld };
+  }
+
+  /** One sentence telling the user how to install Python on this platform. */
+  _pythonInstallHint() {
+    if (this.platform === 'win32') {
+      return 'Install Python 3.12 from python.org (turn on "Add python.exe to PATH") or run "winget install Python.Python.3.12", then try again.';
+    }
+    if (this.platform === 'darwin') {
+      return 'Install Python 3.12 from python.org or run "brew install python@3.12", then try again.';
+    }
+    return 'Install it with your package manager, for example "sudo apt install python3 python3-venv", then try again.';
   }
 
   /**
    * Resolve Python's `--version` string into a `major.minor` tuple
    * (e.g. '3.11'). Returns null if it can't be determined.
    */
-  async _getPythonVersion(pythonCmd) {
-    const r = await this.runExec(pythonCmd, ['-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'], {
+  async _getPythonVersion(pythonCmd, pythonArgs = []) {
+    const r = await this.runExec(pythonCmd, [...pythonArgs, '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'], {
       timeout: 10000,
     });
     if (!r.ok) return null;
@@ -570,8 +624,8 @@ class WhisperInstaller {
   }
 
   /**
-   * openai-whisper requires Python 3.9+. We warn below 3.10 and refuse
-   * below 3.9. Returns false if the version is too old.
+   * Whether Python `version` ('major.minor') is 3.10 or newer, the minimum
+   * the README and setup scripts document for Whisper.
    */
   _isPythonVersionOk(version) {
     const m = (version || '').match(/^(\d+)\.(\d+)/);
@@ -579,8 +633,7 @@ class WhisperInstaller {
     const major = parseInt(m[1], 10);
     const minor = parseInt(m[2], 10);
     if (major > 3) return true;
-    if (major === 3 && minor >= 9) return true;
-    return false;
+    return major === 3 && minor >= 10;
   }
 
   async downloadModel(modelName = 'small', { onProgress } = {}) {
