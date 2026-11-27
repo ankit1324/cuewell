@@ -267,6 +267,8 @@
     function afterSettingSaved(field) {
         if (field === 'ollamaBaseUrl') cancelTest();
         if (field === 'whisperModel' || field === 'whisperCommand') refreshWhisperStatus();
+        // A new command can make Python Whisper usable or not.
+        if (field === 'whisperCommand') refreshVoiceStatus();
         if (field === 'azureRegion' || field === 'whisperCommand') loadSettings({ quiet: true });
     }
 
@@ -997,9 +999,81 @@
     // ---------- Voice ----------
 
     const speechRadios = Array.from(document.querySelectorAll('input[name="speechProvider"]'));
+    const engineRadios = Array.from(document.querySelectorAll('input[name="voiceEngine"]'));
+    const pythonRows = Array.from(document.querySelectorAll('[data-engine="python"]'));
+    const modelList = $('voiceModelList');
+
+    const RELEASES_URL = 'https://github.com/ankit1324/cuewell/releases/latest';
+    const OFFLINE_TEXT = 'You are offline. Connect to the internet, then retry.';
+    const OLD_BUILD_TEXT = 'This version of Cuewell cannot set up local voice. Install the latest release.';
+    // How the built-in models read here; main's label covers any other id.
+    const MODEL_TEXT = {
+        'small-q5_1': { name: 'Small', tag: 'Recommended', note: 'Best for Hindi and Hinglish' },
+        'base-q5_1': { name: 'Base', tag: '', note: 'Faster, smaller' }
+    };
+    // A Cancel this soon after Download is a double click, not a choice.
+    const CANCEL_GRACE_MS = 600;
+    // A cancel main never confirms gives the Cancel button back.
+    const CANCEL_STUCK_MS = 10000;
+
+    const voice = {
+        // Last get-voice-status answer: { engine, binaryAvailable, platformSupported,
+        // models: [{ id, label, bytes, downloaded }], selectedModel, language, pythonConfigured }
+        status: null,
+        error: '',
+        checkedAt: 0,
+        // id -> { phase: 'downloading' | 'cancelling' | 'cancelled' | 'failed', received, total, error }
+        downloads: {},
+        // The one download running, if any.
+        activeId: null,
+        // An engine or model change is being saved.
+        selecting: false
+    };
+
+    const hasApi = (name) => !!(api && typeof api[name] === 'function');
 
     function speechProvider() {
         return (state.settings && state.settings.speechProvider) || 'whisper';
+    }
+
+    const voiceModels = () => (voice.status ? voice.status.models : []);
+    const findModel = (id) => voiceModels().find((m) => m.id === id) || null;
+    const modelName = (m) => (m && MODEL_TEXT[m.id] ? MODEL_TEXT[m.id].name : (m && m.label) || 'the model');
+    const usingPython = () => !!voice.status && voice.status.engine === 'python';
+    const builtInRuns = () => !!voice.status && voice.status.platformSupported !== false && !!voice.status.binaryAvailable;
+
+    /** Bytes as decimal megabytes: 190085487 -> "190 MB", or "190.1 MB" with digits 1. */
+    function formatMB(bytes, digits = 0) {
+        const mb = Math.max(0, Number(bytes) || 0) / 1e6;
+        return `${mb.toFixed(digits)} MB`;
+    }
+
+    /** "45.2 MB of 190.1 MB · 23%", or "45.2 MB" while the size is unknown. */
+    function progressText(received, total) {
+        if (!(total > 0)) return formatMB(received, 1);
+        return `${formatMB(received, 1)} of ${formatMB(total, 1)} · ${progressPercent(received, total)}%`;
+    }
+
+    function progressPercent(received, total) {
+        if (!(total > 0)) return 0;
+        return Math.max(0, Math.min(100, Math.floor((received / total) * 100)));
+    }
+
+    /** Keep only well-formed fields from main's answer. */
+    function cleanVoiceStatus(raw) {
+        const models = Array.isArray(raw.models) ? raw.models
+            .filter((m) => m && typeof m.id === 'string' && m.id && typeof m.label === 'string')
+            .map((m) => ({ id: m.id, label: m.label, bytes: Number(m.bytes) || 0, downloaded: !!m.downloaded }))
+            : [];
+        return {
+            engine: raw.engine === 'python' ? 'python' : 'whispercpp',
+            binaryAvailable: !!raw.binaryAvailable,
+            platformSupported: raw.platformSupported !== false,
+            models,
+            selectedModel: typeof raw.selectedModel === 'string' ? raw.selectedModel : '',
+            language: typeof raw.language === 'string' ? raw.language : '',
+            pythonConfigured: !!raw.pythonConfigured
+        };
     }
 
     function renderVoice() {
@@ -1011,13 +1085,419 @@
         $('azureGroup').hidden = provider !== 'azure';
         azureKey.setField('azureKey', masked('azureKey'));
 
-        // CUDA needs an NVIDIA GPU, which Macs do not have.
+        // CUDA needs an NVIDIA GPU, which Macs do not have (Python Whisper only).
         const cuda = $('whisperDevice').querySelector('option[value="cuda"]');
         if (cuda) cuda.disabled = isMac() && $('whisperDevice').value !== 'cuda';
         if (isMac()) $('whisperDeviceHelp').textContent = 'Macs have no NVIDIA GPU, so Whisper runs on the CPU. Auto and CPU are the same here.';
 
+        renderLocalVoice();
         renderVoiceBanner();
-        if (provider === 'whisper' && state.section === 'voice' && !state.query) maybeCheckWhisper();
+        if (provider === 'whisper' && state.section === 'voice' && !state.query) maybeCheckVoice();
+    }
+
+    /** What stops built-in voice here, as { kind, title, sub }, or null. */
+    function localVoiceProblem() {
+        const st = voice.status;
+        if (!hasApi('getVoiceStatus')) {
+            return { kind: 'error', title: 'Local voice cannot be set up here', sub: ['This version of Cuewell cannot set it up. Install the latest release from ', externalLink('the release page', RELEASES_URL), '.'] };
+        }
+        if (!st) {
+            return voice.error ? { kind: 'error', title: 'Could not check local voice', sub: `${voice.error} Choose Check again.` } : null;
+        }
+        const python = st.engine === 'python';
+        if (st.platformSupported === false) {
+            return { kind: 'warn', title: 'Built-in voice does not run on this system',
+                sub: python ? 'Your Python Whisper setup keeps working. Azure Speech also works here.' : 'Use Azure Speech instead.' };
+        }
+        if (!st.binaryAvailable) {
+            const link = externalLink('the release download', RELEASES_URL);
+            return { kind: 'warn', title: 'Voice is not available in this build',
+                sub: python
+                    ? ['Your Python Whisper setup keeps working. For built-in voice, install Cuewell from ', link, '.']
+                    : ['To use it, install Cuewell from ', link, '. Azure Speech also works.'] };
+        }
+        return null;
+    }
+
+    function renderLocalVoice() {
+        const st = voice.status;
+        const python = usingPython();
+        const problem = localVoiceProblem();
+
+        $('voiceEngineName').textContent = python ? 'Python Whisper (advanced)' : 'Built-in (whisper.cpp)';
+        // Python Whisper shows only for setups that already have it.
+        $('voiceEngineRow').hidden = !st || !(st.pythonConfigured || python);
+        engineRadios.forEach((radio) => {
+            radio.checked = radio.value === (python ? 'python' : 'whispercpp');
+            // Built-in cannot be chosen where it cannot run.
+            radio.disabled = voice.selecting || (radio.value === 'whispercpp' && python && !builtInRuns());
+        });
+        pythonRows.forEach((row) => { row.hidden = !python; });
+
+        $('voiceUnavailableRow').hidden = !problem;
+        if (problem) {
+            $('voiceUnavailableDot').className = `oc-dot oc-dot--${problem.kind}`;
+            fill($('voiceUnavailableText'), el('strong', null, problem.title), el('span', { class: 'sw-state-sub' }, problem.sub));
+        }
+        // Models show while checking and when built-in voice can run.
+        $('voiceModelRow').hidden = !!problem;
+        if (!problem) renderModels();
+    }
+
+    function emptyModels(text) {
+        delete modelList.dataset.ids;
+        fill(modelList, el('div', { class: 'sw-state sw-models-empty', role: 'status' },
+            el('span', { class: 'oc-dot', 'aria-hidden': 'true' }),
+            el('span', { class: 'sw-state-text' }, text)));
+    }
+
+    function renderModels() {
+        const models = voiceModels();
+        if (!models.length) {
+            emptyModels(voice.status ? 'No voice models are listed in this build.' : 'Checking voice setup…');
+            return;
+        }
+        // Build the cards once, then update them in place so focus stays put.
+        const ids = models.map((m) => m.id).join('|');
+        if (modelList.dataset.ids !== ids) {
+            modelList.dataset.ids = ids;
+            modelList.replaceChildren(...models.map(buildModelCard));
+        }
+        Array.from(modelList.querySelectorAll('.sw-model')).forEach((card) => {
+            const m = findModel(card.dataset.model);
+            if (m) updateModelCard(card, m);
+        });
+        fill($('voiceModelHelp'), usingPython()
+            ? 'Downloads once, then works offline. Choosing a downloaded model switches to Built-in.'
+            : 'Downloads once, then works offline. Choose a downloaded model to use it.');
+    }
+
+    function buildModelCard(m, index) {
+        const text = MODEL_TEXT[m.id] || { name: m.label, tag: '', note: '' };
+        const radioId = `voiceModel${index}`;
+        return el('div', { class: 'sw-model', 'data-model': m.id },
+            el('label', { class: 'sw-model-pick', for: radioId },
+                el('input', { type: 'radio', name: 'voiceModel', id: radioId, value: m.id, 'aria-describedby': `${radioId}State` }),
+                el('span', { class: 'sw-model-ring', 'aria-hidden': 'true' }),
+                el('span', { class: 'sw-model-text' },
+                    el('span', { class: 'sw-model-name' }, text.name,
+                        text.tag ? el('span', { class: 'oc-chip oc-chip--accent sw-model-tag' }, text.tag) : null),
+                    el('span', { class: 'sw-model-desc' }, [text.note, m.bytes ? formatMB(m.bytes) : ''].filter(Boolean).join(' · ')))),
+            el('div', { class: 'sw-model-side' },
+                el('span', { class: 'sw-model-state', id: `${radioId}State` }),
+                el('button', { type: 'button', class: 'oc-btn', 'data-act': 'download' })),
+            el('div', { class: 'sw-model-progress', hidden: true },
+                el('div', { class: 'sw-meter', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': `Downloading ${text.name}` }, el('span')),
+                el('span', { class: 'sw-model-progress-text', 'aria-hidden': 'true' })),
+            el('div', { class: 'sw-status', role: 'status' }));
+    }
+
+    function setActionButton(button, act, glyph, label, { disabled = false, title = '' } = {}) {
+        button.hidden = !act;
+        if (!act) return;
+        // Same button, new action: keyboard focus stays on it.
+        if (button.dataset.act !== act || button.dataset.label !== label) {
+            button.dataset.act = act;
+            button.dataset.label = label;
+            button.replaceChildren(icon(glyph, glyph === 'circle-notch' ? 'fa-spin-fast' : ''), el('span', null, label));
+        }
+        button.disabled = disabled;
+        button.title = title;
+    }
+
+    /** Set a card's message only when it changes, so it is announced once. */
+    function setCardMessage(card, kind, text) {
+        const node = card.querySelector(':scope > .sw-status');
+        const key = `${kind}:${text}`;
+        if (node.dataset.message === key) return;
+        node.dataset.message = key;
+        setStatus(node, kind, text, { sticky: true });
+    }
+
+    function updateModelCard(card, m) {
+        const d = voice.downloads[m.id] || null;
+        const phase = d ? d.phase : '';
+        const running = phase === 'downloading' || phase === 'cancelling';
+        const selected = !usingPython() && voice.status.selectedModel === m.id;
+        const radio = card.querySelector('input[name="voiceModel"]');
+        radio.checked = selected;
+        radio.disabled = !m.downloaded || voice.selecting;
+        card.classList.toggle('is-selected', selected && m.downloaded);
+
+        const stateNode = card.querySelector('.sw-model-state');
+        stateNode.classList.toggle('is-ok', m.downloaded);
+        if (m.downloaded) fill(stateNode, icon('circle-check'), selected ? 'Ready, in use' : 'Ready');
+        else if (running) fill(stateNode, 'Downloading');
+        else fill(stateNode, 'Not downloaded');
+
+        const button = card.querySelector('button[data-act]');
+        const otherRunning = !!voice.activeId && voice.activeId !== m.id;
+        if (m.downloaded) setActionButton(button, null);
+        else if (phase === 'downloading') setActionButton(button, 'cancel', 'xmark', 'Cancel');
+        else if (phase === 'cancelling') setActionButton(button, 'cancel', 'circle-notch', 'Cancelling…', { disabled: true });
+        else if (phase === 'failed') setActionButton(button, 'retry', 'rotate-right', 'Retry', { disabled: otherRunning, title: otherRunning ? 'Wait for the other download to finish' : '' });
+        else setActionButton(button, 'download', 'download', 'Download', { disabled: otherRunning, title: otherRunning ? 'Wait for the other download to finish' : '' });
+
+        if (phase === 'failed') setCardMessage(card, 'error', d.error);
+        else if (phase === 'cancelled') setCardMessage(card, 'info', 'Download cancelled.');
+        else if (selected && !m.downloaded && !running) setCardMessage(card, 'info', `Download ${modelName(m)} to turn on voice input.`);
+        else setCardMessage(card, '', '');
+
+        paintProgress(card, running ? d : null);
+    }
+
+    function paintProgress(card, d) {
+        const box = card.querySelector('.sw-model-progress');
+        box.hidden = !d;
+        if (!d) return;
+        const percent = progressPercent(d.received, d.total);
+        const text = progressText(d.received, d.total);
+        const meter = box.querySelector('.sw-meter');
+        meter.setAttribute('aria-valuenow', String(percent));
+        meter.setAttribute('aria-valuetext', text);
+        meter.firstElementChild.style.width = `${percent}%`;
+        box.querySelector('.sw-model-progress-text').textContent = text;
+    }
+
+    const cardFor = (id) => Array.from(modelList.querySelectorAll('.sw-model')).find((card) => card.dataset.model === id) || null;
+
+    // Low-level network and disk errors, in plain words.
+    const NETWORK_ERROR = /\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|socket hang up|network)\b/i;
+    const DISK_FULL_ERROR = /\b(ENOSPC|EDQUOT)\b/;
+
+    function downloadError(raw) {
+        if (navigator.onLine === false) return OFFLINE_TEXT;
+        const text = firstLine(raw);
+        if (DISK_FULL_ERROR.test(text)) return 'There is not enough free disk space. Free up some space, then retry.';
+        if (!text || NETWORK_ERROR.test(text)) return 'Could not reach the download server. Check your internet connection, then retry.';
+        return text;
+    }
+
+    async function startVoiceDownload(id) {
+        const m = findModel(id);
+        if (!m || voice.activeId || m.downloaded) return;
+        setStatus($('voiceModelStatus'), '', '');
+        if (!hasApi('downloadVoiceModel')) {
+            voice.downloads[id] = { phase: 'failed', error: OLD_BUILD_TEXT };
+            renderModels();
+            return;
+        }
+        if (navigator.onLine === false) {
+            voice.downloads[id] = { phase: 'failed', error: OFFLINE_TEXT };
+            renderModels();
+            return;
+        }
+        const d = { phase: 'downloading', received: 0, total: m.bytes, startedAt: Date.now(), frame: 0 };
+        voice.downloads[id] = d;
+        voice.activeId = id;
+        renderModels();
+        $('srAnnounce').textContent = `Downloading ${modelName(m)}`;
+        let result;
+        try {
+            result = await api.downloadVoiceModel(id);
+        } catch (_) {
+            result = { success: false, error: '' };
+        }
+        if (voice.activeId === id) voice.activeId = null;
+        if (d.frame) cancelAnimationFrame(d.frame);
+        if (result && result.success) {
+            delete voice.downloads[id];
+            // A check during the download may have replaced the status.
+            const current = findModel(id);
+            if (current) current.downloaded = true;
+            $('srAnnounce').textContent = `${modelName(m)} is ready`;
+            renderLocalVoice();
+            await adoptDownloadedModel(id);
+        } else if (d.phase === 'cancelling') {
+            voice.downloads[id] = { phase: 'cancelled' };
+            $('srAnnounce').textContent = 'Download cancelled';
+            renderModels();
+        } else {
+            voice.downloads[id] = { phase: 'failed', error: downloadError(result && result.error) };
+            $('srAnnounce').textContent = `${modelName(m)} did not download`;
+            renderModels();
+        }
+        refocusCard(id);
+        refreshVoiceStatus();
+    }
+
+    /** The focused button went away or was disabled: put focus back on its card. */
+    function refocusCard(id) {
+        const card = cardFor(id);
+        if (!card) return;
+        // Chromium moves focus off a hidden or disabled button a frame later.
+        const active = document.activeElement;
+        const lost = !active || active === document.body ||
+            (card.contains(active) && (active.hidden || active.disabled));
+        if (!lost) return;
+        const target = card.querySelector('button[data-act]:not([hidden]):not(:disabled)') ||
+            card.querySelector('input[name="voiceModel"]:not(:disabled)');
+        if (target) target.focus({ preventScroll: true });
+    }
+
+    async function cancelVoiceDownload(id) {
+        const d = voice.downloads[id];
+        if (!d || d.phase !== 'downloading' || Date.now() - d.startedAt < CANCEL_GRACE_MS) return;
+        if (!hasApi('cancelVoiceModelDownload')) {
+            setStatus($('voiceModelStatus'), 'error', 'This version of Cuewell cannot cancel the download. It keeps going.', { sticky: true });
+            return;
+        }
+        d.phase = 'cancelling';
+        renderModels();
+        setTimeout(() => {
+            if (voice.downloads[id] === d && d.phase === 'cancelling') {
+                d.phase = 'downloading';
+                renderModels();
+            }
+        }, CANCEL_STUCK_MS);
+        try {
+            await api.cancelVoiceModelDownload(id);
+        } catch (_) { /* the download's own result reports */ }
+    }
+
+    /** A finished download is used right away unless another ready model is. */
+    async function adoptDownloadedModel(id) {
+        const st = voice.status;
+        if (!st || st.engine === 'python') return;
+        const current = findModel(st.selectedModel);
+        if (current && current.downloaded && current.id !== id) return;
+        const m = findModel(id);
+        await changeVoiceEngine('whispercpp', id, $('voiceModelStatus'), `Voice input uses ${modelName(m)}`);
+    }
+
+    /** Save the engine (and model) through main. Resolves to true on success. */
+    async function changeVoiceEngine(engine, model, statusNode, okText) {
+        if (!hasApi('setVoiceEngine')) {
+            setStatus(statusNode, 'error', OLD_BUILD_TEXT, { sticky: true });
+            renderLocalVoice();
+            return false;
+        }
+        voice.selecting = true;
+        renderLocalVoice();
+        setStatus(statusNode, 'busy', 'Saving…');
+        let result;
+        try {
+            result = await api.setVoiceEngine(engine, model);
+        } catch (_) {
+            result = { success: false, error: SAVE_FAILED };
+        }
+        voice.selecting = false;
+        const ok = !!(result && result.success);
+        if (ok) {
+            if (voice.status) {
+                voice.status.engine = engine;
+                if (model) voice.status.selectedModel = model;
+            }
+            setStatus(statusNode, 'ok', okText);
+        } else {
+            setStatus(statusNode, 'error', (result && result.error) || SAVE_FAILED, { sticky: true });
+        }
+        renderLocalVoice();
+        renderVoiceBanner();
+        if (ok) {
+            refreshVoiceStatus();
+            loadSettings({ quiet: true });
+            if (engine === 'python') {
+                state.whisperCheckedAt = 0;
+                refreshWhisperStatus();
+            }
+        }
+        return ok;
+    }
+
+    engineRadios.forEach((radio) => {
+        radio.addEventListener('change', () => {
+            if (!radio.checked || !voice.status || radio.value === voice.status.engine) return;
+            const engine = radio.value;
+            changeVoiceEngine(engine, engine === 'whispercpp' ? voice.status.selectedModel || undefined : undefined,
+                $('voiceEngineStatus'), engine === 'python' ? 'Using Python Whisper' : 'Using built-in voice');
+        });
+    });
+
+    modelList.addEventListener('change', (e) => {
+        const radio = e.target.closest('input[name="voiceModel"]');
+        if (!radio || !radio.checked) return;
+        const m = findModel(radio.value);
+        if (!m || !m.downloaded) return;
+        const switching = usingPython();
+        changeVoiceEngine('whispercpp', m.id, $('voiceModelStatus'),
+            switching ? `Using built-in voice with ${modelName(m)}` : `Voice input uses ${modelName(m)}`);
+    });
+
+    modelList.addEventListener('click', (e) => {
+        const button = e.target.closest('button[data-act]');
+        const card = button && button.closest('.sw-model');
+        if (!card || button.disabled) return;
+        if (button.dataset.act === 'cancel') cancelVoiceDownload(card.dataset.model);
+        else startVoiceDownload(card.dataset.model);
+    });
+
+    if (hasApi('onVoiceModelProgress')) {
+        api.onVoiceModelProgress((data) => {
+            if (!data || typeof data.id !== 'string') return;
+            const d = voice.downloads[data.id];
+            if (!d || (d.phase !== 'downloading' && d.phase !== 'cancelling')) return;
+            const received = Number(data.received);
+            const total = Number(data.total);
+            if (Number.isFinite(received) && received >= 0) d.received = received;
+            if (Number.isFinite(total) && total > 0) d.total = total;
+            // At most one repaint per frame, however often main reports.
+            if (d.frame) return;
+            d.frame = requestAnimationFrame(() => {
+                d.frame = 0;
+                const card = cardFor(data.id);
+                if (card && voice.downloads[data.id] === d) paintProgress(card, d);
+            });
+        });
+    }
+
+    function maybeCheckVoice() {
+        if (Date.now() - voice.checkedAt < 30000) return;
+        refreshVoiceStatus();
+    }
+
+    let voiceCheckToken = 0;
+    async function refreshVoiceStatus() {
+        if (!hasApi('getVoiceStatus')) {
+            renderLocalVoice();
+            renderVoiceBanner();
+            return;
+        }
+        const token = ++voiceCheckToken;
+        voice.checkedAt = Date.now();
+        $('voiceRecheck').disabled = true;
+        let status = null;
+        try {
+            const raw = await api.getVoiceStatus();
+            if (raw && typeof raw === 'object') status = cleanVoiceStatus(raw);
+        } catch (_) { /* reported below */ }
+        if (token !== voiceCheckToken) return;
+        $('voiceRecheck').disabled = false;
+        if (status) {
+            voice.status = status;
+            voice.error = '';
+            setStatus($('voiceModelStatus'), '', '');
+        } else if (voice.status) {
+            // Keep what the last good check showed, and say this one failed.
+            setStatus($('voiceModelStatus'), 'error', 'Could not check local voice. Choose Check again.', { sticky: true });
+        } else {
+            voice.error = 'The check did not finish.';
+        }
+        renderLocalVoice();
+        renderVoiceBanner();
+        if (usingPython()) maybeCheckWhisper();
+    }
+
+    function localVoiceOffMessage() {
+        const st = voice.status;
+        if (!hasApi('getVoiceStatus')) return `Voice input is off. ${OLD_BUILD_TEXT}`;
+        if (!st) return voice.error ? 'Voice input is off: Cuewell could not check local voice. Choose Check again below.' : 'Checking local voice…';
+        if (st.engine === 'python') return 'Voice input is off: Cuewell cannot run your Python Whisper. Check the Whisper command below, or switch to Built-in.';
+        if (st.platformSupported === false) return 'Voice input is off: built-in voice does not run on this system. Use Azure Speech instead.';
+        if (!st.binaryAvailable) return 'Voice input is off: voice is not available in this build. Install Cuewell from the release download to use it.';
+        const selected = findModel(st.selectedModel);
+        if (!selected || !selected.downloaded) return 'Voice input is off until you download a voice model below.';
+        return 'Voice input is not on yet. If this message stays, choose Check again below, or restart Cuewell.';
     }
 
     function renderVoiceBanner() {
@@ -1040,7 +1520,7 @@
                 : 'Voice input is off until you add your Azure Speech key and region.';
         } else {
             kind = 'warn';
-            message = 'Voice input is off: Cuewell cannot run Whisper yet. Install it below, or set the Whisper command.';
+            message = localVoiceOffMessage();
         }
         if (platform() === 'linux' && provider === 'whisper') {
             message += ' On Linux, recording also needs arecord or sox.';
@@ -1059,7 +1539,7 @@
         const result = await save({ speechProvider: value }, {
             status: $('speechProviderStatus'),
             key: 'speechProvider',
-            okText: value === 'azure' ? 'Using Azure Speech' : 'Using local Whisper'
+            okText: value === 'azure' ? 'Using Azure Speech' : 'Using local voice'
         });
         if (result.stale) return;
         if (!result.ok) {
@@ -1081,17 +1561,7 @@
         onChange: () => loadSettings({ quiet: true })
     });
 
-    // Whisper status, install and model download
-    const whisperLog = $('whisperLog');
-
-    function appendLog(line) {
-        if (!line) return;
-        $('whisperLogDetails').hidden = false;
-        whisperLog.textContent += (whisperLog.textContent ? '\n' : '') + String(line);
-        // Keep the log bounded; installs print a lot.
-        if (whisperLog.textContent.length > 60000) whisperLog.textContent = whisperLog.textContent.slice(-50000);
-        whisperLog.scrollTop = whisperLog.scrollHeight;
-    }
+    // Python Whisper (advanced): status and model download, while in use.
 
     function setWhisperProgram(kind, title, sub) {
         $('whisperProgramDot').className = `oc-dot${kind ? ` oc-dot--${kind}` : ''}`;
@@ -1100,19 +1570,17 @@
     }
 
     function maybeCheckWhisper() {
-        if (state.whisperBusy) return;
+        if (state.whisperBusy || !usingPython()) return;
         if (Date.now() - state.whisperCheckedAt < 30000) return;
         refreshWhisperStatus();
     }
 
     let whisperCheckToken = 0;
     async function refreshWhisperStatus() {
-        if (!api || !api.getWhisperStatus || state.whisperBusy) return;
+        if (!api || !api.getWhisperStatus || state.whisperBusy || !usingPython()) return;
         const token = ++whisperCheckToken;
         state.whisperCheckedAt = Date.now();
-        $('whisperRecheck').disabled = true;
-        setWhisperProgram('', 'Checking for Whisper…', '');
-        $('whisperInstall').hidden = true;
+        setWhisperProgram('', 'Checking Python Whisper…', '');
         $('whisperModelState').textContent = '';
         $('whisperDownload').hidden = true;
         let status;
@@ -1122,32 +1590,26 @@
             status = { found: false, error: 'The check did not finish.' };
         }
         if (token !== whisperCheckToken) return;
-        $('whisperRecheck').disabled = false;
         renderWhisperStatus(status || { found: false });
     }
 
     function renderWhisperStatus(status) {
-        const install = $('whisperInstall');
         if (status.busy) {
-            setWhisperProgram('warn', 'Whisper setup is running', 'Another setup step is in progress. Check again when it finishes.');
-            install.hidden = true;
+            setWhisperProgram('warn', 'Python Whisper is busy', 'A model download is in progress. Check again when it finishes.');
         } else if (status.found) {
             const parts = [status.version ? `Version ${status.version}` : null, status.command].filter(Boolean);
-            setWhisperProgram('ok', 'Whisper is installed', parts.join(' · '));
-            install.hidden = true;
+            setWhisperProgram('ok', 'Python Whisper found', parts.join(' · '));
         } else if (status.error) {
-            setWhisperProgram('error', 'Could not check for Whisper', status.error);
-            install.hidden = false;
+            setWhisperProgram('error', 'Could not check Python Whisper', status.error);
         } else {
-            setWhisperProgram('warn', 'Whisper is not installed',
-                'Install it here. It needs Python 3.10 or newer and about 3 to 5 GB of disk, and can take several minutes.');
-            install.hidden = false;
+            setWhisperProgram('warn', 'Cuewell cannot find your Python Whisper',
+                'Check the Whisper command below, or switch to Built-in above. Built-in needs no Python.');
         }
         const modelState = $('whisperModelState');
         const download = $('whisperDownload');
         if (!status.found) {
             modelState.classList.remove('is-ok');
-            modelState.textContent = 'Install Whisper to download models.';
+            modelState.textContent = 'Needs a working Python Whisper.';
             download.hidden = true;
         } else if (status.modelDownloaded) {
             modelState.replaceChildren(icon('circle-check'), ' Downloaded');
@@ -1163,8 +1625,6 @@
     function setWhisperBusy(job) {
         state.whisperBusy = job;
         const busy = !!job;
-        $('whisperRecheck').disabled = busy;
-        $('whisperInstall').disabled = busy;
         $('whisperDownload').disabled = busy;
         $('whisperModel').disabled = busy;
     }
@@ -1175,61 +1635,11 @@
         return () => button.replaceChildren(...original);
     }
 
-    async function runWhisperJob(job, run) {
-        if (state.whisperBusy || !api) return;
-        setWhisperBusy(job);
-        whisperLog.textContent = '';
-        $('whisperLogDetails').hidden = false;
-        const stop = api.onInstallProgress ? api.onInstallProgress(appendLog) : null;
-        try {
-            await run();
-        } finally {
-            if (typeof stop === 'function') stop();
-            setWhisperBusy(null);
-        }
-    }
-
-    $('whisperInstall').addEventListener('click', () => runWhisperJob('install', async () => {
-        const button = $('whisperInstall');
-        const restore = withButtonBusy(button, 'Installing…');
-        setWhisperProgram('', 'Installing Whisper…', 'This can take several minutes. You can close Settings; it keeps going.');
-        $('whisperLogDetails').open = true;
-        let result;
-        try {
-            result = await api.installWhisper();
-        } catch (_) {
-            result = { ok: false, message: 'The install did not finish.' };
-        }
-        restore();
-        if (result && result.ok) {
-            appendLog(result.message || 'Whisper installed.');
-            if (result.command) {
-                const saved = await save({ whisperCommand: result.command }, {
-                    status: $('whisperCommandStatus'),
-                    input: $('whisperCommand'),
-                    key: 'whisperCommand',
-                    okText: 'Whisper command set'
-                });
-                if (saved.ok) {
-                    state.saved.whisperCommand = result.command;
-                    $('whisperCommand').value = result.command;
-                }
-            }
-            state.whisperCheckedAt = 0;
-            setWhisperBusy(null);
-            await refreshWhisperStatus();
-            loadSettings({ quiet: true });
-        } else {
-            const message = (result && result.message) || 'The install failed.';
-            appendLog(message);
-            setWhisperProgram('error', 'Whisper could not be installed', message);
-            $('whisperInstall').hidden = false;
-        }
-    }));
-
-    $('whisperDownload').addEventListener('click', () => runWhisperJob('download', async () => {
+    $('whisperDownload').addEventListener('click', async () => {
+        if (state.whisperBusy || !api || !api.downloadWhisperModel) return;
         const model = $('whisperModel').value;
         const button = $('whisperDownload');
+        setWhisperBusy('download');
         const restore = withButtonBusy(button, 'Downloading…');
         $('whisperModelState').classList.remove('is-ok');
         $('whisperModelState').textContent = `Downloading ${model}. Large models can take several minutes.`;
@@ -1240,22 +1650,23 @@
             result = { ok: false, message: 'The download did not finish.' };
         }
         restore();
+        setWhisperBusy(null);
         if (result && result.ok) {
-            appendLog(result.message || 'Model downloaded.');
             setStatus($('whisperModelStatus'), 'ok', 'Model downloaded');
-            setWhisperBusy(null);
+            state.whisperCheckedAt = 0;
             await refreshWhisperStatus();
         } else {
             const message = (result && result.message) || 'The download failed.';
-            appendLog(message);
             setStatus($('whisperModelStatus'), 'error', `Download failed. ${firstLine(message)}`, { sticky: true });
             $('whisperModelState').textContent = 'Not downloaded.';
         }
-    }));
+    });
 
-    $('whisperRecheck').addEventListener('click', () => {
+    $('voiceRecheck').addEventListener('click', () => {
         state.whisperCheckedAt = 0;
-        refreshWhisperStatus();
+        refreshVoiceStatus();
+        // Also re-reads whether voice input is on (speechAvailable).
+        loadSettings({ quiet: true });
     });
 
     function firstLine(text) {
@@ -1425,7 +1836,7 @@
             const item = navItems.find((i) => i.dataset.nav === name);
             if (item) item.focus();
         }
-        if (name === 'voice' && speechProvider() === 'whisper') maybeCheckWhisper();
+        if (name === 'voice' && speechProvider() === 'whisper') maybeCheckVoice();
     }
 
     function applyView() {
@@ -1479,13 +1890,13 @@
         switch (gate) {
             case 'speech:whisper':
                 return {
-                    text: 'Used only with Local Whisper. Voice input now uses Azure Speech.',
-                    button: 'Use Local Whisper',
-                    run: () => switchFromNote(gate, () => saveSpeechProvider('whisper'), () => speechProvider() === 'whisper', 'Now using Local Whisper')
+                    text: 'Used only with local voice. Voice input now uses Azure Speech.',
+                    button: 'Use local voice',
+                    run: () => switchFromNote(gate, () => saveSpeechProvider('whisper'), () => speechProvider() === 'whisper', 'Now using local voice')
                 };
             case 'speech:azure':
                 return {
-                    text: 'Used only with Azure Speech. Voice input now uses Local Whisper.',
+                    text: 'Used only with Azure Speech. Voice input now uses local voice.',
                     button: 'Use Azure Speech',
                     run: () => switchFromNote(gate, () => saveSpeechProvider('azure'), () => speechProvider() === 'azure', 'Now using Azure Speech')
                 };
@@ -1653,6 +2064,8 @@
         state.query = searchInput.value.trim();
         applyView();
         scroller.scrollTop = 0;
+        // Results can list the voice models; make sure they have loaded.
+        if (state.query && speechProvider() === 'whisper' && !voice.status) maybeCheckVoice();
     });
 
     searchInput.addEventListener('keydown', (e) => {
@@ -1774,7 +2187,10 @@
                 loadSettings({ quiet: true });
                 loadProfile();
                 if (!state.info) loadInfo();
-                if (state.section === 'voice') state.whisperCheckedAt = 0;
+                if (state.section === 'voice') {
+                    state.whisperCheckedAt = 0;
+                    voice.checkedAt = 0;
+                }
                 setTimeout(() => {
                     if (!document.activeElement || document.activeElement === document.body) searchInput.focus();
                 }, 50);

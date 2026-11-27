@@ -256,16 +256,6 @@
             height: 26px;
         }
 
-        /* Status chips. JS sets className to "oc-chip status-pill <state>". */
-        .status-pill {
-            margin-top: 10px;
-        }
-        .status-pill i { font-size: 10px; }
-        .status-pill.idle    { color: var(--oc-text-3); }
-        .status-pill.testing { color: var(--oc-warn); background: var(--oc-warn-soft); border-color: transparent; }
-        .status-pill.success { color: var(--oc-accent); background: var(--oc-accent-soft); border-color: var(--oc-accent-line); }
-        .status-pill.error   { color: var(--oc-error); background: var(--oc-error-soft); border-color: transparent; }
-
         /* ── Choice cards ── */
         .choice-list {
             display: flex;
@@ -439,99 +429,147 @@
         .test-result.success { color: var(--oc-accent); background: var(--oc-accent-soft); border-color: var(--oc-accent-line); }
         .test-result.error   { color: var(--oc-error); background: var(--oc-error-soft); }
 
-        /* ── Whisper install ── */
-        .install-card {
+        /* ── Local voice models ── */
+        .voice-problem {
+            margin-bottom: 12px;
+        }
+        .voice-problem a {
+            color: inherit;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+        .voice-problem .oc-btn {
+            flex: none;
+            height: 26px;
+            margin-left: auto;
+            padding: 0 10px;
+            font-size: var(--oc-fs-xs);
+        }
+        .voice-status {
             margin-top: 12px;
-            padding: 14px;
         }
-        .install-title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 10px;
-            font-size: var(--oc-fs-sm);
-            font-weight: 650;
-            color: var(--oc-text);
-        }
-        .install-title i {
-            font-size: 11px;
+        .voice-hint {
+            margin-top: 12px;
+            font-size: var(--oc-fs-xs);
+            line-height: 1.5;
             color: var(--oc-text-3);
         }
-        .install-list {
-            list-style: none;
+        .model-card {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px 14px;
+            padding: 12px 14px;
+            transition:
+                background var(--oc-t-fast) var(--oc-ease),
+                border-color var(--oc-t-fast) var(--oc-ease);
         }
-        .install-list li {
-            position: relative;
-            margin-bottom: 4px;
-            padding-left: 14px;
-            font-size: var(--oc-fs-xs);
-            line-height: 1.6;
-            color: var(--oc-text-2);
+        .model-card:hover {
+            background: var(--oc-raised-2);
+            border-color: var(--oc-line-2);
         }
-        .install-list li::before {
-            content: '';
-            position: absolute;
-            top: 0.75em;
-            left: 2px;
-            width: 4px;
-            height: 4px;
-            border-radius: 50%;
-            background: var(--oc-text-4);
+        .model-card:has(input:checked) {
+            background: var(--oc-accent-soft);
+            border-color: var(--oc-accent-line);
         }
-
-        .install-log {
-            max-height: 128px;
-            margin-top: 12px;
-            padding: 10px 12px;
-            overflow-y: auto;
-            font-family: var(--oc-mono);
-            font-size: var(--oc-fs-2xs);
-            line-height: 1.6;
-            color: var(--oc-text-2);
-            white-space: pre-wrap;
-            word-break: break-word;
-            background: var(--oc-sunken);
-            border: 1px solid var(--oc-line);
-            border-radius: var(--oc-r-md);
+        .model-card:has(input:focus-visible) {
+            outline: 2px solid var(--oc-accent-line);
+            outline-offset: 2px;
         }
-        .install-log:empty::before {
-            content: "Install output will appear here…";
-            color: var(--oc-text-4);
-        }
-
-        .detect-row {
+        .model-pick {
             display: flex;
             align-items: center;
-            justify-content: space-between;
             gap: 12px;
-            padding: 14px;
-        }
-        .detect-main {
             min-width: 0;
+            cursor: pointer;
         }
-        .detect-main .oc-label {
-            display: block;
-            margin-bottom: 6px;
+        .model-card:has(input:checked) .choice-radio {
+            border-color: var(--oc-accent);
+            background: var(--oc-accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23141a08' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center;
         }
-        .detect-row code {
-            display: inline-block;
-            max-width: 100%;
-            padding: 4px 8px;
-            overflow: hidden;
+        .model-card:has(input:checked) .choice-icon {
+            color: var(--oc-accent);
+            border-color: var(--oc-accent-line);
+        }
+        .choice-title .tag.oc-chip {
+            height: 18px;
+            margin-left: 6px;
+            padding: 0 7px;
+            font-size: var(--oc-fs-2xs);
+            vertical-align: 1px;
+        }
+        .model-side {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .model-side .oc-btn {
+            height: 30px;
+        }
+        .model-state {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
             font-size: var(--oc-fs-xs);
-            text-overflow: ellipsis;
+            font-weight: 600;
+            color: var(--oc-text-3);
             white-space: nowrap;
-            vertical-align: middle;
-            color: var(--oc-text);
-            border-radius: var(--oc-r-sm);
         }
-        .detect-row .status-pill {
-            flex: none;
-            margin-top: 0;
+        .model-state:empty {
+            display: none;
         }
-
-        #installWhisperBtn {
-            height: 34px;
+        .model-state.ok {
+            color: var(--oc-accent);
+        }
+        .model-state i {
+            font-size: 10px;
+        }
+        .model-progress {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .meter {
+            flex: 1;
+            height: 4px;
+            overflow: hidden;
+            background: var(--oc-line-2);
+            border-radius: var(--oc-r-pill);
+        }
+        .meter > span {
+            display: block;
+            width: 0;
+            height: 100%;
+            background: var(--oc-accent);
+            border-radius: inherit;
+            transition: width 240ms var(--oc-ease);
+        }
+        .model-progress-text {
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-2xs);
+            font-variant-numeric: tabular-nums;
+            color: var(--oc-text-2);
+            white-space: nowrap;
+        }
+        .model-msg {
+            grid-column: 1 / -1;
+            font-size: var(--oc-fs-xs);
+            font-weight: 600;
+            line-height: 1.45;
+        }
+        .model-msg:empty {
+            display: none;
+        }
+        .model-msg.error { color: var(--oc-error); }
+        .model-msg.info  { color: var(--oc-text-3); }
+        /* These set display, so restate what the hidden attribute means. */
+        .voice-problem[hidden],
+        .choice-list[hidden],
+        .model-progress[hidden],
+        .model-side .oc-btn[hidden] {
+            display: none;
         }
 
         /* ── Finish ── */
@@ -868,10 +906,10 @@
                         <input class="sr-only" type="radio" name="speech" value="whisper">
                         <div class="choice-icon"><i class="fas fa-microphone" aria-hidden="true"></i></div>
                         <div class="choice-text">
-                            <div class="choice-title">Local Whisper</div>
+                            <div class="choice-title">Local voice</div>
                             <div class="choice-desc">
-                                Run OpenAI Whisper on your own machine. Free, offline, and private:
-                                no audio leaves your computer. Requires Python.
+                                Built-in whisper.cpp. Free, offline and private: audio never leaves
+                                this computer. Needs a one-time 60 to 190 MB download.
                             </div>
                         </div>
                         <div class="choice-radio" aria-hidden="true"></div>
@@ -921,78 +959,26 @@
                 </div>
             </section>
 
-            <!-- SCREEN 4: Whisper install (only shown when whisper chosen) -->
-            <section class="screen" data-screen="whisper">
-                <h1>Local Whisper setup</h1>
-                <p class="subtitle" id="whisperSubtitle">
-                    Detecting your Whisper installation…
+            <!-- SCREEN 4: Local voice model (only when local voice is chosen) -->
+            <section class="screen" data-screen="voice-model">
+                <h1>Set up local voice</h1>
+                <p class="subtitle">
+                    Runs on this computer. Audio never leaves it. The model downloads once, then works offline.
                 </p>
 
-                <div class="detect-row oc-card" id="detectRow">
-                    <div class="detect-main">
-                        <span class="oc-label">Detected command</span>
-                        <code id="detectCmd">scanning…</code>
-                    </div>
-                    <div id="detectStatus" class="oc-chip status-pill idle">
-                        <i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i>
-                        <span class="text">Probing</span>
-                    </div>
-                </div>
+                <div id="voiceProblem" class="test-result error voice-problem" role="status" hidden></div>
 
-                <div class="install-card oc-card" id="installCard">
-                    <div class="install-title">
-                        <i class="fas fa-circle-info" aria-hidden="true"></i>
-                        <span id="installCardTitle">What we'll do</span>
-                    </div>
-                    <ul class="install-list" id="installList"></ul>
-                </div>
+                <fieldset class="choice-list" id="voiceModelChoices">
+                    <legend class="sr-only">Voice model</legend>
+                </fieldset>
 
-                <div class="install-log" id="installLog"></div>
-            </section>
-
-            <!-- SCREEN 5: Whisper Model Download -->
-            <section class="screen" data-screen="model-download">
-                <h1>Whisper model download</h1>
-                <p class="subtitle" id="modelDownloadSubtitle">
-                    The Whisper transcription model needs to be downloaded before first use.
+                <div id="voiceModelStatus" class="test-result voice-status" role="status" aria-live="polite"></div>
+                <p class="voice-hint" id="voiceLanguageHint">
+                    Speak Hindi or Hinglish? Choose your language later in Settings &gt; Voice.
                 </p>
-
-                <div class="install-card oc-card" id="modelDownloadCard">
-                    <div class="install-title">
-                        <i class="fas fa-circle-info" aria-hidden="true"></i>
-                        <span id="modelDownloadTitle">Choose when to download the model</span>
-                    </div>
-                    <fieldset class="choice-list" id="modelDownloadChoices">
-                        <legend class="sr-only">When to download the model</legend>
-                        <label class="choice-card oc-card">
-                            <input class="sr-only" type="radio" name="modelDownload" value="now">
-                            <div class="choice-icon"><i class="fas fa-download" aria-hidden="true"></i></div>
-                            <div class="choice-text">
-                                <div class="choice-title">Download now</div>
-                                <div class="choice-desc">
-                                    Download the <code>small</code> model (~461 MB) now so it's ready when you need it. Recommended.
-                                </div>
-                            </div>
-                            <div class="choice-radio" aria-hidden="true"></div>
-                        </label>
-                        <label class="choice-card oc-card">
-                            <input class="sr-only" type="radio" name="modelDownload" value="later">
-                            <div class="choice-icon"><i class="fas fa-clock" aria-hidden="true"></i></div>
-                            <div class="choice-text">
-                                <div class="choice-title">Download on first use</div>
-                                <div class="choice-desc">
-                                    Download the model automatically when you first use voice input. First transcription will take longer.
-                                </div>
-                            </div>
-                            <div class="choice-radio" aria-hidden="true"></div>
-                        </label>
-                    </fieldset>
-                </div>
-
-                <div class="install-log" id="modelDownloadLog"></div>
             </section>
 
-            <!-- SCREEN 6: Finish (summary) -->
+            <!-- SCREEN 5: Finish (summary) -->
             <section class="screen" data-screen="finish">
                 <div class="finish-card">
                     <div class="check"><i class="fas fa-check" aria-hidden="true"></i></div>
@@ -1039,7 +1025,7 @@
             </button>
             <div class="nav-right">
                 <button class="oc-btn oc-btn--ghost" id="skipBtn" type="button" style="display:none;">
-                    Skip
+                    Set up later
                 </button>
                 <button class="oc-btn oc-btn--primary" id="nextBtn" type="button">
                     Get started <i class="fas fa-arrow-right"></i>
