@@ -58,16 +58,61 @@
     // with delimiters x paragraph length (10,000 "#*a" take about 4 s).
     // Past this budget the answer is shown as plain text. Normal answers stay
     // far below it: a 2,000-char paragraph with 40 delimiters scores 80,000.
+    //
+    // Every "_" counts, word-internal ones too ("snake_case"): marked never
+    // makes emphasis of them, but it still rescans for each one, so 20,000
+    // "a_" took about 1 s. Fenced code blocks are skipped, since marked runs
+    // no inline rules inside them; that keeps long code full of snake_case
+    // names formatted. A fence that marked would not treat as one is counted
+    // as text (see FENCE_OPEN), so this never undercounts.
     var EMPHASIS_BUDGET = 5e6;
-    var DELIMITER = /[*~]|(?:^|[^A-Za-z0-9])_/g;
+    var DELIMITER = /[*~_]/g;
+    // An opening fence at the start of a line: 3+ backticks or tildes (a
+    // backtick fence's info string cannot contain a backtick). Indented
+    // fences are counted as text: inside a list item marked may end the
+    // fence where this scan would not.
+    var FENCE_OPEN = /^(`{3,}(?=[^`]*$)|~{3,})/;
+    // At least as loose as marked's closer (" {0,3}" + opener + "[~`]* *"),
+    // so a fence never ends later here than in marked.
+    var FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[~`]*[ \t]*$/;
+    var BLANK = /^[ \t]*$/;
 
     function emphasisCost(src) {
         var cost = 0;
-        var blocks = src.split(/\n[ \t]*\n/);
-        for (var i = 0; i < blocks.length; i++) {
-            var delimiters = blocks[i].match(DELIMITER);
-            if (delimiters) cost += delimiters.length * blocks[i].length;
+        var count = 0;
+        var length = 0;
+        var fence = null;
+        // marked normalizes line endings the same way before lexing.
+        var lines = src.replace(/\r\n|\r/g, '\n').split('\n');
+        function endBlock() {
+            cost += count * length;
+            count = 0;
+            length = 0;
         }
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (fence) {
+                var close = FENCE_CLOSE.exec(line);
+                if (close && close[1].charAt(0) === fence.charAt(0) && close[1].length >= fence.length) {
+                    fence = null;
+                }
+                continue;
+            }
+            var open = FENCE_OPEN.exec(line);
+            if (open) {
+                endBlock();
+                fence = open[1];
+                continue;
+            }
+            if (BLANK.test(line)) {
+                endBlock();
+                continue;
+            }
+            var delimiters = line.match(DELIMITER);
+            if (delimiters) count += delimiters.length;
+            length += line.length + 1;
+        }
+        endBlock();
         return cost;
     }
 

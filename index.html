@@ -169,8 +169,10 @@
         font-weight: 500;
       }
 
-      /* Info: icon-only circle */
-      #infoButton {
+      /* Shortcuts, Settings and More: icon-only circles */
+      #infoButton,
+      #settingsButton,
+      #moreButton {
         justify-content: center;
         width: 28px;
         padding: 0;
@@ -317,6 +319,76 @@
         align-items: center;
         gap: 6px;
       }
+      /* ---------- Notice under the bar (microphone problems, etc.) ---------- */
+
+      /* top = bar height (40px) + 6px gap, like the shortcuts popover */
+      .toolbar-notice {
+        position: absolute;
+        top: 46px;
+        left: 0;
+        right: 0;
+        display: none;
+        align-items: flex-start;
+        gap: 9px;
+        box-sizing: border-box;
+        padding: 9px 8px 9px 12px;
+        color: var(--oc-text);
+        background: var(--oc-glass-pop);
+        border-radius: var(--oc-r-lg);
+        box-shadow: inset 0 0 0 1px var(--oc-live-line), inset 0 1px 0 var(--oc-sheen);
+        z-index: 1001;
+        -webkit-app-region: no-drag;
+      }
+
+      .toolbar-notice.is-open {
+        display: flex;
+      }
+
+      .toolbar-notice-icon {
+        flex: none;
+        width: 14px;
+        margin-top: 2px;
+        font-size: 12px;
+        text-align: center;
+        color: var(--oc-error);
+      }
+
+      .toolbar-notice-text {
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+        font-size: var(--oc-fs-sm);
+        line-height: 1.45;
+        color: var(--oc-text);
+        user-select: text;
+      }
+
+      .toolbar-notice-close {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        margin: -2px 0 0;
+        padding: 0;
+        font-size: 11px;
+        color: var(--oc-text-3);
+        background: transparent;
+        border: 0;
+        border-radius: 50%;
+        cursor: pointer;
+      }
+
+      .toolbar-notice-close:hover {
+        color: var(--oc-text);
+        background: var(--oc-raised-2);
+      }
+
+      .toolbar-notice-close:focus-visible {
+        outline: 2px solid var(--oc-accent-line);
+        outline-offset: 0;
+      }
     </style>
     <link rel="stylesheet" href="./src/styles/theme.css">
   </head>
@@ -359,7 +431,19 @@
       <button type="button" class="command-item" id="settingsButton" title="Settings" aria-label="Settings">
         <i class="fas fa-gear" aria-hidden="true"></i>
       </button>
+      <button type="button" class="command-item" id="moreButton" title="More" aria-label="More" aria-haspopup="menu">
+        <i class="fas fa-ellipsis" aria-hidden="true"></i>
+      </button>
       <div class="status-dot non-interactive" id="statusDot" role="img" title="Click-through mode (Alt+A to interact)" aria-label="Click-through mode (Alt+A to interact)"></div>
+    </div>
+
+    <!-- Notice under the bar; main-window.js fills and opens it. -->
+    <div id="toolbarNotice" class="toolbar-notice" role="alert">
+      <i class="fas fa-microphone-slash toolbar-notice-icon" aria-hidden="true"></i>
+      <p class="toolbar-notice-text" id="toolbarNoticeText"></p>
+      <button type="button" class="toolbar-notice-close" id="toolbarNoticeClose" title="Dismiss" aria-label="Dismiss">
+        <i class="fas fa-xmark" aria-hidden="true"></i>
+      </button>
     </div>
 
     <!-- Shortcuts popover (hidden by default via CSS) -->

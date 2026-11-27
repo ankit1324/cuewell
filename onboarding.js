@@ -539,40 +539,43 @@
   function enterWhisperScreen() {
     if (whisperInitialized) return;
     whisperInitialized = true;
+    // The venv goes in Cuewell's app data folder (Electron userData), where
+    // main.js points the Whisper installer; never in the app's own folder.
     const hints = {
       win32: {
-        title: "We'll create a project-local venv and install openai-whisper",
+        title: 'Cuewell installs Whisper in its own Python environment',
         steps: [
-          'Python 3.10+ must be on PATH (download from python.org if missing).',
-          'A new <code>.venv-whisper\\</code> folder will be created in the app directory.',
-          'Whisper will be installed into that venv (pip download, no admin rights needed).',
-          'First transcription downloads the <code>small</code> model (~461 MB).',
+          'Needs Python 3.10 or newer (3.12 recommended), from python.org or <code>winget install Python.Python.3.12</code>.',
+          'Creates a <code>.venv-whisper</code> folder in the Cuewell app data folder (under <code>%APPDATA%</code>).',
+          'Installs Whisper there with pip. No admin rights needed. Uses about 3 to 5 GB of disk.',
+          'Then downloads the <code>small</code> model (about 461 MB), now or on first use.',
         ],
       },
       darwin: {
-        title: "We'll create a project-local venv and install openai-whisper",
+        title: 'Cuewell installs Whisper in its own Python environment',
         steps: [
-          'Uses your existing Python 3 (install via Homebrew if missing).',
-          'A new <code>.venv-whisper/</code> folder is created in the app data directory.',
-          'Whisper installs into that venv — no <code>sudo</code> required.',
-          'First transcription downloads the <code>small</code> model (~461 MB).',
+          'Needs Python 3.10 or newer (3.12 recommended), from python.org or <code>brew install python@3.12</code>.',
+          'Creates a <code>.venv-whisper</code> folder in the Cuewell app data folder (under <code>~/Library/Application Support</code>).',
+          'Installs Whisper there with pip. No <code>sudo</code> needed. Uses about 3 to 5 GB of disk.',
+          'Then downloads the <code>small</code> model (about 461 MB), now or on first use.',
         ],
       },
       other: {
-        title: "We'll create a project-local venv and install openai-whisper",
+        title: 'Cuewell installs Whisper in its own Python environment',
         steps: [
-          'Uses your system Python 3 (needs <code>python3-venv</code> on Debian/Ubuntu).',
-          'A new <code>.venv-whisper/</code> folder is created in the app data directory.',
-          'Whisper installs into that venv — avoids the externally-managed-environment error.',
-          'First transcription downloads the <code>small</code> model (~461 MB).',
+          'Needs Python 3.10 or newer with venv. On Debian and Ubuntu: <code>sudo apt install python3-venv</code>.',
+          'Creates a <code>.venv-whisper</code> folder in the Cuewell app data folder (under <code>~/.config</code>).',
+          'Installs Whisper there with pip. No <code>sudo</code> needed. Uses about 3 to 5 GB of disk.',
+          'Recording needs <code>arecord</code> (alsa-utils) or <code>sox</code>.',
+          'Then downloads the <code>small</code> model (about 461 MB), now or on first use.',
         ],
       },
     };
-    const plat = navigator.platform.toLowerCase().includes('win')
-      ? 'win32'
-      : navigator.platform.toLowerCase().includes('mac')
-        ? 'darwin'
-        : 'other';
+    // html[data-platform] comes from preload.js; navigator is the fallback.
+    const platformName = document.documentElement.dataset.platform ||
+      (navigator.platform.toLowerCase().includes('win') ? 'win32'
+        : navigator.platform.toLowerCase().includes('mac') ? 'darwin' : 'linux');
+    const plat = platformName === 'win32' || platformName === 'darwin' ? platformName : 'other';
     const h = hints[plat];
     installCardTitle.textContent = h.title;
     installList.innerHTML = h.steps.map((s) => `<li>${s}</li>`).join('');
@@ -687,6 +690,11 @@
       rows.push({ icon: 'fa-microphone', label: 'Speech', value: 'Skipped (configure later)', cls: 'skip' });
     }
     rows.push({ icon: 'fa-file-lines', label: 'Config saved to', value: '.env', cls: 'ok' });
+    // Linux cannot hide windows from screen capture; say so before the
+    // first interview rather than let the user assume privacy mode works.
+    if (document.documentElement.dataset.platform === 'linux') {
+      rows.push({ icon: 'fa-eye', label: 'Screen-capture protection', value: 'Not available on Linux', cls: 'skip' });
+    }
 
     const list = $('#summaryList');
     list.textContent = '';

@@ -85,7 +85,9 @@ class WindowManager {
     
     this.windowConfigs = {
       main: {
-        width: 520,
+        // Also the toolbar's max width. Widest bar measured: 595 px (Ctrl
+        // keys, mic "Listening", Coding + JavaScript, gear and More).
+        width: 620,
         height: 35,
         useContentSize: true,
         file: 'index.html',
