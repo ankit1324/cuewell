@@ -576,7 +576,7 @@
      A /releases/tag/vX.Y.Z URL also works. File names live in index.html
      (data-file on each .dl-file link). */
   var RELEASES_URL = 'https://github.com/ankit1324/cuewell/releases/latest';
-  var VERSION = '1.0.1';
+  var VERSION = '1.0.2';
 
   function releaseBase() {
     var url = String(RELEASES_URL || '').trim().replace(/\/+$/, '');
