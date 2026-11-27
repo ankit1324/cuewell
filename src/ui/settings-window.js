@@ -1583,9 +1583,13 @@
         return Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
     }
 
-    async function flushAll() {
-        await withTimeout(Promise.all([saveProfile(), flushTextInputs()]), 2000);
+    async function flushAll(timeoutMs = 2000) {
+        await withTimeout(Promise.all([saveProfile(), flushTextInputs()]), timeoutMs);
     }
+
+    // Quitting (Cmd+Q, menu, tray) waits up to 1 s for pending saves; stay
+    // inside that budget.
+    if (api && api.onFlushBeforeQuit) api.onFlushBeforeQuit(() => flushAll(900));
 
     async function closeWindow() {
         await flushAll();
