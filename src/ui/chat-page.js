@@ -389,7 +389,7 @@ function syncCards(entry, blocks) {
       return;
     }
     const label = card.querySelector('.code-head .oc-label');
-    if (label && label.textContent !== lang) label.textContent = lang;
+    if (label && label.textContent !== codeLabel(lang)) label.textContent = codeLabel(lang);
     const codeEl = card.querySelector('pre code');
     if (codeEl && codeEl.textContent !== block.code) {
       codeEl.className = `language-${lang}`;
@@ -686,6 +686,13 @@ function attachCopy(btn, codeText) {
 // A snippet card. `rise` plays the entry animation (not for cards that
 // appear while an answer streams); `copy` adds the copy button and
 // highlights the code, which a streaming card gets from finishSnippet.
+// Display name for a code block's language (same names as the answer window).
+function codeLabel(lang) {
+  const names = { cpp: 'C++', 'c++': 'C++', cs: 'C#', csharp: 'C#', js: 'JavaScript', javascript: 'JavaScript', ts: 'TypeScript', typescript: 'TypeScript', py: 'Python', python: 'Python', java: 'Java', c: 'C', go: 'Go', rust: 'Rust', sql: 'SQL', bash: 'Bash', sh: 'Shell' };
+  const key = String(lang || '').toLowerCase();
+  return names[key] || lang;
+}
+
 function buildSnippet(language, code, { rise = true, copy = true } = {}) {
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message assistant snippet';
@@ -706,7 +713,7 @@ function buildSnippet(language, code, { rise = true, copy = true } = {}) {
 
   const label = document.createElement('span');
   label.className = 'oc-label';
-  label.textContent = lang;
+  label.textContent = codeLabel(lang);
 
   const head = document.createElement('div');
   head.className = 'code-head';

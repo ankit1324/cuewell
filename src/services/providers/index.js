@@ -26,7 +26,7 @@ const PROVIDERS = Object.freeze({
   }),
   anthropic: Object.freeze({
     label: 'Anthropic Claude', keyEnv: 'ANTHROPIC_API_KEY', modelEnv: 'ANTHROPIC_MODEL',
-    defaultModel: 'claude-opus-5-5', kind: 'anthropic', supportsImages: true
+    defaultModel: 'claude-sonnet-5-5', kind: 'anthropic', supportsImages: true
   }),
   openai: Object.freeze({
     label: 'OpenAI', keyEnv: 'OPENAI_API_KEY', modelEnv: 'OPENAI_MODEL',

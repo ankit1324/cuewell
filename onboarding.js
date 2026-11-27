@@ -183,7 +183,7 @@
     },
     anthropic: {
       label: 'Anthropic Claude', company: 'Anthropic', keyField: 'anthropicKey', modelField: 'anthropicModel',
-      defaultModel: 'claude-opus-5-5', keyPlaceholder: 'sk-ant-…',
+      defaultModel: 'claude-sonnet-5-5', keyPlaceholder: 'sk-ant-…',
       keyUrl: 'https://console.anthropic.com/settings/keys', keyUrlText: 'console.anthropic.com',
     },
     openai: {
