@@ -7,7 +7,7 @@
  * decides which screens the current path shows:
  *
  *   1. Welcome
- *   2. Gemini API key entry + live connection test
+ *   2. AI provider choice, key / model / Ollama URL + Test connection
  *   3. Speech provider choice (Whisper / Azure / Skip)
  *   4. Whisper detect + (optional) install (Whisper only)
  *   5. Whisper model download (Whisper only)
@@ -46,8 +46,15 @@
   // ── State ─────────────────────────────────────────────────────────
   const state = {
     step: 0,
-    geminiKey: '',
-    geminiConfigured: false, // a key already exists in .env from a prior run
+    provider: 'gemini',
+    apiKey: '',
+    model: '',
+    baseUrl: 'http://localhost:11434', // Ollama only
+    savedProvider: null, // provider whose key is already in .env, from a prior run
+    savedProviderConfigured: false,
+    geminiConfigured: false,
+    testing: false,
+    testedSignature: null, // inputs of the last successful test
     speechProvider: null, // 'whisper' | 'azure' | 'skip'
     azureKey: '',
     azureRegion: '',
@@ -57,6 +64,7 @@
     modelDownloadChoice: null, // 'now' | 'later'
     modelDownloading: false,
     modelDownloaded: false,
+    modelDownloadFailed: false,
     finished: false,
   };
 
@@ -105,8 +113,10 @@
     // The primary action label changes by step
     if (name === 'welcome') nextBtn.innerHTML = 'Get started <i class="fas fa-arrow-right"></i>';
     else if (name === 'finish') nextBtn.innerHTML = 'Finish <i class="fas fa-check"></i>';
-    else if (name === 'whisper') nextBtn.innerHTML = 'Continue <i class="fas fa-arrow-right"></i>';
+    else if (name === 'model-download') refreshModelDownloadButton();
     else nextBtn.innerHTML = 'Continue <i class="fas fa-arrow-right"></i>';
+    // Continue on the AI step waits for a passing test of the current inputs.
+    if (name === 'provider') nextBtn.disabled = !providerTestPassed();
   }
 
   function navigate(direction) {
@@ -125,7 +135,7 @@
 
   // Order depends on choices — e.g. whisper path inserts the install screen.
   function computeScreenOrder() {
-    const out = ['welcome', 'apikey', 'speech'];
+    const out = ['welcome', 'provider', 'speech'];
     if (state.speechProvider === 'whisper') out.push('whisper');
     if (state.speechProvider === 'whisper') out.push('model-download');
     out.push('finish');
@@ -143,9 +153,8 @@
     switch (name) {
       case 'welcome':
         return true;
-      case 'apikey':
-        // A key already in .env is enough — don't force a re-entry.
-        return !!state.geminiKey.trim() || state.geminiConfigured;
+      case 'provider':
+        return providerTestPassed();
       case 'speech':
         if (state.speechProvider === 'azure') {
           return !!state.azureKey.trim() && !!state.azureRegion.trim();
@@ -163,54 +172,249 @@
     }
   }
 
-  // ── Wire up: API key ──────────────────────────────────────────────
-  const geminiInput = $('#geminiKey');
-  const toggleVis = $('#toggleVis');
-  const keyStatus = $('#keyStatus');
+  // ── Wire up: AI provider ──────────────────────────────────────────
+  // Mirrors src/services/providers/index.js (labels, default models) and the
+  // save-settings field names in main.js.
+  const PROVIDERS = {
+    gemini: {
+      label: 'Google Gemini', company: 'Google', keyField: 'geminiKey', modelField: 'geminiModel',
+      defaultModel: 'gemini-3.1-flash-lite', keyPlaceholder: 'AIza…',
+      keyUrl: 'https://aistudio.google.com/apikey', keyUrlText: 'aistudio.google.com/apikey',
+    },
+    anthropic: {
+      label: 'Anthropic Claude', company: 'Anthropic', keyField: 'anthropicKey', modelField: 'anthropicModel',
+      defaultModel: 'claude-opus-5-5', keyPlaceholder: 'sk-ant-…',
+      keyUrl: 'https://console.anthropic.com/settings/keys', keyUrlText: 'console.anthropic.com',
+    },
+    openai: {
+      label: 'OpenAI', company: 'OpenAI', keyField: 'openaiKey', modelField: 'openaiModel',
+      defaultModel: 'gpt-5-mini', keyPlaceholder: 'sk-…',
+      keyUrl: 'https://platform.openai.com/api-keys', keyUrlText: 'platform.openai.com/api-keys',
+    },
+    openrouter: {
+      label: 'OpenRouter', company: 'OpenRouter', keyField: 'openrouterKey', modelField: 'openrouterModel',
+      defaultModel: 'openrouter/auto', keyPlaceholder: 'sk-or-…',
+      keyUrl: 'https://openrouter.ai/keys', keyUrlText: 'openrouter.ai/keys',
+    },
+    groq: {
+      label: 'Groq', company: 'Groq', keyField: 'groqKey', modelField: 'groqModel',
+      defaultModel: 'llama-3.3-70b-versatile', keyPlaceholder: 'gsk_…',
+      keyUrl: 'https://console.groq.com/keys', keyUrlText: 'console.groq.com/keys',
+    },
+    deepseek: {
+      label: 'DeepSeek', company: 'DeepSeek', keyField: 'deepseekKey', modelField: 'deepseekModel',
+      defaultModel: 'deepseek-chat', keyPlaceholder: 'sk-…',
+      keyUrl: 'https://platform.deepseek.com/api_keys', keyUrlText: 'platform.deepseek.com',
+    },
+    ollama: {
+      label: 'Ollama', company: null, keyField: null, modelField: 'ollamaModel',
+      defaultModel: 'llama3.2-vision', noKey: true,
+    },
+  };
+  const OLLAMA_DEFAULT_URL = 'http://localhost:11434';
 
-  function setKeyStatus(state_, text) {
-    keyStatus.className = `oc-chip status-pill ${state_}`;
-    keyStatus.style.display = 'inline-flex';
-    const icon = keyStatus.querySelector('i');
-    const txt = keyStatus.querySelector('.text');
-    if (state_ === 'testing') {
-      icon.className = 'fas fa-circle-notch fa-spin';
-    } else if (state_ === 'success') {
-      icon.className = 'fas fa-check-circle';
-    } else if (state_ === 'error') {
-      icon.className = 'fas fa-circle-xmark';
-    } else {
-      icon.className = 'fas fa-circle-info';
-    }
-    txt.textContent = text;
+  const providerInputs = $$('#providerChoices input[name="provider"]');
+  const keyField = $('#keyField');
+  const keyInput = $('#providerKey');
+  const keyLabel = $('#providerKeyLabel');
+  const keyLink = $('#keyLink');
+  const keyProviderName = $('#keyProviderName');
+  const baseUrlField = $('#baseUrlField');
+  const baseUrlInput = $('#providerBaseUrl');
+  const modelInput = $('#providerModel');
+  const testBtn = $('#testBtn');
+  const testResult = $('#testResult');
+  const toggleVis = $('#toggleVis');
+  const TEST_BTN_HTML = testBtn.innerHTML;
+
+  // Ollama's OpenAI-compatible API lives under /v1. Accept the bare server
+  // address people copy from Ollama's docs and add the path.
+  function normalizeOllamaUrl(raw) {
+    const value = String(raw || '').trim();
+    if (!value) return '';
+    return /^https?:\/\/[^/?#]+\/?$/i.test(value) ? `${value.replace(/\/$/, '')}/v1` : value;
   }
 
-  geminiInput.addEventListener('input', () => {
-    state.geminiKey = geminiInput.value.trim();
-    if (!state.geminiKey) {
-      keyStatus.style.display = 'none';
-    } else if (keyStatus.classList.contains('success')) {
-      // Keep success state — they had a valid key, may be editing
-    } else {
-      setKeyStatus('idle', 'Key entered');
+  // What Test connection and Continue send for the current inputs.
+  function providerRequest() {
+    const p = PROVIDERS[state.provider];
+    const req = { provider: state.provider, model: state.model };
+    if (p.noKey) req.baseUrl = normalizeOllamaUrl(state.baseUrl || OLLAMA_DEFAULT_URL);
+    else req.apiKey = state.apiKey;
+    return req;
+  }
+
+  function providerSignature() {
+    return JSON.stringify(providerRequest());
+  }
+
+  function providerTestPassed() {
+    return !state.testing && state.testedSignature !== null && state.testedSignature === providerSignature();
+  }
+
+  function setTestResult(kind, text) {
+    testResult.className = `test-result ${kind}`;
+    testResult.textContent = '';
+    if (!text) return;
+    const icon = document.createElement('i');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.className = {
+      testing: 'fas fa-circle-notch fa-spin',
+      success: 'fas fa-check-circle',
+      error: 'fas fa-circle-xmark',
+    }[kind] || 'fas fa-circle-info';
+    const span = document.createElement('span');
+    span.textContent = text;
+    testResult.append(icon, span);
+  }
+
+  // Any change to the inputs voids an earlier passing test.
+  function onProviderInputChanged() {
+    if (state.testedSignature !== null && state.testedSignature !== providerSignature()) {
+      state.testedSignature = null;
+      setTestResult('idle', '');
     }
+    if (currentScreenName() === 'provider') nextBtn.disabled = !providerTestPassed();
+  }
+
+  function keyAlreadySaved(id) {
+    if (id === 'gemini' && state.geminiConfigured) return true;
+    return state.savedProviderConfigured && state.savedProvider === id;
+  }
+
+  function renderProviderFields() {
+    const id = state.provider;
+    const p = PROVIDERS[id];
+    providerInputs.forEach((input) => { input.checked = input.value === id; });
+
+    keyField.hidden = !!p.noKey;
+    baseUrlField.hidden = !p.noKey;
+    if (!p.noKey) {
+      keyLabel.textContent = `${p.label} API key`;
+      keyInput.placeholder = keyAlreadySaved(id) ? '•••••••••••••••• (already saved)' : p.keyPlaceholder;
+      keyLink.href = p.keyUrl;
+      keyLink.textContent = p.keyUrlText;
+      keyProviderName.textContent = p.company;
+    }
+    // Keys and models are per provider: clear them when switching.
+    keyInput.value = state.apiKey;
+    modelInput.value = state.model;
+    modelInput.placeholder = p.defaultModel;
+    baseUrlInput.value = state.baseUrl;
+    baseUrlInput.placeholder = OLLAMA_DEFAULT_URL;
+  }
+
+  providerInputs.forEach((input) => {
+    input.addEventListener('change', () => {
+      if (!input.checked || input.value === state.provider) return;
+      state.provider = input.value;
+      state.apiKey = '';
+      state.model = '';
+      state.testedSignature = null;
+      setTestResult('idle', '');
+      renderProviderFields();
+      onProviderInputChanged();
+    });
   });
+
+  keyInput.addEventListener('input', () => {
+    state.apiKey = keyInput.value.trim();
+    onProviderInputChanged();
+  });
+  modelInput.addEventListener('input', () => {
+    state.model = modelInput.value.trim();
+    onProviderInputChanged();
+  });
+  baseUrlInput.addEventListener('input', () => {
+    state.baseUrl = baseUrlInput.value.trim();
+    onProviderInputChanged();
+  });
+  // Enter in any field runs the test.
+  [keyInput, modelInput, baseUrlInput].forEach((el) => {
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runProviderTest();
+      }
+    });
+  });
+
+  async function runProviderTest() {
+    if (state.testing) return;
+    const p = PROVIDERS[state.provider];
+    if (!p.noKey && !state.apiKey && !keyAlreadySaved(state.provider)) {
+      setTestResult('error', `Enter your ${p.label} API key first.`);
+      keyInput.focus();
+      return;
+    }
+    const signature = providerSignature();
+    state.testing = true;
+    state.testedSignature = null;
+    testBtn.disabled = true;
+    testBtn.innerHTML = '<span class="spinner"></span> Testing…';
+    nextBtn.disabled = true;
+    setTestResult('testing', `Contacting ${p.label}…`);
+    let result;
+    try {
+      result = await window.electronAPI.testProvider(providerRequest());
+    } catch (e) {
+      result = { ok: false, message: (e && e.message) || 'Connection test failed.' };
+    }
+    state.testing = false;
+    testBtn.disabled = false;
+    testBtn.innerHTML = TEST_BTN_HTML;
+    // The inputs changed while the test ran: that result is for old values.
+    if (signature !== providerSignature()) {
+      setTestResult('idle', '');
+      onProviderInputChanged();
+      return;
+    }
+    if (result && result.ok) {
+      state.testedSignature = signature;
+      setTestResult('success', result.message || 'Connected.');
+    } else {
+      setTestResult('error', (result && result.message) || 'Connection test failed.');
+    }
+    if (currentScreenName() === 'provider') nextBtn.disabled = !providerTestPassed();
+  }
+
+  testBtn.addEventListener('click', runProviderTest);
 
   toggleVis.addEventListener('click', () => {
-    const showing = geminiInput.type === 'text';
-    geminiInput.type = showing ? 'password' : 'text';
+    const showing = keyInput.type === 'text';
+    keyInput.type = showing ? 'password' : 'text';
     toggleVis.innerHTML = showing
-      ? '<i class="fas fa-eye"></i>'
-      : '<i class="fas fa-eye-slash"></i>';
+      ? '<i class="fas fa-eye" aria-hidden="true"></i>'
+      : '<i class="fas fa-eye-slash" aria-hidden="true"></i>';
   });
 
+  // Save exactly what passed the test. Empty key or model keeps the saved one.
+  async function saveProvider() {
+    const p = PROVIDERS[state.provider];
+    const req = providerRequest();
+    const payload = { llmProvider: state.provider };
+    if (p.keyField && req.apiKey) payload[p.keyField] = req.apiKey;
+    if (req.model) payload[p.modelField] = req.model;
+    if (p.noKey) payload.ollamaBaseUrl = req.baseUrl;
+    try {
+      const r = await window.electronAPI.saveSettings(payload);
+      if (r && r.success === false) {
+        setTestResult('error', r.error || 'Could not save these settings.');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      setTestResult('error', (e && e.message) || 'Could not save these settings.');
+      return false;
+    }
+  }
+
   // ── Wire up: Speech choices ───────────────────────────────────────
-  $$('#speechChoices .choice-card').forEach((card) => {
-    card.addEventListener('click', () => {
-      const value = card.dataset.value;
+  $$('#speechChoices input[name="speech"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (!input.checked) return;
+      const value = input.value;
       state.speechProvider = value;
-      $$('#speechChoices .choice-card').forEach((c) => c.classList.remove('selected'));
-      card.classList.add('selected');
       const azurePanel = $('#azurePanel');
       azurePanel.style.display = value === 'azure' ? 'block' : 'none';
       if (value !== 'azure') {
@@ -384,44 +588,50 @@
     modelDownloadLog.scrollTop = modelDownloadLog.scrollHeight;
   }
 
-  let modelDownloadInitialized = false;
-  function enterModelDownloadScreen() {
-    if (!modelDownloadInitialized) {
-      modelDownloadInitialized = true;
-
-      // Set up choice card click handlers once
-      $$('#modelDownloadChoices .choice-card').forEach((card) => {
-        card.addEventListener('click', () => {
-          const value = card.dataset.value;
-          state.modelDownloadChoice = value;
-          $$('#modelDownloadChoices .choice-card').forEach((c) => c.classList.remove('selected'));
-          card.classList.add('selected');
-          
-          if (value === 'now') {
-            // Start downloading the model immediately
-            startModelDownload();
-          } else {
-            nextBtn.disabled = false;
-          }
-        });
-      });
+  // Selecting a card only records the choice; arrow keys move the radio
+  // selection, so a download must not start on selection. With "now"
+  // chosen, Continue starts the download, then moves on once it is done.
+  function refreshModelDownloadButton() {
+    if (state.modelDownloading) {
+      nextBtn.disabled = true;
+      nextBtn.innerHTML = '<span class="spinner"></span> Downloading…';
+      return;
     }
+    nextBtn.classList.remove('oc-btn--success');
+    nextBtn.classList.add('oc-btn--primary');
+    if (state.modelDownloaded) {
+      nextBtn.classList.remove('oc-btn--primary');
+      nextBtn.classList.add('oc-btn--success');
+      nextBtn.innerHTML = '<i class="fas fa-check-circle"></i> Continue';
+    } else if (state.modelDownloadChoice === 'now' && !state.modelDownloadFailed) {
+      nextBtn.innerHTML = '<i class="fas fa-download"></i> Download';
+    } else {
+      nextBtn.innerHTML = 'Continue <i class="fas fa-arrow-right"></i>';
+    }
+    nextBtn.disabled = !state.modelDownloadChoice;
+  }
 
-    // Restore selection state when navigating back
-    $$('#modelDownloadChoices .choice-card').forEach((card) => {
-      card.classList.toggle('selected', card.dataset.value === state.modelDownloadChoice);
+  $$('#modelDownloadChoices input[name="modelDownload"]').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (!input.checked || state.modelDownloading) return;
+      state.modelDownloadChoice = input.value;
+      refreshModelDownloadButton();
     });
+  });
 
-    // Re-enable continue button if a choice has been made and not actively downloading
-    if (state.modelDownloadChoice && !state.modelDownloading) {
-      nextBtn.disabled = false;
-    }
+  function enterModelDownloadScreen() {
+    $$('#modelDownloadChoices input[name="modelDownload"]').forEach((input) => {
+      input.checked = input.value === state.modelDownloadChoice;
+    });
+    refreshModelDownloadButton();
   }
 
   async function startModelDownload() {
     state.modelDownloading = true;
+    state.modelDownloadFailed = false;
     nextBtn.disabled = true;
     nextBtn.innerHTML = '<span class="spinner"></span> Downloading…';
+    $$('#modelDownloadChoices input').forEach((input) => { input.disabled = true; });
 
     appendModelLog('Starting model download…');
 
@@ -432,70 +642,70 @@
 
     try {
       const r = await window.electronAPI.downloadWhisperModel('small');
-      state.modelDownloading = false;
       if (r.ok) {
         state.modelDownloaded = true;
         appendModelLog(`\n✓ Model downloaded successfully: ${r.path}`);
-        nextBtn.disabled = false;
-        nextBtn.classList.remove('oc-btn--primary');
-        nextBtn.classList.add('oc-btn--success');
-        nextBtn.innerHTML = '<i class="fas fa-check-circle"></i> Continue';
       } else {
+        // Let the user continue anyway; the model downloads on first use.
+        state.modelDownloadFailed = true;
         appendModelLog(`\n✗ Download failed: ${r.message}`);
-        // Let user continue anyway; they'll download on first use
-        nextBtn.disabled = false;
       }
     } catch (e) {
-      state.modelDownloading = false;
+      state.modelDownloadFailed = true;
       appendModelLog(`\n! Error: ${e.message || e}`);
-      nextBtn.disabled = false;
     } finally {
+      state.modelDownloading = false;
+      $$('#modelDownloadChoices input').forEach((input) => { input.disabled = false; });
       if (typeof stopProgress === 'function') {
         try { stopProgress(); } catch (_) { /* ignore */ }
       }
+      if (currentScreenName() === 'model-download') refreshModelDownloadButton();
     }
   }
 
   // ── Wire up: Finish screen ────────────────────────────────────────
   function populateSummary() {
     const rows = [];
+    const p = PROVIDERS[state.provider];
+    const model = state.model || p.defaultModel;
     rows.push({
-      label: '<i class="fas fa-key"></i> Gemini API',
-      value: (state.geminiKey || state.geminiConfigured) ? 'Configured' : 'Missing',
-      cls: (state.geminiKey || state.geminiConfigured) ? 'ok' : 'skip',
+      icon: 'fa-wand-magic-sparkles',
+      label: 'AI provider',
+      value: state.testedSignature !== null ? `${p.label} · ${model}` : `${p.label} (not tested)`,
+      cls: state.testedSignature !== null ? 'ok' : 'skip',
     });
     if (state.speechProvider === 'whisper') {
       rows.push({
-        label: '<i class="fas fa-microphone"></i> Speech',
+        icon: 'fa-microphone',
+        label: 'Speech',
         value: state.whisperDetected ? `Whisper (${state.whisperCmd || 'cli'})` : 'Whisper (not installed)',
         cls: state.whisperDetected ? 'ok' : 'skip',
       });
     } else if (state.speechProvider === 'azure') {
-      rows.push({
-        label: '<i class="fas fa-cloud"></i> Speech',
-        value: 'Azure',
-        cls: 'ok',
-      });
+      rows.push({ icon: 'fa-cloud', label: 'Speech', value: 'Azure', cls: 'ok' });
     } else {
-      rows.push({
-        label: '<i class="fas fa-microphone"></i> Speech',
-        value: 'Skipped (configure later)',
-        cls: 'skip',
-      });
+      rows.push({ icon: 'fa-microphone', label: 'Speech', value: 'Skipped (configure later)', cls: 'skip' });
     }
-    rows.push({
-      label: '<i class="fas fa-file-lines"></i> Config saved to',
-      value: '.env',
-      cls: 'ok',
+    rows.push({ icon: 'fa-file-lines', label: 'Config saved to', value: '.env', cls: 'ok' });
+
+    const list = $('#summaryList');
+    list.textContent = '';
+    rows.forEach((r) => {
+      const row = document.createElement('div');
+      row.className = 'summary-row';
+      const label = document.createElement('div');
+      label.className = 'label';
+      const icon = document.createElement('i');
+      icon.className = `fas ${r.icon}`;
+      icon.setAttribute('aria-hidden', 'true');
+      label.append(icon, document.createTextNode(` ${r.label}`));
+      const value = document.createElement('div');
+      value.className = `value ${r.cls}`;
+      value.textContent = r.value;
+      value.title = r.value;
+      row.append(label, value);
+      list.appendChild(row);
     });
-    $('#summaryList').innerHTML = rows
-      .map((r) => `
-        <div class="summary-row">
-          <div class="label">${r.label}</div>
-          <div class="value ${r.cls}">${r.value}</div>
-        </div>
-      `)
-      .join('');
   }
 
   // ── Wire up: Hero CTA (welcome screen) ────────────────────────────
@@ -512,28 +722,21 @@
     const name = currentScreenName();
     if (!canAdvance()) {
       // Lightly nudge the user
-      if (name === 'apikey') setKeyStatus('error', 'Enter a Gemini API key');
+      if (name === 'provider' && !state.testing) setTestResult('error', 'Test the connection before continuing.');
       return;
     }
 
-    // Persist settings on speech selection (Azure path), since we
-    // already saved geminiKey on test; do it here too if user skipped
-    // testing.
-    if (name === 'apikey' && state.geminiKey && window.electronAPI) {
-      try {
-        const r = await window.electronAPI.saveSettings({ geminiKey: state.geminiKey });
-        if (r && r.success === false) {
-          setKeyStatus('error', r.error || 'Could not save the key');
-          return;
-        }
-      } catch (_) { /* surfaced elsewhere */ }
+    // Save the tested provider so the app uses it right away.
+    if (name === 'provider') {
+      nextBtn.disabled = true;
+      const saved = await saveProvider();
+      nextBtn.disabled = false;
+      if (!saved) return;
     }
-    if (name === 'speech' && window.electronAPI) {
+    // "Skip for now" saves nothing: no speech provider is chosen.
+    if (name === 'speech' && state.speechProvider !== 'skip' && window.electronAPI) {
       try {
-        const payload = {
-          speechProvider:
-            state.speechProvider === 'skip' ? 'whisper' : state.speechProvider,
-        };
+        const payload = { speechProvider: state.speechProvider };
         if (state.speechProvider === 'azure') {
           payload.azureKey = state.azureKey;
           payload.azureRegion = state.azureRegion;
@@ -578,7 +781,14 @@
       }
     }
 
-    // Model download screen: persist choice
+    // Model download screen: "Download now" downloads first, then continues.
+    if (name === 'model-download' && state.modelDownloadChoice === 'now' &&
+        !state.modelDownloaded && !state.modelDownloadFailed) {
+      await startModelDownload();
+      // Failed: the log says why and Continue now moves on. Also stay put if
+      // the user went Back while it downloaded.
+      if (!state.modelDownloaded || currentScreenName() !== 'model-download') return;
+    }
     if (name === 'model-download') {
       if (window.electronAPI && state.modelDownloadChoice) {
         try {
@@ -675,21 +885,31 @@
   // ── Boot ──────────────────────────────────────────────────────────
   showScreen('welcome');
 
-  // Pre-populate Gemini key from existing .env (if any) so users with
-  // a partial config don't have to retype.
+  // Accurate wording for the welcome badge.
+  const deviceName = $('#deviceName');
+  if (deviceName && document.documentElement.dataset.platform === 'darwin') {
+    deviceName.textContent = 'this Mac';
+  }
+
+  renderProviderFields();
+
+  // Start on the provider already in .env, if any. Keys never leave the
+  // main process; the status only says whether one is saved, so the user
+  // can test and continue without retyping it.
   if (window.electronAPI && window.electronAPI.getFirstRunStatus) {
     window.electronAPI.getFirstRunStatus().then((s) => {
-      if (s && s.geminiConfigured) {
-        // The key itself never leaves the main process (only its last 4
-        // characters), but we can mark status as success if the env file
-        // already has one and let the user advance without retyping it.
-        state.geminiConfigured = true;
-        setKeyStatus('success', 'Already configured — click Continue');
-        const last4 = s.geminiKey && s.geminiKey.set && s.geminiKey.last4;
-        geminiInput.placeholder = last4
-          ? `•••••••••••••••• ${last4} (already set)`
-          : '•••••••••••••••• (already set)';
+      if (!s) return;
+      state.geminiConfigured = !!s.geminiConfigured;
+      if (s.llmProvider && PROVIDERS[s.llmProvider]) {
+        state.savedProvider = s.llmProvider;
+        state.savedProviderConfigured = !!s.llmConfigured;
+        // Only switch while the user has not started on the step.
+        if (!state.apiKey && !state.model && state.testedSignature === null && !state.testing) {
+          state.provider = s.llmProvider;
+        }
       }
+      renderProviderFields();
+      onProviderInputChanged();
     }).catch(() => {});
   }
 })();

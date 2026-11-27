@@ -286,9 +286,31 @@
             background: var(--oc-raised-2);
             border-color: var(--oc-line-2);
         }
-        .choice-card.selected {
+        .choice-card:has(input:checked) {
             background: var(--oc-accent-soft);
             border-color: var(--oc-accent-line);
+        }
+        /* Cards wrap a visually hidden radio; show its keyboard focus on the card. */
+        .choice-card:has(input:focus-visible),
+        .provider-card:has(input:focus-visible) {
+            outline: 2px solid var(--oc-accent-line);
+            outline-offset: 2px;
+        }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            margin: -1px;
+            padding: 0;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        fieldset.choice-list,
+        fieldset.provider-grid {
+            min-width: 0;
+            border: 0;
         }
         .choice-icon {
             display: flex;
@@ -304,7 +326,7 @@
             border-radius: var(--oc-r-md);
             transition: color var(--oc-t-fast) var(--oc-ease), border-color var(--oc-t-fast) var(--oc-ease);
         }
-        .choice-card.selected .choice-icon {
+        .choice-card:has(input:checked) .choice-icon {
             color: var(--oc-accent);
             border-color: var(--oc-accent-line);
         }
@@ -329,10 +351,93 @@
             border: 1.5px solid var(--oc-line-2);
             transition: background-color var(--oc-t-fast) var(--oc-ease), border-color var(--oc-t-fast) var(--oc-ease);
         }
-        .choice-card.selected .choice-radio {
+        .choice-card:has(input:checked) .choice-radio {
             border-color: var(--oc-accent);
             background: var(--oc-accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23141a08' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center;
         }
+
+        /* ── AI provider ── */
+        .provider-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 6px;
+            margin-bottom: 18px;
+        }
+        .provider-card {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+            padding: 9px 10px;
+            cursor: pointer;
+            transition:
+                background var(--oc-t-fast) var(--oc-ease),
+                border-color var(--oc-t-fast) var(--oc-ease);
+        }
+        .provider-card:hover {
+            background: var(--oc-raised-2);
+            border-color: var(--oc-line-2);
+        }
+        .provider-card:has(input:checked) {
+            background: var(--oc-accent-soft);
+            border-color: var(--oc-accent-line);
+        }
+        .provider-name {
+            overflow: hidden;
+            font-size: var(--oc-fs-sm);
+            font-weight: 650;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--oc-text);
+        }
+        .provider-card:has(input:checked) .provider-name {
+            color: var(--oc-accent);
+        }
+        .provider-note {
+            overflow: hidden;
+            font-size: var(--oc-fs-2xs);
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--oc-text-3);
+        }
+        .field label .optional {
+            font-weight: 500;
+            color: var(--oc-text-4);
+        }
+        .test-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .test-row .oc-btn {
+            flex: none;
+            height: 34px;
+        }
+        .test-result {
+            display: flex;
+            flex: 1;
+            align-items: flex-start;
+            gap: 8px;
+            min-width: 0;
+            min-height: 34px;
+            padding: 8px 10px;
+            font-size: var(--oc-fs-xs);
+            line-height: 1.5;
+            color: var(--oc-text-3);
+            border: 1px solid transparent;
+            border-radius: var(--oc-r-md);
+        }
+        .test-result:empty {
+            display: none;
+        }
+        .test-result i {
+            margin-top: 3px;
+            font-size: 10px;
+        }
+        .test-result.testing { color: var(--oc-warn); background: var(--oc-warn-soft); }
+        .test-result.success { color: var(--oc-accent); background: var(--oc-accent-soft); border-color: var(--oc-accent-line); }
+        .test-result.error   { color: var(--oc-error); background: var(--oc-error-soft); }
 
         /* ── Whisper install ── */
         .install-card {
@@ -498,6 +603,24 @@
             color: var(--oc-text-3);
         }
 
+        .try-title {
+            margin: 16px 0 8px;
+        }
+        /* Summary + Try it share the finish screen; keep it within the window. */
+        .finish-card .check {
+            margin-bottom: 12px;
+        }
+        .finish-card .summary-row {
+            min-height: 38px;
+        }
+        .try-card {
+            margin-top: 0;
+            padding: 2px 14px;
+        }
+        .try-card .shortcut-row {
+            min-height: 32px;
+        }
+
         /* ── Navigation ── */
         .nav {
             display: flex;
@@ -593,7 +716,7 @@
                     <div class="feature-row">
                         <div class="feature-pill oc-chip"><i class="fas fa-keyboard" aria-hidden="true"></i> Live answers</div>
                         <div class="feature-pill oc-chip"><i class="fas fa-microphone" aria-hidden="true"></i> Voice input</div>
-                        <div class="feature-pill oc-chip"><i class="fas fa-shield-halved" aria-hidden="true"></i> Local &amp; private</div>
+                        <div class="feature-pill oc-chip"><i class="fas fa-shield-halved" aria-hidden="true"></i> Your keys stay on <span id="deviceName">this computer</span></div>
                     </div>
 
                     <div class="shortcut-card oc-card">
@@ -620,40 +743,116 @@
                 </div>
             </section>
 
-            <!-- SCREEN 2: API Key -->
-            <section class="screen" data-screen="apikey">
-                <h1>Connect Google Gemini</h1>
+            <!-- SCREEN 2: AI provider -->
+            <section class="screen" data-screen="provider">
+                <h1>Choose your AI</h1>
                 <p class="subtitle">
-                    Super Interview uses Google's Gemini to generate answers. You'll need a free API key.
+                    Pick the provider that answers your questions, then test the connection.
                 </p>
 
-                <div class="field">
-                    <label for="geminiKey">Gemini API key</label>
+                <fieldset class="provider-grid" id="providerChoices">
+                    <legend class="sr-only">AI provider</legend>
+                    <label class="provider-card oc-card">
+                        <input class="sr-only" type="radio" name="provider" value="gemini">
+                        <span class="provider-name">Gemini</span>
+                        <span class="provider-note">Google, free tier</span>
+                    </label>
+                    <label class="provider-card oc-card">
+                        <input class="sr-only" type="radio" name="provider" value="anthropic">
+                        <span class="provider-name">Claude</span>
+                        <span class="provider-note">Anthropic</span>
+                    </label>
+                    <label class="provider-card oc-card">
+                        <input class="sr-only" type="radio" name="provider" value="openai">
+                        <span class="provider-name">OpenAI</span>
+                        <span class="provider-note">GPT models</span>
+                    </label>
+                    <label class="provider-card oc-card">
+                        <input class="sr-only" type="radio" name="provider" value="openrouter">
+                        <span class="provider-name">OpenRouter</span>
+                        <span class="provider-note">Many models</span>
+                    </label>
+                    <label class="provider-card oc-card">
+                        <input class="sr-only" type="radio" name="provider" value="groq">
+                        <span class="provider-name">Groq</span>
+                        <span class="provider-note">Fast, text only</span>
+                    </label>
+                    <label class="provider-card oc-card">
+                        <input class="sr-only" type="radio" name="provider" value="deepseek">
+                        <span class="provider-name">DeepSeek</span>
+                        <span class="provider-note">Text only</span>
+                    </label>
+                    <label class="provider-card oc-card">
+                        <input class="sr-only" type="radio" name="provider" value="ollama">
+                        <span class="provider-name">Ollama</span>
+                        <span class="provider-note">Local, no key</span>
+                    </label>
+                </fieldset>
+
+                <div class="field" id="keyField">
+                    <label for="providerKey" id="providerKeyLabel">API key</label>
                     <div class="input-wrap">
                         <i class="fas fa-key icon" aria-hidden="true"></i>
                         <input
                             type="password"
-                            id="geminiKey"
+                            id="providerKey"
                             class="oc-input has-toggle"
-                            placeholder="AIza…"
                             autocomplete="off"
                             spellcheck="false"
+                            aria-describedby="keyHint"
                         >
                         <button class="toggle-vis oc-btn oc-btn--ghost oc-icon-btn" id="toggleVis" type="button" title="Show / hide" aria-label="Show or hide API key">
-                            <i class="fas fa-eye"></i>
+                            <i class="fas fa-eye" aria-hidden="true"></i>
                         </button>
                     </div>
-                    <div class="hint">
-                        Don't have one? Get a free key at
-                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a>.
-                        It's stored locally in <code>.env</code> and only sent to Google.
-                    </div>
-                    <div id="keyStatus" class="oc-chip status-pill idle" style="display:none;">
-                        <i class="fas fa-circle-info" aria-hidden="true"></i>
-                        <span class="text">Enter your key above</span>
+                    <div class="hint" id="keyHint">
+                        Get a key at <a id="keyLink" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a>.
+                        It's saved in <code>.env</code> on this computer and only sent to <span id="keyProviderName">Google</span>.
                     </div>
                 </div>
 
+                <div class="field" id="baseUrlField" hidden>
+                    <label for="providerBaseUrl">Ollama server URL</label>
+                    <div class="input-wrap">
+                        <i class="fas fa-server icon" aria-hidden="true"></i>
+                        <input
+                            type="text"
+                            id="providerBaseUrl"
+                            class="oc-input is-mono"
+                            value="http://localhost:11434"
+                            autocomplete="off"
+                            spellcheck="false"
+                            aria-describedby="baseUrlHint"
+                        >
+                    </div>
+                    <div class="hint" id="baseUrlHint">
+                        Start Ollama first. Nothing leaves this computer. Get it at
+                        <a href="https://ollama.com/download" target="_blank" rel="noreferrer">ollama.com</a>.
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label for="providerModel">Model <span class="optional">(optional)</span></label>
+                    <div class="input-wrap">
+                        <i class="fas fa-microchip icon" aria-hidden="true"></i>
+                        <input
+                            type="text"
+                            id="providerModel"
+                            class="oc-input is-mono"
+                            autocomplete="off"
+                            spellcheck="false"
+                            aria-describedby="modelHint"
+                        >
+                    </div>
+                    <div class="hint" id="modelHint">Leave empty to use the default shown.</div>
+                </div>
+
+                <div class="test-row">
+                    <button class="oc-btn" id="testBtn" type="button">
+                        <i class="fas fa-plug" aria-hidden="true"></i> Test connection
+                    </button>
+                    <div id="testResult" class="test-result" role="status" aria-live="polite"></div>
+                </div>
             </section>
 
             <!-- SCREEN 3: Speech -->
@@ -663,8 +862,10 @@
                     How would you like to capture audio? You can change this later in Settings.
                 </p>
 
-                <div class="choice-list" id="speechChoices">
-                    <div class="choice-card oc-card" data-value="whisper">
+                <fieldset class="choice-list" id="speechChoices">
+                    <legend class="sr-only">Speech recognition</legend>
+                    <label class="choice-card oc-card">
+                        <input class="sr-only" type="radio" name="speech" value="whisper">
                         <div class="choice-icon"><i class="fas fa-microphone" aria-hidden="true"></i></div>
                         <div class="choice-text">
                             <div class="choice-title">Local Whisper</div>
@@ -673,9 +874,10 @@
                                 no audio leaves your computer. Requires Python.
                             </div>
                         </div>
-                        <div class="choice-radio"></div>
-                    </div>
-                    <div class="choice-card oc-card" data-value="azure">
+                        <div class="choice-radio" aria-hidden="true"></div>
+                    </label>
+                    <label class="choice-card oc-card">
+                        <input class="sr-only" type="radio" name="speech" value="azure">
                         <div class="choice-icon"><i class="fas fa-cloud" aria-hidden="true"></i></div>
                         <div class="choice-text">
                             <div class="choice-title">Azure Speech</div>
@@ -684,9 +886,10 @@
                                 High accuracy, requires internet.
                             </div>
                         </div>
-                        <div class="choice-radio"></div>
-                    </div>
-                    <div class="choice-card oc-card" data-value="skip">
+                        <div class="choice-radio" aria-hidden="true"></div>
+                    </label>
+                    <label class="choice-card oc-card">
+                        <input class="sr-only" type="radio" name="speech" value="skip">
                         <div class="choice-icon"><i class="fas fa-forward" aria-hidden="true"></i></div>
                         <div class="choice-text">
                             <div class="choice-title">Skip for now</div>
@@ -694,9 +897,9 @@
                                 Set this up later in Settings. You can still type messages into the chat window.
                             </div>
                         </div>
-                        <div class="choice-radio"></div>
-                    </div>
-                </div>
+                        <div class="choice-radio" aria-hidden="true"></div>
+                    </label>
+                </fieldset>
 
                 <!-- Inline Azure key entry (revealed only if Azure selected) -->
                 <div id="azurePanel" style="display:none; margin-top: 16px;">
@@ -759,18 +962,21 @@
                         <i class="fas fa-circle-info" aria-hidden="true"></i>
                         <span id="modelDownloadTitle">Choose when to download the model</span>
                     </div>
-                    <div class="choice-list" id="modelDownloadChoices">
-                        <div class="choice-card oc-card" data-value="now">
+                    <fieldset class="choice-list" id="modelDownloadChoices">
+                        <legend class="sr-only">When to download the model</legend>
+                        <label class="choice-card oc-card">
+                            <input class="sr-only" type="radio" name="modelDownload" value="now">
                             <div class="choice-icon"><i class="fas fa-download" aria-hidden="true"></i></div>
                             <div class="choice-text">
                                 <div class="choice-title">Download now</div>
                                 <div class="choice-desc">
-                                    Download the <code>turbo</code> model (~150 MB) now so it's ready when you need it. Recommended.
+                                    Download the <code>small</code> model (~461 MB) now so it's ready when you need it. Recommended.
                                 </div>
                             </div>
-                            <div class="choice-radio"></div>
-                        </div>
-                        <div class="choice-card oc-card" data-value="later">
+                            <div class="choice-radio" aria-hidden="true"></div>
+                        </label>
+                        <label class="choice-card oc-card">
+                            <input class="sr-only" type="radio" name="modelDownload" value="later">
                             <div class="choice-icon"><i class="fas fa-clock" aria-hidden="true"></i></div>
                             <div class="choice-text">
                                 <div class="choice-title">Download on first use</div>
@@ -778,9 +984,9 @@
                                     Download the model automatically when you first use voice input. First transcription will take longer.
                                 </div>
                             </div>
-                            <div class="choice-radio"></div>
-                        </div>
-                    </div>
+                            <div class="choice-radio" aria-hidden="true"></div>
+                        </label>
+                    </fieldset>
                 </div>
 
                 <div class="install-log" id="modelDownloadLog"></div>
@@ -791,12 +997,36 @@
                 <div class="finish-card">
                     <div class="check"><i class="fas fa-check" aria-hidden="true"></i></div>
                     <h1>You're all set</h1>
-                    <p class="subtitle" style="margin-bottom: 20px;">
+                    <p class="subtitle" style="margin-bottom: 16px;">
                         Here's what we configured. You can change any of this later in Settings.
                     </p>
 
                     <div class="summary-list oc-card" id="summaryList">
                         <!-- populated dynamically -->
+                    </div>
+
+                    <div class="oc-label try-title" id="tryTitle">Try it</div>
+                    <div class="shortcut-card try-card oc-card" role="list" aria-labelledby="tryTitle">
+                        <div class="shortcut-row" role="listitem">
+                            <span>Screenshot the screen and ask</span>
+                            <span class="oc-kbd-group" aria-label="Command or Control, Shift, S"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">S</span></span>
+                        </div>
+                        <div class="shortcut-row" role="listitem">
+                            <span>Start or stop voice</span>
+                            <span class="oc-kbd-group" aria-label="Alt or Option, R"><span class="oc-kbd oc-alt"></span><span class="oc-kbd">R</span></span>
+                        </div>
+                        <div class="shortcut-row" role="listitem">
+                            <span>Show or hide all windows</span>
+                            <span class="oc-kbd-group" aria-label="Command or Control, Shift, V"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">V</span></span>
+                        </div>
+                        <div class="shortcut-row" role="listitem">
+                            <span>Toggle click-through</span>
+                            <span class="oc-kbd-group" aria-label="Command or Control, Shift, I"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">I</span></span>
+                        </div>
+                        <div class="shortcut-row" role="listitem">
+                            <span>Open the chat</span>
+                            <span class="oc-kbd-group" aria-label="Command or Control, Shift, C"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">C</span></span>
+                        </div>
                     </div>
                 </div>
             </section>

@@ -139,6 +139,8 @@ const PAGES = {
       completeFirstRun: invoke('complete-first-run'),
       closeOnboarding: invoke('close-onboarding'),
       saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+      // { provider, apiKey, baseUrl, model } -> { ok, message }; saves nothing.
+      testProvider: (input) => ipcRenderer.invoke('test-provider', input),
       detectWhisper: invoke('detect-whisper'),
       installWhisper: invoke('install-whisper'),
       downloadWhisperModel: (modelName) => ipcRenderer.invoke('download-whisper-model', modelName),
