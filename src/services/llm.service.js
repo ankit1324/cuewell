@@ -25,8 +25,41 @@ class LLMService {
     // provider uses this.provider from ./providers.
     this.providerId = null;
     this.provider = null;
+    // Prompt settings main.js keeps current: answer length (Settings) and
+    // the interview context (userData/profile.json).
+    this.promptContext = { answerLength: 'auto', profile: null };
     
     this.initializeClient();
+  }
+
+  /** Update the answer length and/or interview context used in every prompt. */
+  setPromptContext({ answerLength, profile } = {}) {
+    if (answerLength !== undefined) {
+      this.promptContext.answerLength = promptLoader.isAnswerLength(answerLength) ? answerLength : 'auto';
+    }
+    if (profile !== undefined) {
+      this.promptContext.profile = profile && typeof profile === 'object' ? { ...profile } : null;
+    }
+  }
+
+  /**
+   * Whether to retag every code fence with the selected language. Only in
+   * Coding mode: Auto answers theory questions too, whose examples may be in
+   * the language they are about (TypeScript, SQL, ...).
+   */
+  shouldRetagCode(activeSkill, programmingLanguage) {
+    return !!programmingLanguage && promptLoader.normalizeSkillName(activeSkill) === 'dsa';
+  }
+
+  /** System prompt for one request in `activeSkill` mode over `channel` ('voice' | 'text' | 'image'). */
+  buildSystemPrompt(activeSkill, programmingLanguage, channel) {
+    return promptLoader.buildSystemPrompt({
+      mode: activeSkill,
+      programmingLanguage,
+      channel,
+      answerLength: this.promptContext.answerLength,
+      profile: this.promptContext.profile
+    });
   }
 
   initializeClient() {
@@ -199,9 +232,8 @@ class LLMService {
     this.requestCount++;
 
     try {
-      // Build system instruction using the skill prompt (with optional language injection)
-      const { promptLoader } = require('../../prompt-loader');
-      const skillPrompt = promptLoader.getSkillPrompt(activeSkill, programmingLanguage) || '';
+      // System instruction: mode prompt, answer format and interview context
+      const skillPrompt = this.buildSystemPrompt(activeSkill, programmingLanguage, 'image');
 
       // Build request with text + image parts
       const base64 = imageBuffer.toString('base64');
@@ -251,7 +283,7 @@ class LLMService {
       }
 
       // Enforce language in code fences if provided
-      const finalResponse = programmingLanguage
+      const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(responseText, programmingLanguage)
         : responseText;
 
@@ -302,8 +334,7 @@ class LLMService {
     this.requestCount++;
 
     try {
-      const { promptLoader } = require('../../prompt-loader');
-      const skillPrompt = promptLoader.getSkillPrompt(activeSkill, programmingLanguage) || '';
+      const skillPrompt = this.buildSystemPrompt(activeSkill, programmingLanguage, 'image');
       const base64 = imageBuffer.toString('base64');
 
       const geminiRequest = {
@@ -328,7 +359,7 @@ class LLMService {
         }
       });
 
-      const finalResponse = programmingLanguage
+      const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
         : fullText;
 
@@ -362,8 +393,7 @@ class LLMService {
   }
 
   formatImageInstruction(activeSkill, programmingLanguage) {
-    const langNote = programmingLanguage ? ` Use only ${programmingLanguage.toUpperCase()} for any code.` : '';
-    return `Analyze this image for a ${activeSkill.toUpperCase()} question. Extract the problem concisely and provide the best possible solution with explanation and final code.${langNote}`;
+    return promptLoader.getImageInstruction(activeSkill, programmingLanguage);
   }
 
   async processTextWithSkill(text, activeSkill, sessionMemory = [], programmingLanguage = null) {
@@ -414,7 +444,7 @@ class LLMService {
       }
       
       // Enforce language in code fences if programmingLanguage specified
-      const finalResponse = programmingLanguage
+      const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(response, programmingLanguage)
         : response;
 
@@ -466,7 +496,7 @@ class LLMService {
         }
       });
 
-      const finalResponse = programmingLanguage
+      const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
         : fullText;
 
@@ -545,7 +575,7 @@ class LLMService {
       }
       
       // Enforce language in code fences if programmingLanguage specified
-      const finalResponse = programmingLanguage
+      const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(response, programmingLanguage)
         : response;
 
@@ -679,19 +709,18 @@ class LLMService {
 
     this.applyGenerationDefaults(request);
 
-    // Use the skill prompt that already has programming language injected
-    if (requestComponents.shouldUseModelMemory && requestComponents.skillPrompt) {
-      request.systemInstruction = {
-        parts: [{ text: requestComponents.skillPrompt }]
-      };
-      
-      logger.debug('Using language-enhanced system instruction for skill', {
-        skill: activeSkill,
-        programmingLanguage: programmingLanguage || 'not specified',
-        promptLength: requestComponents.skillPrompt.length,
-        requiresProgrammingLanguage: requestComponents.requiresProgrammingLanguage
-      });
-    }
+    // Every request carries the mode prompt, answer format and interview context
+    const systemPrompt = this.buildSystemPrompt(activeSkill, programmingLanguage, 'text');
+    request.systemInstruction = {
+      parts: [{ text: systemPrompt }]
+    };
+
+    logger.debug('Using mode system instruction', {
+      skill: activeSkill,
+      programmingLanguage: programmingLanguage || 'not specified',
+      promptLength: systemPrompt.length,
+      requiresProgrammingLanguage: requestComponents.requiresProgrammingLanguage
+    });
 
     request.contents.push({
       role: 'user',
@@ -724,20 +753,19 @@ class LLMService {
 
     this.applyGenerationDefaults(request);
 
-    // Use the skill prompt from context (which may already include programming language)
-    if (skillContext.skillPrompt) {
-      request.systemInstruction = {
-        parts: [{ text: skillContext.skillPrompt }]
-      };
-      
-      logger.debug('Using skill context prompt as system instruction', {
-        skill: activeSkill,
-        programmingLanguage: programmingLanguage || 'not specified',
-        promptLength: skillContext.skillPrompt.length,
-        requiresProgrammingLanguage: skillContext.requiresProgrammingLanguage || false,
-        hasLanguageInjection: programmingLanguage && skillContext.requiresProgrammingLanguage
-      });
-    }
+    // Mode prompt (with the coding language for Coding), answer format and
+    // interview context
+    const systemPrompt = this.buildSystemPrompt(activeSkill, programmingLanguage, 'text');
+    request.systemInstruction = {
+      parts: [{ text: systemPrompt }]
+    };
+
+    logger.debug('Using mode system instruction', {
+      skill: activeSkill,
+      programmingLanguage: programmingLanguage || 'not specified',
+      promptLength: systemPrompt.length,
+      requiresProgrammingLanguage: skillContext.requiresProgrammingLanguage || false
+    });
 
     // Add conversation history (excluding system messages) with validation
     const conversationContents = conversationHistory
@@ -838,9 +866,9 @@ class LLMService {
 
     this.applyGenerationDefaults(request);
 
-  // For chat/transcription messages, DO NOT include the full skill prompt; use only the intelligent filter prompt
-  const intelligentPrompt = this.getIntelligentTranscriptionPrompt(activeSkill, programmingLanguage);
-  request.systemInstruction = { parts: [{ text: intelligentPrompt }] };
+    // Voice uses the same mode prompt as typed questions, with voice handling
+    const intelligentPrompt = this.getIntelligentTranscriptionPrompt(activeSkill, programmingLanguage);
+    request.systemInstruction = { parts: [{ text: intelligentPrompt }] };
 
     // Recent conversation history (excluding system messages) with validation
     const historyContents = conversationHistory
@@ -901,63 +929,11 @@ class LLMService {
   }
 
   getIntelligentTranscriptionPrompt(activeSkill, programmingLanguage) {
-    let prompt = `# Intelligent Transcription Response System
-
-Assume you are asked a question in ${activeSkill.toUpperCase()} mode. Your job is to intelligently respond to question/message with appropriate brevity.
-Assume you are in an interview and you need to perform best in ${activeSkill.toUpperCase()} mode.
-Always respond to the point, do not repeat the question or unnecessary information which is not related to ${activeSkill}.`;
-
-    // Add programming language context if provided
-    if (programmingLanguage) {
-      const lang = String(programmingLanguage).toLowerCase();
-      const languageMap = { cpp: 'C++', c: 'C', python: 'Python', java: 'Java', javascript: 'JavaScript', js: 'JavaScript' };
-      const fenceTagMap = { cpp: 'cpp', c: 'c', python: 'python', java: 'java', javascript: 'javascript', js: 'javascript' };
-      const languageTitle = languageMap[lang] || (lang.charAt(0).toUpperCase() + lang.slice(1));
-      const fenceTag = fenceTagMap[lang] || lang || 'text';
-      prompt += `\n\nCODING CONTEXT: Respond ONLY in ${languageTitle}. All code blocks must use triple backticks with language tag \`\`\`${fenceTag}\`\`\`. Do not include other languages unless explicitly asked.`;
-    }
-
-    prompt += `
-
-## Response Rules:
-
-### If the transcription is casual conversation, greetings, or NOT related to ${activeSkill}:
-- Respond with: "Yeah, I'm listening. Ask your question relevant to ${activeSkill}."
-- Or similar brief acknowledgments like: "I'm here, what's your ${activeSkill} question?"
-
-### If the transcription IS relevant to ${activeSkill} or is a follow-up question:
-- Provide a comprehensive, detailed response
-- Use bullet points, examples, and explanations
-- Focus on actionable insights and complete answers
-- Do not truncate or shorten your response
-
-### Examples of casual/irrelevant messages:
-- "Hello", "Hi there", "How are you?"
-- "What's the weather like?"
-- "I'm just testing this"
-- Random conversations not related to ${activeSkill}
-
-### Examples of relevant messages:
-- Actual questions about ${activeSkill} concepts
-- Follow-up questions to previous responses
-- Requests for clarification on ${activeSkill} topics
-- Problem-solving requests related to ${activeSkill}
-
-## Response Format:
-- Keep responses detailed
-- Use bullet points for structured answers
-- Be encouraging and helpful
-- Stay focused on ${activeSkill}
-
-If the user's input is a coding or DSA problem statement and contains no code, produce a complete, runnable solution in the selected programming language without asking for more details. Always include the final implementation in a properly tagged code block.
-
-Remember: Be intelligent about filtering - only provide detailed responses when the user actually needs help with ${activeSkill}.`;
-
-    return prompt;
+    return this.buildSystemPrompt(activeSkill, programmingLanguage, 'voice');
   }
 
   formatUserMessage(text, activeSkill) {
-    return `Context: ${activeSkill.toUpperCase()} analysis request\n\nText to analyze:\n${text}`;
+    return `Interview mode: ${promptLoader.getModeLabel(activeSkill)}\n\nQuestion:\n${text}`;
   }
 
   async executeRequest(geminiRequest) {
@@ -1121,7 +1097,7 @@ Remember: Be intelligent about filtering - only provide detailed responses when 
         }
       });
 
-      const finalResponse = programmingLanguage
+      const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
         : fullText;
 

@@ -28,7 +28,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const windowGapInput = document.getElementById('windowGap');
     const codingLanguageSelect = document.getElementById('codingLanguage');
     const activeSkillSelect = document.getElementById('activeSkill');
+    const answerLengthSelect = document.getElementById('answerLength');
     const iconGrid = document.getElementById('iconGrid');
+    // Interview context inputs; data-profile-field is the profile.json key.
+    const profileInputs = Array.from(document.querySelectorAll('[data-profile-field]'));
+    const contextStatus = document.getElementById('contextStatus');
 
     // API-key fields. Main never sends a saved key back, only whether one is
     // set and its last 4 characters. These inputs stay empty and show the
@@ -150,10 +154,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Close button handler
+    // Unsaved interview context is saved before the window hides. Declared
+    // later in this function; only called after setup has finished.
+    const closeSettings = () => {
+        Promise.resolve(saveProfile()).finally(() => window.api.send('close-settings'));
+    };
+
     if (closeButton) {
-        closeButton.addEventListener('click', () => {
-            window.api.send('close-settings');
-        });
+        closeButton.addEventListener('click', closeSettings);
     }
 
     // Quit button handler with multiple attempts
@@ -215,7 +223,19 @@ document.addEventListener('DOMContentLoaded', () => {
             codingLanguageSelect.value = settings.codingLanguage || 'cpp';
         }
 
+        // Mode options come from main so they always match the toolbar.
+        if (activeSkillSelect && Array.isArray(settings.modes) && settings.modes.length > 0) {
+            activeSkillSelect.replaceChildren(...settings.modes
+                .filter((mode) => mode && typeof mode.id === 'string' && typeof mode.label === 'string')
+                .map((mode) => {
+                    const option = document.createElement('option');
+                    option.value = mode.id;
+                    option.textContent = mode.label;
+                    return option;
+                }));
+        }
         if (settings.activeSkill && activeSkillSelect) activeSkillSelect.value = settings.activeSkill;
+        if (answerLengthSelect) answerLengthSelect.value = settings.answerLength || 'auto';
 
         // Handle icon selection
         const selectedIcon = settings.selectedIcon || settings.appIcon;
@@ -243,7 +263,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.electronAPI && window.electronAPI.onSettingsWindowShown) {
         window.electronAPI.onSettingsWindowShown(() => {
             requestCurrentSettings();
+            requestProfile();
         });
+
+    // Keep the Mode select in step with the toolbar chip and ⌘↑/↓.
+    if (window.electronAPI.onSkillUpdated) {
+        window.electronAPI.onSkillUpdated((data) => {
+            if (data && typeof data.skill === 'string' && activeSkillSelect) {
+                activeSkillSelect.value = data.skill;
+            }
+        });
+    }
 
     // Listen for coding language changes from other windows via helper
     window.electronAPI.onCodingLanguageChanged((data) => {
@@ -277,7 +307,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (windowGapInput) settings.windowGap = windowGapInput.value;
         if (codingLanguageSelect) settings.codingLanguage = codingLanguageSelect.value;
-        if (activeSkillSelect) settings.activeSkill = activeSkillSelect.value;
+        // Mode and answer length save on their own change events, so a blur
+        // here never sends back a mode the toolbar has switched since.
 
         sendSettings(settings);
     };
@@ -372,14 +403,116 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Skill selection handler
+    // Mode selection: main switches the mode and tells the toolbar.
     if (activeSkillSelect) {
         activeSkillSelect.addEventListener('change', (e) => {
-            saveSettings();
-            // Also update the main window
-            window.api.send('update-skill', e.target.value);
+            sendSettings({ activeSkill: e.target.value });
         });
     }
+
+    if (answerLengthSelect) {
+        answerLengthSelect.addEventListener('change', (e) => {
+            sendSettings({ answerLength: e.target.value });
+        });
+    }
+
+    // ---------- Interview context (userData/profile.json) ----------
+    // Saved through its own IPC (get-profile / save-profile); main validates
+    // and writes it. Edits save 800 ms after typing stops, on change, and
+    // before the window closes.
+    let profileDirty = false;
+    let profileTimer = null;
+    let profileStatusTimer = null;
+
+    const setContextStatus = (text, kind = '') => {
+        if (!contextStatus) return;
+        if (profileStatusTimer) {
+            clearTimeout(profileStatusTimer);
+            profileStatusTimer = null;
+        }
+        contextStatus.textContent = text;
+        contextStatus.classList.toggle('is-error', kind === 'error');
+        contextStatus.classList.toggle('is-saved', kind === 'saved');
+        if (kind === 'saved') {
+            profileStatusTimer = setTimeout(() => setContextStatus(''), 1800);
+        }
+    };
+
+    const updateProfileCount = (input) => {
+        const counter = document.querySelector(`[data-count-for="${input.id}"]`);
+        if (!counter) return;
+        const limit = Number(input.getAttribute('maxlength')) || 0;
+        const length = input.value.length;
+        counter.textContent = length > 0 ? `${length.toLocaleString()} / ${limit.toLocaleString()}` : '';
+        counter.classList.toggle('is-over', limit > 0 && length > limit);
+    };
+
+    const collectProfile = () => {
+        const profile = {};
+        profileInputs.forEach((input) => {
+            profile[input.dataset.profileField] = input.value;
+        });
+        return profile;
+    };
+
+    const loadProfileIntoUI = (profile) => {
+        if (!profile || typeof profile !== 'object') return;
+        profileInputs.forEach((input) => {
+            const value = profile[input.dataset.profileField];
+            input.value = typeof value === 'string' ? value : '';
+            input.setCustomValidity('');
+            updateProfileCount(input);
+        });
+    };
+
+    const requestProfile = () => {
+        // Never overwrite edits that are not saved yet.
+        if (profileDirty || !window.electronAPI || !window.electronAPI.getProfile) return;
+        window.electronAPI.getProfile().then((result) => {
+            if (!profileDirty && result && result.success) loadProfileIntoUI(result.profile);
+        }).catch((error) => console.error('Failed to load interview context:', error));
+    };
+
+    const saveProfile = () => {
+        if (profileTimer) {
+            clearTimeout(profileTimer);
+            profileTimer = null;
+        }
+        if (!profileDirty || !window.electronAPI || !window.electronAPI.saveProfile) return Promise.resolve();
+        profileDirty = false;
+        setContextStatus('Saving…');
+        return window.electronAPI.saveProfile(collectProfile()).then((result) => {
+            profileInputs.forEach((input) => input.setCustomValidity(''));
+            if (result && result.success) {
+                setContextStatus('Saved', 'saved');
+                return;
+            }
+            const message = (result && result.error) || 'Could not save the interview context.';
+            setContextStatus('Not saved', 'error');
+            const input = result && result.field
+                ? profileInputs.find((el) => el.dataset.profileField === result.field)
+                : null;
+            if (input) {
+                input.setCustomValidity(message);
+                input.reportValidity();
+            } else {
+                console.error('Interview context not saved:', message);
+            }
+        }).catch((error) => {
+            setContextStatus('Not saved', 'error');
+            console.error('Interview context not saved:', error);
+        });
+    };
+
+    profileInputs.forEach((input) => {
+        input.addEventListener('input', () => {
+            profileDirty = true;
+            updateProfileCount(input);
+            if (profileTimer) clearTimeout(profileTimer);
+            profileTimer = setTimeout(saveProfile, 800);
+        });
+        input.addEventListener('change', saveProfile);
+    });
 
     updateSpeechFieldStates();
     updateProviderFieldStates();
@@ -471,12 +604,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Request settings on load
     setTimeout(() => {
         requestCurrentSettings();
+        requestProfile();
     }, 200);
 
     // ESC key to close
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            window.api.send('close-settings');
+            closeSettings();
         }
     });
 }); 

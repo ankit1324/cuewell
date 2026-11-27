@@ -141,7 +141,7 @@
             font-size: 10px;
         }
 
-        /* Compact controls for a 400px panel */
+        /* Compact controls for the settings panel */
         .settings-content .oc-input {
             height: 32px;
             font-size: var(--oc-fs-sm);
@@ -166,6 +166,52 @@
 
         input[type="number"].oc-input::-webkit-inner-spin-button {
             opacity: 0.4;
+        }
+
+        /* Multi-line fields (interview context) */
+        .settings-content textarea.oc-input {
+            height: auto;
+            min-height: 64px;
+            max-height: 320px;
+            padding: 8px 11px;
+            font-size: var(--oc-fs-sm);
+            line-height: 1.45;
+            resize: vertical;
+        }
+
+        .field-label-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .field-count {
+            margin-bottom: 6px;
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-2xs);
+            color: var(--oc-text-4);
+        }
+
+        .field-count.is-over {
+            color: var(--oc-error);
+        }
+
+        /* After the section rule (the ::after flex item) */
+        .context-status {
+            order: 1;
+            font-size: var(--oc-fs-2xs);
+            font-weight: 600;
+            color: var(--oc-text-3);
+            white-space: nowrap;
+        }
+
+        .context-status.is-error {
+            color: var(--oc-error);
+        }
+
+        .context-status.is-saved {
+            color: var(--oc-accent);
         }
 
         /* ---------- App icon tiles ---------- */
@@ -289,6 +335,89 @@
         </div>
 
         <div class="settings-content">
+            <section class="settings-section">
+                <div class="section-head"><h2 class="oc-label">Interview</h2></div>
+                <div class="settings-stack">
+                    <div class="field">
+                        <label class="field-label" for="activeSkill">Mode</label>
+                        <select class="oc-input" id="activeSkill">
+                            <option value="auto">Auto</option>
+                            <option value="dsa">Coding</option>
+                            <option value="technical">Technical</option>
+                            <option value="system-design">System design</option>
+                            <option value="behavioral">Behavioral</option>
+                            <option value="hr">HR</option>
+                        </select>
+                        <div class="field-help">Auto answers any question in the format that fits it. Pick a mode to force one format. Click the mode chip on the toolbar to switch.</div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label class="field-label" for="codingLanguage">Coding language</label>
+                            <select class="oc-input" id="codingLanguage">
+                                <option value="cpp">C++</option>
+                                <option value="c">C</option>
+                                <option value="python">Python</option>
+                                <option value="java">Java</option>
+                                <option value="javascript">JavaScript</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="answerLength">Answer length</label>
+                            <select class="oc-input" id="answerLength">
+                                <option value="auto">Auto</option>
+                                <option value="short">Short</option>
+                                <option value="standard">Standard</option>
+                                <option value="detailed">Detailed</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field-help" style="margin-top: -6px;">Code is written in this language in Auto and Coding. Auto length is Short for voice and Standard for typed and screenshot questions.</div>
+                </div>
+            </section>
+
+            <section class="settings-section">
+                <div class="section-head">
+                    <h2 class="oc-label">Interview context</h2>
+                    <span class="context-status" id="contextStatus" role="status" aria-live="polite"></span>
+                </div>
+                <div class="settings-stack">
+                    <div class="settings-note">Sent to your AI provider with each question.</div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label class="field-label" for="profileRole">Target role</label>
+                            <input type="text" class="oc-input" id="profileRole" data-profile-field="role" maxlength="200" placeholder="e.g. Senior Frontend Engineer" spellcheck="false">
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="profileCompany">Company</label>
+                            <input type="text" class="oc-input" id="profileCompany" data-profile-field="company" maxlength="200" placeholder="e.g. Acme Corp" spellcheck="false">
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label-row">
+                            <label class="field-label" for="profileJobDescription">Job description</label>
+                            <span class="field-count" data-count-for="profileJobDescription"></span>
+                        </div>
+                        <textarea class="oc-input" id="profileJobDescription" data-profile-field="jobDescription" maxlength="20000" rows="4" placeholder="Paste the job description"></textarea>
+                    </div>
+                    <div class="field">
+                        <div class="field-label-row">
+                            <label class="field-label" for="profileResume">Resume</label>
+                            <span class="field-count" data-count-for="profileResume"></span>
+                        </div>
+                        <textarea class="oc-input" id="profileResume" data-profile-field="resume" maxlength="20000" rows="5" placeholder="Paste your resume as plain text"></textarea>
+                        <div class="field-help">Behavioral and HR answers draw their examples from it.</div>
+                    </div>
+                    <div class="field">
+                        <div class="field-label-row">
+                            <label class="field-label" for="profileNotes">Extra notes</label>
+                            <span class="field-count" data-count-for="profileNotes"></span>
+                        </div>
+                        <textarea class="oc-input" id="profileNotes" data-profile-field="notes" maxlength="20000" rows="3" placeholder="e.g. Notice period 30 days, expected salary range, topics to highlight"></textarea>
+                    </div>
+                    <div class="field-help" style="margin-top: -6px;">Saved on this computer in your app data folder, not in <code>.env</code>.</div>
+                </div>
+            </section>
+
             <section class="settings-section">
                 <div class="section-head"><h2 class="oc-label">AI Provider</h2></div>
                 <div class="settings-stack">
@@ -489,31 +618,6 @@
                     <div id="azureFieldsNote" class="settings-note">
                         Azure credentials apply immediately and are also written back to <code>.env</code> so they persist across restarts.
                     </div>
-                </div>
-            </section>
-
-            <section class="settings-section">
-                <div class="section-head"><h2 class="oc-label">Language &amp; Skills</h2></div>
-                <div class="settings-stack">
-                    <div class="field-row">
-                        <div class="field">
-                            <label class="field-label" for="codingLanguage">Coding language</label>
-                            <select class="oc-input" id="codingLanguage">
-                                <option value="cpp">C++</option>
-                                <option value="c">C</option>
-                                <option value="python">Python</option>
-                                <option value="java">Java</option>
-                                <option value="javascript">JavaScript</option>
-                            </select>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="activeSkill">Active skill</label>
-                            <select class="oc-input" id="activeSkill">
-                                <option value="dsa">Data Structures &amp; Algorithms</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="field-help" style="margin-top: -6px;">Your preferred programming language and current focus area</div>
                 </div>
             </section>
 
