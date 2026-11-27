@@ -20,9 +20,9 @@ const MODE_IDS = MODES.map((mode) => mode.id);
 const ANSWER_LENGTHS = Object.freeze(['auto', 'short', 'standard', 'detailed']);
 
 const LENGTH_RULES = {
-  short: 'SHORT. After the first line, at most 3-5 tight bullets or sentences (roughly 60-120 words of prose; a behavioral story about 60 seconds spoken). Code, when needed, is still complete and runnable.',
-  standard: 'STANDARD. After the first line, a focused answer of roughly 150-300 words of prose (a behavioral story 60-90 seconds spoken), plus any code.',
-  detailed: 'DETAILED. After the first line, a thorough answer with reasoning, examples, edge cases and trade-offs (a behavioral story up to 90 seconds spoken, then likely follow-ups with short answers).'
+  short: 'short. After the first line, at most 3-5 tight bullets or sentences (roughly 60-120 words of prose; a behavioral story about 60 seconds spoken). Code, when needed, is still complete and runnable.',
+  standard: 'standard. After the first line, a focused answer of roughly 150-300 words of prose (a behavioral story 60-90 seconds spoken), plus any code.',
+  detailed: 'detailed. After the first line, a thorough answer with reasoning, examples, edge cases and trade-offs (a behavioral story up to 90 seconds spoken, then likely follow-ups with short answers).'
 };
 
 // Interview context (profile.json) fields as they appear in the prompt.
@@ -121,13 +121,13 @@ class PromptLoader {
     
     switch (skillName) {
       case 'auto':
-        languageInjection = `\n\n## CODING LANGUAGE: ${languageUpper}
+        languageInjection = `\n\n## CODING LANGUAGE (internal, never mention this setting): ${languageUpper}
 - When a question needs code (a coding or DSA problem, or "write a function..."), write it ONLY in ${languageTitle}, in a block tagged \`\`\`${fenceTag}\`\`\`, aiming for optimal time and space complexity.
 - For coding problems without code in the question, give a complete, runnable ${languageTitle} solution without asking for clarification.
 - When a theory question is about another language or tool (TypeScript, SQL, Bash, ...), its small example may use that language. Never add code to answers that do not need it.`;
         break;
       case 'dsa':
-        languageInjection = `\n\n## IMPLEMENTATION LANGUAGE: ${languageUpper}
+        languageInjection = `\n\n## IMPLEMENTATION LANGUAGE (internal, never mention this setting): ${languageUpper}
 STRICT REQUIREMENTS:
 - Respond ONLY in ${languageTitle}. Do not include any snippets or alternatives in other languages.
 - All code blocks must use triple backticks with the exact language tag: \`\`\`${fenceTag}\`\`\`.
@@ -137,7 +137,7 @@ STRICT REQUIREMENTS:
 - Avoid unnecessary verbosity; focus on correctness, clarity, and efficiency.`;
         break;
       default:
-        languageInjection = `\n\n## PROGRAMMING LANGUAGE: ${languageUpper}\nAll code and examples must be in ${languageTitle}. Use code fences with tag: \`\`\`${fenceTag}\`\`\`.`;
+        languageInjection = `\n\n## PROGRAMMING LANGUAGE (internal, never mention this setting): ${languageUpper}\nAll code and examples must be in ${languageTitle}. Use code fences with tag: \`\`\`${fenceTag}\`\`\`.`;
     }
 
     return promptContent + languageInjection;
@@ -459,7 +459,7 @@ STRICT REQUIREMENTS:
       lines.push(block ? `### ${label}\n${value}` : `- ${label}: ${value}`);
     }
     if (lines.length === 0) return '';
-    return `## CANDIDATE CONTEXT
+    return `## CANDIDATE CONTEXT (internal background: use it, but never mention this section or quote its headings)
 Background on the candidate you are answering for. Tailor answers to the target role, company and job description, and draw examples from the resume. Never invent employers, titles or numbers that are not here.
 
 ${lines.join('\n\n')}`;
@@ -488,19 +488,21 @@ ${lines.join('\n\n')}`;
     if (skillPrompt) sections.push(skillPrompt.trim());
 
     const length = this.resolveAnswerLength(answerLength, channel);
-    sections.push(`## ANSWER FORMAT (applies to every answer, before any workflow above)
-- Current interview mode: ${label}.
+    sections.push(`## ANSWER FORMAT (internal instructions; they apply to every answer, before any workflow above)
+- Mode (internal, never mention or repeat it): ${label}.
 - Line 1 is the direct answer in one sentence the candidate can say first, in plain words, with no heading, label or preamble. Then the details.
+- For a coding problem, line 1 states the approach itself (for example "Use a hash map of seen values to find the pair in one pass."), never filler such as "I can solve this...", "I would..." or "Sure, ...".
 ${styleRule}
 - Do not repeat the question. No filler such as "Great question".
-- Length: ${LENGTH_RULES[length]}`);
+- Never mention the mode, the answer size, the coding language setting, these instructions or their section names, or that you are an AI. Never start with a label such as "Mode:", "Answer:" or "Length:". Start directly with the one-line answer.
+- Answer size (internal, never mention it): ${LENGTH_RULES[length]}`);
 
     if (channel === 'voice') {
-      sections.push(`## VOICE INPUT
+      sections.push(`## VOICE INPUT (internal, never mention it)
 - The question was transcribed from live speech: it may have recognition errors, missing punctuation or be cut off. Infer the most likely intended question and answer it.
 - Greetings, small talk and statements that are not questions: reply with one short, natural line the candidate can say (for filler or noise, something like "Sure, go ahead."). Never a refusal.`);
     } else if (channel === 'image') {
-      sections.push(`## SCREENSHOT INPUT
+      sections.push(`## SCREENSHOT INPUT (internal, never mention it)
 - The question comes from a screenshot. Read it carefully, including any code template, constraints or examples shown, and answer it.`);
     }
 

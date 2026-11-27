@@ -307,6 +307,29 @@ function appendStreamDelta(messageId, delta) {
   else entry.timer = setTimeout(() => renderStream(entry), wait);
 }
 
+// A retry or fallback in main starts the answer over: drop the text shown
+// so far and put the row back to "Thinking…" until the new text arrives.
+function resetStream(messageId) {
+  const entry = streams.get(messageId);
+  if (!entry) return;
+  if (entry.timer) {
+    clearTimeout(entry.timer);
+    entry.timer = null;
+  }
+  entry.text = '';
+  if (!entry.live) return;
+  entry.live = false;
+  entry.el.classList.remove('streaming');
+  entry.el.classList.add('thinking');
+  const textDiv = entry.el.querySelector('.message-text');
+  if (!textDiv) return;
+  textDiv.classList.remove('oc-prose');
+  const shimmer = document.createElement('span');
+  shimmer.className = 'oc-shimmer';
+  shimmer.textContent = 'Thinking…';
+  textDiv.replaceChildren(shimmer);
+}
+
 function renderStream(entry) {
   entry.timer = null;
   if (!entry.el.isConnected || !entry.text) return;
@@ -716,7 +739,9 @@ if (whysperAPI) {
   }
   if (whysperAPI.onTranscriptionLlmResponseChunk) {
     whysperAPI.onTranscriptionLlmResponseChunk((event, data) => {
-      if (data) appendStreamDelta(data.messageId, data.delta);
+      if (!data) return;
+      if (data.reset === true) resetStream(data.messageId);
+      else appendStreamDelta(data.messageId, data.delta);
     });
   }
 

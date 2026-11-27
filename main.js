@@ -1399,6 +1399,13 @@ class ApplicationController {
             messageId,
             delta
           });
+        },
+        // A retry or fallback starts over: clear this answer's live text.
+        () => {
+          this.sendToAnswerWindows("transcription-llm-response-chunk", {
+            messageId,
+            reset: true
+          });
         }
       );
       llmResult.metadata = { ...llmResult.metadata, messageId };
@@ -1495,6 +1502,13 @@ class ApplicationController {
           this.sendToAnswerWindows("transcription-llm-response-chunk", {
             messageId,
             delta
+          });
+        },
+        // A retry or fallback starts over: clear this answer's live text.
+        () => {
+          this.sendToAnswerWindows("transcription-llm-response-chunk", {
+            messageId,
+            reset: true
           });
         }
       );
@@ -1679,6 +1693,13 @@ class ApplicationController {
           this.sendToVoiceResponseWindows("transcription-llm-response-chunk", {
             messageId,
             delta
+          }, voiceTarget);
+        },
+        // A retry or fallback starts over: clear this answer's live text.
+        () => {
+          this.sendToVoiceResponseWindows("transcription-llm-response-chunk", {
+            messageId,
+            reset: true
           }, voiceTarget);
         }
       );

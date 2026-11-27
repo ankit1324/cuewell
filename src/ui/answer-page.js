@@ -156,6 +156,10 @@ function onStreamStart(data) {
 }
 
 function onStreamChunk(data) {
+    if (data && data.reset === true) {
+        resetStream(data.messageId);
+        return;
+    }
     if (!data || typeof data.delta !== 'string' || !data.delta) return;
     const id = typeof data.messageId === 'string' ? data.messageId : '';
     // No start seen (e.g. the page loaded mid-answer): follow this stream.
@@ -166,6 +170,17 @@ function onStreamChunk(data) {
     const wait = STREAM_RENDER_INTERVAL_MS - (Date.now() - lastStreamRenderAt);
     if (wait <= 0) renderStreamNow();
     else streamRenderTimer = setTimeout(renderStreamNow, wait);
+}
+
+// A retry or fallback in main starts the answer over: drop the text shown
+// so far and go back to "Thinking…" until the new text arrives.
+function resetStream(messageId) {
+    if (!isOpenStream(messageId)) return;
+    cancelStreamRender();
+    stream.text = '';
+    if (!stream.rendered) return;
+    stream.rendered = false;
+    showLoadingState();
 }
 
 function renderStreamNow() {

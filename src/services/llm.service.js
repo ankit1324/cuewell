@@ -319,7 +319,7 @@ class LLMService {
     }
   }
 
-  async processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
+  async processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null) {
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
     }
@@ -332,6 +332,7 @@ class LLMService {
 
     const startTime = Date.now();
     this.requestCount++;
+    const live = this._createLiveText(onDelta, onReset);
 
     try {
       const skillPrompt = this.buildSystemPrompt(activeSkill, programmingLanguage, 'image');
@@ -353,11 +354,7 @@ class LLMService {
         geminiRequest.systemInstruction = { parts: [{ text: skillPrompt }] };
       }
 
-      const fullText = await this.executeStreamingRequest(geminiRequest, (delta) => {
-        if (typeof onDelta === 'function' && delta) {
-          onDelta(delta);
-        }
-      });
+      const fullText = await this.executeStreamingRequest(geminiRequest, live.onDelta, live.onAttemptStart);
 
       const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
@@ -388,6 +385,7 @@ class LLMService {
         error: error.message,
         requestId: this.requestCount
       });
+      live.onAttemptStart();
       return this.processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory, programmingLanguage);
     }
   }
@@ -479,22 +477,19 @@ class LLMService {
     }
   }
 
-  async processTextWithSkillStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
+  async processTextWithSkillStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null) {
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
     }
 
     const startTime = Date.now();
     this.requestCount++;
+    const live = this._createLiveText(onDelta, onReset);
 
     try {
       const geminiRequest = this.buildGeminiRequest(text, activeSkill, sessionMemory, programmingLanguage);
 
-      const fullText = await this.executeStreamingRequest(geminiRequest, (delta) => {
-        if (typeof onDelta === 'function' && delta) {
-          onDelta(delta);
-        }
-      });
+      const fullText = await this.executeStreamingRequest(geminiRequest, live.onDelta, live.onAttemptStart);
 
       const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
@@ -523,6 +518,7 @@ class LLMService {
         error: error.message,
         requestId: this.requestCount
       });
+      live.onAttemptStart();
       return this.processTextWithSkill(text, activeSkill, sessionMemory, programmingLanguage);
     }
   }
@@ -1080,22 +1076,19 @@ class LLMService {
    * {response, metadata} shape. Falls back to the non-streaming path on any
    * streaming failure so reliability is never worse than before.
    */
-  async processTranscriptionWithIntelligentResponseStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null) {
+  async processTranscriptionWithIntelligentResponseStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null) {
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
     }
 
     const startTime = Date.now();
     this.requestCount++;
+    const live = this._createLiveText(onDelta, onReset);
 
     try {
       const geminiRequest = this.buildIntelligentTranscriptionRequest(text, activeSkill, sessionMemory, programmingLanguage);
 
-      const fullText = await this.executeStreamingRequest(geminiRequest, (delta) => {
-        if (typeof onDelta === 'function' && delta) {
-          onDelta(delta);
-        }
-      });
+      const fullText = await this.executeStreamingRequest(geminiRequest, live.onDelta, live.onAttemptStart);
 
       const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
@@ -1126,9 +1119,39 @@ class LLMService {
         requestId: this.requestCount
       });
       // Non-streaming path returns the same shape; the caller renders it as a
-      // single final response.
+      // single final response. The partial text of the failed stream is
+      // cleared first so it does not stay on screen while this runs.
+      live.onAttemptStart();
       return this.processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory, programmingLanguage);
     }
+  }
+
+  /**
+   * Live text for one streamed answer. onDelta forwards each piece to the
+   * caller. onAttemptStart runs before every attempt (a retry, another model
+   * or the non-streaming fallback): when an earlier attempt already showed
+   * text it calls onReset once, so the caller clears that text instead of
+   * the new attempt's text being appended to it.
+   */
+  _createLiveText(onDelta, onReset) {
+    let shown = false;
+    return {
+      onDelta: (delta) => {
+        if (typeof onDelta !== 'function' || !delta) return;
+        shown = true;
+        onDelta(delta);
+      },
+      onAttemptStart: () => {
+        if (!shown) return;
+        shown = false;
+        if (typeof onReset !== 'function') return;
+        try {
+          onReset();
+        } catch (error) {
+          logger.warn('Live text reset failed', { error: error.message });
+        }
+      }
+    };
   }
 
   /** Safely pull the text delta out of a streamed Gemini chunk. */
@@ -1153,11 +1176,11 @@ class LLMService {
   /**
    * Run a streaming Gemini request with the same model-fallback + retry policy
    * as executeRequest. Accumulates and returns the full text; invokes onDelta
-   * for each chunk.
+   * for each chunk and onAttemptStart (optional) before every attempt.
    */
-  async executeStreamingRequest(geminiRequest, onDelta) {
+  async executeStreamingRequest(geminiRequest, onDelta, onAttemptStart = null) {
     if (this.providerId !== 'gemini') {
-      return this.executeProviderRequest(geminiRequest, onDelta);
+      return this.executeProviderRequest(geminiRequest, onDelta, { onAttemptStart });
     }
 
     const maxRetries = config.get('llm.gemini.maxRetries');
@@ -1170,6 +1193,7 @@ class LLMService {
 
     for (const modelName of modelsToTry) {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        if (typeof onAttemptStart === 'function') onAttemptStart();
         try {
           const fullText = await this._streamRequestForModel(geminiRequest, modelName, apiKey, onDelta);
 
@@ -1644,7 +1668,8 @@ class LLMService {
    * Streams when onDelta is a function. Retries network, 429 and 5xx failures
    * with the same backoff as the Gemini paths; a stream that already showed
    * text is not replayed, because the caller's non-streaming fallback replaces
-   * the partial answer instead of appending a second copy.
+   * the partial answer instead of appending a second copy. options.onAttemptStart
+   * (optional) runs before every attempt.
    */
   async executeProviderRequest(geminiRequest, onDelta = null, options = {}) {
     const providerConfig = getProviderConfig(this.providerId);
@@ -1668,8 +1693,10 @@ class LLMService {
     const maxAttempts = Math.max(1, Number(options.maxAttempts) || config.get('llm.gemini.maxRetries') || 1);
     let lastError = null;
 
+    const onAttemptStart = typeof options.onAttemptStart === 'function' ? options.onAttemptStart : null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       let emittedText = false;
+      if (onAttemptStart) onAttemptStart();
       try {
         const text = streaming
           ? await provider.stream(neutral, model, (delta) => {
