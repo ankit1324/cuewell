@@ -6,7 +6,8 @@ Cuewell is free and open source (Apache-2.0), built on Electron, and maintained 
 
 ## Features
 
-- **Small overlay.** A toolbar, a floating answer panel, a chat window, Settings and a first-run onboarding wizard. Windows stay on top, and click-through mode lets clicks pass to the app underneath.
+- **Small overlay.** A toolbar, a floating answer panel, a chat window, a Settings window and a first-run onboarding wizard. The overlay windows stay on top, and click-through mode lets clicks pass to the app underneath.
+- **Menu bar and tray icon.** The overlay has no Dock icon or taskbar button. A menu bar icon (macOS) or tray icon (Windows, Linux) shows or hides Cuewell, takes a screenshot, opens the chat, Settings or Check for Updates…, and quits.
 - **Interview modes.** Auto (the default) works out the question type: coding, technical theory, system design, behavioral, HR, managerial or situational, puzzles and case questions. You can also pin a mode: Coding, Technical, System design, Behavioral or HR.
 - **One-line answer first.** Every answer opens with one sentence you can say right away, then the details. Answer length is Auto, Short, Standard or Detailed. Auto is Short for voice and Standard for typed and screenshot questions.
 - **Coding language.** In Auto and Coding modes, code is written in C++, C, Python, Java or JavaScript, as chosen on the toolbar or in Settings.
@@ -127,7 +128,7 @@ No pre-built downloads are linked from this README. The workflow in `.github/wor
 Cuewell does not update itself, because builds are not signed. It only tells you when a newer release exists:
 
 - About 15 seconds after launch, at most once a day, it asks GitHub for the latest release. If that release is newer, a notification says "Cuewell X.Y.Z is available". Click it to open the release page in your browser. Nothing is shown if you are up to date or offline.
-- **Check for Updates…** checks right away and tells you the result. On macOS it is in the **Cuewell** menu. On Windows and Linux it is in the app menu on the toolbar.
+- **Check for Updates…** checks right away and tells you the result. It is in the menu bar or tray icon's menu on every system, in the **Cuewell** menu on macOS, and in the app menu on the toolbar on Windows and Linux.
 
 The check is a single request to `api.github.com` that names only the app version. To turn off the automatic check, add `UPDATE_CHECKS=off` to `.env`. **Check for Updates…** still works when you choose it.
 
@@ -154,7 +155,9 @@ These work only while a Cuewell window has focus, so other apps keep them:
 
 With click-through on, you cannot click a window to focus it, so moving the windows by keyboard only works while one still has focus, for example right after you turn click-through on.
 
-If another app already owns a global shortcut, Cuewell cannot register it and logs a warning.
+If another app already owns a global shortcut, Cuewell cannot register it. Settings > Shortcuts marks it as not working, and the log has a warning. The menu bar or tray icon's menu still has those commands.
+
+On Linux with Wayland, global shortcuts go through the desktop's shortcuts portal. GNOME and KDE may ask you once to allow them. Desktops without the portal give Cuewell no global shortcuts; use the tray icon's menu, or an X11 session.
 
 ## AI providers
 
@@ -179,7 +182,7 @@ On macOS and Linux the app makes this file readable by your user only (mode 0600
 
 ## Configuration
 
-Settings writes provider, voice, mode and answer length values to `.env` for you. The main keys:
+Settings writes provider, voice, mode, answer length, coding language, app icon and window gap values to `.env` for you. The main keys:
 
 ```bash
 # AI provider: gemini | anthropic | openai | openrouter | groq | deepseek | ollama
@@ -193,6 +196,12 @@ LLM_STREAM_IDLE_TIMEOUT_MS=60000
 # Saved by the app when you change them
 INTERVIEW_MODE=auto          # auto | dsa (Coding) | technical | system-design | behavioral | hr
 ANSWER_LENGTH=auto           # auto | short | standard | detailed
+CODING_LANGUAGE=cpp          # cpp | c | python | java | javascript
+APP_ICON=terminal            # terminal | activity | settings | cuewell
+WINDOW_GAP=10                # pixels, 0 to 100
+
+# Set to off to turn off the automatic update check
+# UPDATE_CHECKS=off
 
 # Speech: whisper (local) or azure
 SPEECH_PROVIDER=whisper
@@ -213,10 +222,10 @@ See `env.example` for the full list. `setup.sh` configures Whisper with the `bas
 Settings also has:
 
 - **Interview context:** role, company, job description, resume and notes, saved to `profile.json` in the app data folder (not in `.env`).
-- **App icon:** the icon and name the app uses for its Dock icon and process title (Terminal, Activity Monitor or System Settings; Terminal is the default).
+- **App icon:** the name and icon the app shows to the system: its process title (as Activity Monitor shows it), its window titles and the menu bar or tray icon's tooltip. Choose Terminal (the default), Activity Monitor, System Settings or Cuewell.
 - **Window gap:** spacing in pixels between the toolbar and the answer panel.
 
-The app icon, window gap and coding language are not saved yet; they reset when the app restarts (to Terminal, 10 px and C++).
+Settings saves each change as you make it. Quitting waits up to a second for a change that is still being saved.
 
 If no speech provider is available, the mic buttons are hidden.
 
@@ -245,6 +254,7 @@ On macOS and Windows, every Cuewell window is marked as excluded from screen cap
 
 - Some browser-based screen sharing, and older capture methods, can still capture the windows.
 - On Linux there is no such window flag, so the windows are always visible in screen shares and recordings.
+- The menu bar icon (macOS) and tray icon (Windows, Linux) are part of the system's menu bar or taskbar, so they show in screen shares and recordings of the whole screen.
 - Someone looking at your screen, or a camera pointed at it, still sees it.
 
 Treat privacy mode as a convenience for keeping the overlay out of your own recordings and shares, not as a guarantee.
@@ -290,6 +300,9 @@ No speech provider is available. Run `./setup.sh` again, finish the Whisper step
 **A shortcut does not work.**
 Another app may own it; check the log in `~/.Cuewell/logs`. `Cmd/Ctrl + ,` and the arrow shortcuts only work while a Cuewell window has focus.
 
+**No tray icon on Linux.**
+GNOME shows tray icons only with an AppIndicator extension (Ubuntu includes one). Install "AppIndicator and KStatusNotifierItem Support", or use the shortcuts and the toolbar.
+
 **Blank window or GPU crash on Linux.**
 The app already disables GPU acceleration on Linux. Make sure an X11 or XWayland display is available, and try `npm run dev`.
 
@@ -316,7 +329,7 @@ settings.html             Settings
 onboarding.html/.js       First-run wizard
 prompt-loader.js          Builds the system prompt: mode, answer format, length, context
 prompts/                  Mode prompts (auto, dsa, technical, system-design, behavioral, hr)
-src/core/                 Config, logging, first run, profile store, Whisper installer
+src/core/                 Config, logging, first run, profile store, menus, tray icon, updates, Whisper installer
 src/managers/             Window and session (conversation history) managers
 src/services/             Screen capture, LLM, speech and Whisper worker services
 src/services/providers/   Claude and OpenAI-compatible provider adapters

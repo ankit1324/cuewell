@@ -66,20 +66,57 @@ const quit = () => {
   }
 }
 
-// window.api: a named send/receive pair, limited to the given channels.
-function channelApi(sendChannels, receiveChannels) {
+// window.api: receive by channel name, limited to the given channels. The
+// toolbar only listens through it; it sends nothing.
+function receiveApi(receiveChannels) {
   return {
-    send: (channel, data) => {
-      if (sendChannels.includes(channel)) {
-        ipcRenderer.send(channel, data)
-      } else {
-        console.warn('Invalid IPC channel:', channel)
-      }
-    },
     receive: (channel, func) => {
       if (receiveChannels.includes(channel) && typeof func === 'function') {
         ipcRenderer.on(channel, (_event, ...args) => func(...args))
       }
+    }
+  }
+}
+
+// Quit: main sends flush-before-quit and waits up to 1 s for
+// flush-before-quit-done before it closes the windows. The page's callback
+// (set with onFlushBeforeQuit) saves whatever is still pending; the ack goes
+// out when its promise settles. With no callback, a blur event runs the
+// page's own "focus left the window" save instead and the ack follows on the
+// next task: the page's save messages are sent first, and main handles IPC
+// messages from one page in order, so they are saved before the ack arrives.
+// Returns the onFlushBeforeQuit method.
+function flushBeforeQuit() {
+  let pageCallback = null
+  ipcRenderer.on('flush-before-quit', (_event, request) => {
+    const id = request && Number.isInteger(request.id) ? request.id : null
+    let acked = false
+    const ack = () => {
+      if (acked) return
+      acked = true
+      ipcRenderer.send('flush-before-quit-done', id)
+    }
+    if (!pageCallback) {
+      try {
+        if (typeof window !== 'undefined' && typeof Event === 'function') window.dispatchEvent(new Event('blur'))
+      } catch (_) {}
+      setTimeout(ack, 0)
+      return
+    }
+    let result
+    try {
+      result = pageCallback()
+    } catch (e) {
+      console.error('flush-before-quit listener error:', e)
+    }
+    if (result && typeof result.then === 'function') result.then(ack, ack)
+    else ack()
+  })
+  return (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    pageCallback = callback
+    return () => {
+      if (pageCallback === callback) pageCallback = null
     }
   }
 }
@@ -121,7 +158,7 @@ const PAGES = {
       onCodingLanguageChanged: listen('coding-language-changed'),
       onMainWindowShown: listen('main-window-shown')
     },
-    api: channelApi([], ['interaction-mode-changed', 'skill-updated'])
+    api: receiveApi(['interaction-mode-changed', 'skill-updated'])
   }),
 
   // Settings (settings.html, src/ui/settings-window.js)
@@ -147,6 +184,9 @@ const PAGES = {
       saveProfile: (profile) => ipcRenderer.invoke('save-profile', profile),
       closeSettings: () => ipcRenderer.send('close-settings'),
       quit,
+      // callback() -> optional promise: save what is pending before the app
+      // quits. Main waits for it at most 1 s. Returns an unsubscribe function.
+      onFlushBeforeQuit: flushBeforeQuit(),
       onCodingLanguageChanged: listen('coding-language-changed'),
       onSkillUpdated: listen('skill-updated'),
       onSpeechAvailability: listen('speech-availability'),
@@ -171,7 +211,9 @@ const PAGES = {
   })
 }
 
-const build = PAGES[windowType()]
+// Own properties only: "constructor" or "__proto__" must expose nothing.
+const type = windowType()
+const build = Object.hasOwn(PAGES, type) ? PAGES[type] : null
 if (build) {
   const exposed = build()
   for (const [name, value] of Object.entries(exposed)) {

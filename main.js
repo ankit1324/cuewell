@@ -3,7 +3,7 @@ const fs = require("fs");
 // Node's URL on purpose: speech.service.js replaces globalThis.URL with a
 // stand-in that reports every URL as https:.
 const { URL, fileURLToPath } = require("url");
-const { app, BrowserWindow, Menu, globalShortcut, session, ipcMain, nativeTheme, dialog, shell, Notification, net, systemPreferences } = require("electron");
+const { app, BrowserWindow, Menu, Tray, nativeImage, globalShortcut, session, ipcMain, nativeTheme, dialog, shell, Notification, net, systemPreferences, powerMonitor } = require("electron");
 
 // ── Carry data over from the folders used before the renames ──
 // Electron names the userData folder after package.json, so each rename gave
@@ -181,6 +181,10 @@ if (process.platform === "linux") {
   // On X11 only; harmless on Wayland. Prevents Chromium from spawning a
   // compositor process that adds another X11 client.
   app.commandLine.appendSwitch("in-process-gpu");
+  // Global shortcuts on Wayland go through the desktop's GlobalShortcuts
+  // portal (the desktop may ask the user to allow them once). Ignored on X11.
+  // Must be set before the app is ready.
+  app.commandLine.appendSwitch("enable-features", "GlobalShortcutsPortal");
 }
 
 // Keep Chromium network noise out of the terminal; app-level logs still go through Winston.
@@ -202,6 +206,7 @@ const {
   isMediaAccessBlocked, buildProblemReportUrl,
 } = require("./src/core/error-reporter");
 const { buildAppMenuTemplate, buildToolbarMenuTemplate } = require("./src/core/app-menu");
+const { AppTray } = require("./src/core/tray");
 
 // The launch update check waits until startup work has settled.
 const LAUNCH_UPDATE_CHECK_DELAY_MS = 15000;
@@ -210,6 +215,12 @@ const SPEECH_ERROR_REPEAT_MS = 5000;
 // A crashed window is reloaded at most this many times in a minute; after
 // that it is left alone and the user is told to restart.
 const MAX_RENDERER_RELOADS_PER_MINUTE = 3;
+// On quit, the longest wait for Settings to save what is still pending.
+const QUIT_FLUSH_TIMEOUT_MS = 1000;
+// If quitting still has not finished this long after it started, exit.
+const QUIT_FORCE_EXIT_MS = QUIT_FLUSH_TIMEOUT_MS + 3000;
+// A tray click closes the menu first; the screenshot waits for it to fade.
+const TRAY_SCREENSHOT_DELAY_MS = 250;
 
 // ── Global crash guard ──
 // The speech path spawns external processes (Whisper CLI, and on macOS/Linux
@@ -373,6 +384,8 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   "resize-llm-window-for-content": ["llmResponse"],
   // Settings (settings.html)
   "close-settings": ["settings"],
+  // Ack for flush-before-quit: Settings saved what was pending (see onBeforeQuit)
+  "flush-before-quit-done": ["settings"],
   // Read-only facts for Settings: version, platform, shortcuts, file paths
   "get-settings-info": ["settings"],
   // Removes one saved key (a save with an empty key keeps it)
@@ -385,8 +398,9 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   "get-first-run-status": ["onboarding"],
   "complete-first-run": ["onboarding"],
   "close-onboarding": ["onboarding"],
-  // Whisper setup and Test connection: the wizard and Settings
-  "detect-whisper": ["onboarding", "settings"],
+  // Whisper setup and Test connection: the wizard and Settings. Settings
+  // reads the Whisper state with get-whisper-status instead of detect-whisper.
+  "detect-whisper": ["onboarding"],
   "install-whisper": ["onboarding", "settings"],
   "download-whisper-model": ["onboarding", "settings"],
   "test-provider": ["onboarding", "settings"],
@@ -554,6 +568,17 @@ class ApplicationController {
     this._whisperJob = null;
     this.isFirstRun = false;
     this.isQuitting = false;
+    // Quit sequence (onBeforeQuit): true once Settings had its chance to save.
+    this._quitPrepared = false;
+    this._quitPreparing = false;
+    // The flush-before-quit request Settings is answering: { id, finish }.
+    this._quitFlushWaiter = null;
+    this._quitFlushSeq = 0;
+    this._quitForceExitTimer = null;
+    // Menu bar / tray icon (src/core/tray.js), created when the app is ready.
+    this.tray = null;
+    // The name the app shows now (Cuewell, or the app icon setting's disguise).
+    this.appDisplayName = "Cuewell";
 
     // Update notifier: reads the latest GitHub release, never installs.
     // Automatic checks follow UPDATE_CHECKS in .env (read only, default on).
@@ -611,7 +636,7 @@ class ApplicationController {
     app.on("window-all-closed", () => this.onWindowAllClosed());
     app.on("activate", () => this.onActivate());
     app.on("will-quit", () => this.onWillQuit());
-    app.on("before-quit", () => { this.isQuitting = true; });
+    app.on("before-quit", (event) => this.onBeforeQuit(event));
 
     this.setupCrashRecovery();
     this.setupIPCHandlers();
@@ -691,6 +716,7 @@ class ApplicationController {
     try {
       this.setupPermissions();
       this.setupApplicationMenu();
+      this.watchSystemShutdown();
 
       // Small delay to ensure desktop/space detection is accurate
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -717,6 +743,7 @@ class ApplicationController {
       // default Terminal disguise.
       const savedIcon = normalizeAppIconKey(String(process.env.APP_ICON || "").trim());
       this.updateAppIcon(APP_ICON_KEYS.includes(savedIcon) ? savedIcon : "terminal");
+      this.setupTray();
 
       this.starting = false;
       this.isReady = true;
@@ -810,6 +837,55 @@ class ApplicationController {
     };
   }
 
+  /**
+   * Menu bar icon (macOS) or tray icon (Windows, Linux). The overlay has no
+   * Dock icon or taskbar button, so this is how the app is always reachable.
+   * A desktop without a tray only loses the icon; it is logged.
+   */
+  setupTray() {
+    if (this.tray) return;
+    this.tray = new AppTray({
+      electron: { Tray, Menu, nativeImage },
+      platform: process.platform,
+      appRoot: __dirname,
+      logger,
+      // macOS: keep the overlay from covering the menu while it is open.
+      onMenuOpen: () => windowManager.setOverlayBelowMenus(true),
+      onMenuClose: () => windowManager.setOverlayBelowMenus(false),
+      getMenuOptions: () => ({
+        appName: this.appDisplayName,
+        updatesConfigured: this.updateChecker.isConfigured(),
+        setupNeeded: this.isFirstRun,
+        screenShared: !!windowManager.isScreenBeingShared,
+        isShortcutRegistered: (accelerator) => this.isGlobalShortcutWorking(accelerator),
+        actions: {
+          toggleWindows: () => windowManager.toggleVisibility(),
+          screenshot: () => setTimeout(() => this.triggerScreenshotOCR(), TRAY_SCREENSHOT_DELAY_MS),
+          openChat: () => windowManager.showChatWindow(),
+          settings: () => this.showSettings(),
+          checkForUpdates: () => this.checkForUpdatesNow(),
+          finishSetup: () => {
+            windowManager.showOnboarding().catch((e) => {
+              logger.warn("Could not show the onboarding window", { error: e.message });
+            });
+          },
+          quit: () => this.quitApp(),
+        },
+      }),
+    });
+    if (!this.tray.create()) this.tray = null;
+  }
+
+  /** True when `accelerator` is a global shortcut that registered. */
+  isGlobalShortcutWorking(accelerator) {
+    if (!this.globalShortcutStatus || !this.globalShortcutStatus[accelerator]) return false;
+    try {
+      return globalShortcut.isRegistered(accelerator);
+    } catch (_) {
+      return false;
+    }
+  }
+
   /** Open Settings and send it the current values. */
   showSettings() {
     windowManager.showSettings();
@@ -824,18 +900,113 @@ class ApplicationController {
     }
   }
 
+  /** Quit from the menus, the tray or Settings. onBeforeQuit does the rest. */
   quitApp() {
     logger.info("Quit requested");
     this.isQuitting = true;
+    this.armForceExit();
     try {
-      windowManager.destroyAllWindows();
-      globalShortcut.unregisterAll();
       app.quit();
-      setTimeout(() => process.exit(0), 1000);
     } catch (error) {
-      logger.error("Error during quit:", error);
+      logger.error("Error during quit", { error: error.message });
       process.exit(1);
     }
+  }
+
+  /**
+   * On shutdown, restart or log out, quit at once: delaying the quit (as
+   * onBeforeQuit does to let Settings save) would make macOS cancel the log
+   * out. Settings already saves when it loses focus.
+   */
+  watchSystemShutdown() {
+    try {
+      powerMonitor.on("shutdown", () => {
+        logger.info("System is shutting down; quitting without waiting");
+        this.isQuitting = true;
+        this._quitPrepared = true;
+        try {
+          globalShortcut.unregisterAll();
+          windowManager.destroyAllWindows();
+        } catch (_) { /* quitting anyway */ }
+        app.quit();
+      });
+    } catch (e) {
+      logger.debug("Shutdown events are not available here", { error: e.message });
+    }
+  }
+
+  /** Exit anyway if quitting stalls (a window that will not close, a hung page). */
+  armForceExit() {
+    if (this._quitForceExitTimer) return;
+    this._quitForceExitTimer = setTimeout(() => {
+      logger.warn("Quit did not finish in time; exiting");
+      process.exit(0);
+    }, QUIT_FORCE_EXIT_MS);
+  }
+
+  /**
+   * Every quit (Cmd+Q, the menus, the tray, Settings, the Dock, logging out)
+   * comes here first. The quit waits until Settings has saved anything still
+   * pending, at most QUIT_FLUSH_TIMEOUT_MS, then closes the windows and
+   * quits for real. The overlay windows cannot be closed by the user
+   * (closable: false), which on macOS would cancel a plain app.quit(), so
+   * they are destroyed here.
+   */
+  onBeforeQuit(event) {
+    this.isQuitting = true;
+    if (this._quitPrepared) return;
+    event.preventDefault();
+    if (this._quitPreparing) return;
+    this._quitPreparing = true;
+    this.armForceExit();
+    this.flushSettingsBeforeQuit()
+      .then((outcome) => logger.info("Quitting", { settingsFlush: outcome }))
+      .catch((error) => logger.warn("Settings flush before quit failed", { error: error.message }))
+      .finally(() => {
+        this._quitPrepared = true;
+        this._quitPreparing = false;
+        try {
+          globalShortcut.unregisterAll();
+          windowManager.destroyAllWindows();
+        } catch (error) {
+          logger.warn("Could not close the windows before quitting", { error: error.message });
+        }
+        app.quit();
+      });
+  }
+
+  /**
+   * Ask the Settings page to save what is still pending and wait for its ack
+   * (flush-before-quit-done) or QUIT_FLUSH_TIMEOUT_MS, whichever comes
+   * first. Resolves with "saved", "timeout", "no-settings" or "gone".
+   */
+  flushSettingsBeforeQuit() {
+    const win = windowManager.getWindow("settings");
+    const contents = win && !win.isDestroyed() ? win.webContents : null;
+    if (!contents || contents.isDestroyed() || contents.isLoading() ||
+        (typeof contents.isCrashed === "function" && contents.isCrashed())) {
+      return Promise.resolve("no-settings");
+    }
+    return new Promise((resolve) => {
+      const id = ++this._quitFlushSeq;
+      let timer = null;
+      const finish = (outcome) => {
+        if (!this._quitFlushWaiter || this._quitFlushWaiter.id !== id) return;
+        this._quitFlushWaiter = null;
+        clearTimeout(timer);
+        try { contents.removeListener("destroyed", onGone); } catch (_) { /* already gone */ }
+        resolve(outcome);
+      };
+      const onGone = () => finish("gone");
+      this._quitFlushWaiter = { id, finish };
+      timer = setTimeout(() => finish("timeout"), QUIT_FLUSH_TIMEOUT_MS);
+      contents.once("destroyed", onGone);
+      try {
+        contents.send("flush-before-quit", { id });
+      } catch (_) {
+        finish("gone");
+      }
+    });
   }
 
   logsFolder() {
@@ -1141,15 +1312,28 @@ class ApplicationController {
       "Alt+R": () => this.toggleSpeechRecognition(),
     };
 
-    // accelerator -> whether it registered, for the Settings shortcuts table.
+    // accelerator -> whether it registered, for the Settings shortcuts table
+    // and the tray menu. register() returns false when another app owns the
+    // keys, and can throw where the system refuses global shortcuts (some
+    // Wayland desktops); either way the shortcut is marked as not working
+    // and the app carries on.
     this.globalShortcutStatus = {};
     Object.entries(shortcuts).forEach(([accelerator, handler]) => {
-      const success = globalShortcut.register(accelerator, handler);
-      this.globalShortcutStatus[accelerator] = !!success;
+      let success = false;
+      let error = null;
+      try {
+        success = !!globalShortcut.register(accelerator, handler);
+      } catch (e) {
+        error = e.message;
+      }
+      this.globalShortcutStatus[accelerator] = success;
       if (success) {
         logger.debug("Global shortcut registered", { accelerator });
       } else {
-        logger.warn("Global shortcut unavailable (another app owns it)", { accelerator });
+        logger.warn("Global shortcut unavailable", {
+          accelerator,
+          reason: error || "another app owns it, or the system does not allow it",
+        });
       }
     });
 
@@ -1162,6 +1346,8 @@ class ApplicationController {
    * app, so other apps keep these keys.
    */
   setupFocusShortcuts() {
+    // accelerator -> false once registering it failed; true once it worked.
+    this.focusShortcutStatus = {};
     this.focusShortcuts = {
       "CommandOrControl+,": () => windowManager.showSettings(),
       "CommandOrControl+Up": () => this.handleUpArrow(),
@@ -1192,10 +1378,23 @@ class ApplicationController {
     if (!this.focusShortcuts || active === this.focusShortcutsActive) return;
     this.focusShortcutsActive = active;
     Object.entries(this.focusShortcuts).forEach(([accelerator, handler]) => {
-      if (active) {
-        globalShortcut.register(accelerator, handler);
-      } else if (globalShortcut.isRegistered(accelerator)) {
-        globalShortcut.unregister(accelerator);
+      try {
+        if (active) {
+          const success = !!globalShortcut.register(accelerator, handler);
+          if (!success && this.focusShortcutStatus[accelerator] !== false) {
+            logger.warn("Shortcut unavailable while Cuewell has focus", { accelerator });
+          }
+          this.focusShortcutStatus[accelerator] = success;
+        } else if (globalShortcut.isRegistered(accelerator)) {
+          globalShortcut.unregister(accelerator);
+        }
+      } catch (e) {
+        if (active) {
+          if (this.focusShortcutStatus[accelerator] !== false) {
+            logger.warn("Shortcut unavailable while Cuewell has focus", { accelerator, reason: e.message });
+          }
+          this.focusShortcutStatus[accelerator] = false;
+        }
       }
     });
   }
@@ -1501,9 +1700,16 @@ class ApplicationController {
       const y = coord(position && position.y);
       try {
         const menu = Menu.buildFromTemplate(buildToolbarMenuTemplate(this.menuOptions()));
-        menu.popup({ window: win, ...(x !== undefined && y !== undefined ? { x, y } : {}) });
+        // macOS: the overlay windows sit above menus; lower them while it is open.
+        windowManager.setOverlayBelowMenus(true);
+        menu.popup({
+          window: win,
+          ...(x !== undefined && y !== undefined ? { x, y } : {}),
+          callback: () => windowManager.setOverlayBelowMenus(false),
+        });
         return { success: true };
       } catch (e) {
+        windowManager.setOverlayBelowMenus(false);
         logger.warn("Could not show the app menu", { error: e.message });
         return { success: false };
       }
@@ -1531,6 +1737,7 @@ class ApplicationController {
       try {
         this.firstRunManager.markCompleted();
         this.isFirstRun = false;
+        if (this.tray) this.tray.refresh();
         // Reinitialize speech service with the latest persisted settings
         // so the mic button reflects the provider/command set during onboarding.
         speechService.initializeClient();
@@ -1688,6 +1895,12 @@ class ApplicationController {
       if (settingsWindow) {
         settingsWindow.hide();
       }
+    });
+
+    // Settings saved what was pending after flush-before-quit.
+    this.onIpc("flush-before-quit-done", (_event, id) => {
+      const waiter = this._quitFlushWaiter;
+      if (waiter && id === waiter.id) waiter.finish("saved");
     });
 
     this.onIpc("quit-app", () => {
@@ -2426,6 +2639,10 @@ class ApplicationController {
   }
 
   onWillQuit() {
+    if (this.tray) {
+      this.tray.destroy();
+      this.tray = null;
+    }
     globalShortcut.unregisterAll();
     speechService.shutdown();
     windowManager.destroyAllWindows();
@@ -2519,7 +2736,13 @@ class ApplicationController {
       ...Object.keys(global).map((accelerator) => ({
         accelerator, scope: "global", registered: global[accelerator],
       })),
-      ...focus.map((accelerator) => ({ accelerator, scope: "focus", registered: null })),
+      // Focus shortcuts are only registered while a window has focus: false
+      // once registering one failed, otherwise null (not known yet).
+      ...focus.map((accelerator) => ({
+        accelerator,
+        scope: "focus",
+        registered: this.focusShortcutStatus && this.focusShortcutStatus[accelerator] === false ? false : null,
+      })),
     ].map((entry) => ({ ...entry, action: SHORTCUT_ACTIONS[entry.accelerator] || "" }));
     let logs = "";
     try {
@@ -3322,6 +3545,9 @@ class ApplicationController {
 
       // Force update process title for Activity Monitor stealth - CRITICAL
       process.title = appName;
+      // The tray tooltip and menu use the same name.
+      this.appDisplayName = String(appName || "").trim() || "Cuewell";
+      if (this.tray) this.tray.refresh();
 
       // Set app name in dock (macOS) - this affects the dock and Activity Monitor
       if (process.platform === "darwin") {

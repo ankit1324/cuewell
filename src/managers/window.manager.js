@@ -24,6 +24,14 @@ const ANSWER_REVEAL_TIMEOUT_MS = 150; // longest wait for the answer page's firs
 const ANSWER_MIN_HEIGHT = 120;       // title bar plus a line or two
 const ANSWER_SCREEN_MARGIN = 12;     // kept free below the answer window
 
+// The one window level of the overlay windows (toolbar, chat, answer,
+// onboarding). On macOS 'screen-saver' keeps them above full-screen apps and
+// other floating windows; Settings uses OVERLAY_RELATIVE_LEVEL + 1 while it
+// has focus. Changing the level of a visible window makes it blink, so the
+// level is set once and never switched.
+const OVERLAY_LEVEL = 'screen-saver';
+const OVERLAY_RELATIVE_LEVEL = 2;
+
 /** Open http(s) URLs in the system browser and drop every other scheme. */
 function openExternalHttpUrl(url) {
   let parsed;
@@ -184,35 +192,12 @@ class WindowManager {
     const mainWindow = this.windows.get('main');
     if (!mainWindow) return;
     
-    // Immediate always-on-top enforcement for main window
-    if (process.platform === 'darwin') {
-      try {
-        mainWindow.setAlwaysOnTop(true, 'screen-saver', 2);
-      } catch (error) {
-        mainWindow.setAlwaysOnTop(true, 'floating', 2);
-      }
-    } else {
-      mainWindow.setAlwaysOnTop(true);
-    }
-    
+    this.pinOverlayOnTop(mainWindow);
+
     // Wait for app to fully initialize and detect current desktop
     await new Promise((resolve) => setTimeout(resolve, 100));
     this.showOnCurrentDesktop(mainWindow);
-    
-    // Additional enforcement after showing
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    if (!mainWindow.isDestroyed()) {
-      if (process.platform === 'darwin') {
-        try {
-          mainWindow.setAlwaysOnTop(true, 'screen-saver', 2);
-        } catch (error) {
-          mainWindow.setAlwaysOnTop(true, 'floating', 2);
-        }
-      } else {
-        mainWindow.setAlwaysOnTop(true);
-      }
-    }
-    
+
     this.isVisible = true;
     logger.info('Main window displayed');
     // Notify renderer to refresh speech availability
@@ -229,15 +214,7 @@ class WindowManager {
 
     // Always-on-top must be set even when we're deferring the visual
     // show — it persists into the future showOnCurrentDesktop call.
-    if (process.platform === 'darwin') {
-      try {
-        window.setAlwaysOnTop(true, 'screen-saver', 2);
-      } catch (error) {
-        window.setAlwaysOnTop(true, 'floating', 2);
-      }
-    } else {
-      window.setAlwaysOnTop(true);
-    }
+    this.pinOverlayOnTop(window);
 
     // Only auto-show when explicitly allowed (e.g. not during first-run
     // onboarding). The single entry point for showing the overlay is
@@ -246,20 +223,6 @@ class WindowManager {
       // Wait for app to fully initialize and detect current desktop
       setTimeout(() => {
         this.showOnCurrentDesktop(window);
-        // Additional enforcement after showing
-        setTimeout(() => {
-          if (!window.isDestroyed()) {
-            if (process.platform === 'darwin') {
-              try {
-                window.setAlwaysOnTop(true, 'screen-saver', 2);
-              } catch (error) {
-                window.setAlwaysOnTop(true, 'floating', 2);
-              }
-            } else {
-              window.setAlwaysOnTop(true);
-            }
-          }
-        }, 200);
       }, 100);
     }
 
@@ -350,8 +313,8 @@ class WindowManager {
       if (window.isDestroyed() || !window.isFocused()) return;
       try {
         if (process.platform === 'darwin') {
-          // One step above the overlay's level (screen-saver, 2).
-          window.setAlwaysOnTop(true, 'screen-saver', 3);
+          // One step above the overlay's level.
+          window.setAlwaysOnTop(true, OVERLAY_LEVEL, OVERLAY_RELATIVE_LEVEL + 1);
         } else {
           window.setAlwaysOnTop(true);
         }
@@ -799,85 +762,54 @@ class WindowManager {
     return window;
   }
 
-  applyStealthMeasures(window, type) {
-    // Enhanced always-on-top enforcement for all platforms
-    if (process.platform === 'darwin') {
-      // macOS: Use native window level constants for maximum effectiveness
-      try {
-        // Try the most aggressive levels first
-        const levels = [
-          'screen-saver',    // Highest level
-          'pop-up-menu',     // Menu level
-          'modal-panel',     // Modal panel level
-          'floating',        // Floating level
-          'normal'           // Fallback to normal with alwaysOnTop
-        ];
-        
-        let levelSet = false;
-        for (const level of levels) {
-          try {
-            window.setAlwaysOnTop(true, level, 1);
-            levelSet = true;
-            logger.debug(`Successfully set always-on-top with level: ${level}`, { type });
-            break;
-          } catch (levelError) {
-            logger.debug(`Failed to set level: ${level}`, { error: levelError.message });
-          }
-        }
-        
-        if (!levelSet) {
-          // Final fallback
-          window.setAlwaysOnTop(true);
-        }
-        
-        // Additional macOS-specific enforcement
-        setTimeout(() => {
-          if (!window.isDestroyed()) {
-            try {
-              // Force re-application of always-on-top
-              window.setAlwaysOnTop(false);
-              setTimeout(() => {
-                if (!window.isDestroyed()) {
-                  window.setAlwaysOnTop(true, 'floating', 1);
-                }
-              }, 50);
-            } catch (error) {
-              logger.warn('Error in macOS re-enforcement', { error: error.message });
-            }
-          }
-        }, 200);
-        
-      } catch (error) {
-        logger.warn('Error setting always-on-top for macOS', { error: error.message });
-        // Absolute fallback
-        window.setAlwaysOnTop(true);
+  /**
+   * Put an overlay window (toolbar, chat, answer, onboarding) at the overlay
+   * level: macOS OVERLAY_LEVEL with OVERLAY_RELATIVE_LEVEL, elsewhere plain
+   * always-on-top. Does nothing when the window is already there, so calling
+   * it on every show never changes a level (which makes the window blink).
+   * Settings has its own rules (applySettingsWindowMeasures).
+   */
+  pinOverlayOnTop(win) {
+    if (!win || win.isDestroyed() || this.isSettingsWindow(win)) return;
+    if (!this.pinnedOverlays) this.pinnedOverlays = new WeakSet();
+    if (this.pinnedOverlays.has(win) && win.isAlwaysOnTop()) return;
+    try {
+      if (process.platform === 'darwin') {
+        win.setAlwaysOnTop(true, OVERLAY_LEVEL, OVERLAY_RELATIVE_LEVEL);
+      } else {
+        win.setAlwaysOnTop(true);
       }
-    } else if (process.platform === 'win32') {
-      // Windows: Multiple enforcement attempts
-      window.setAlwaysOnTop(true);
-      
-      setTimeout(() => {
-        if (!window.isDestroyed()) {
-          window.setAlwaysOnTop(true);
-        }
-      }, 100);
-      
-      setTimeout(() => {
-        if (!window.isDestroyed()) {
-          window.setAlwaysOnTop(true);
-        }
-      }, 500);
-      
-    } else {
-      // Linux and other platforms
-      window.setAlwaysOnTop(true);
-      
-      setTimeout(() => {
-        if (!window.isDestroyed()) {
-          window.setAlwaysOnTop(true);
-        }
-      }, 100);
+    } catch (error) {
+      logger.warn('Could not set the overlay window level', { error: error.message });
+      try { win.setAlwaysOnTop(true); } catch (_) { return; }
     }
+    this.pinnedOverlays.add(win);
+  }
+
+  /**
+   * macOS draws menus at the pop-up menu level, below the overlay's level,
+   * so a menu opened from the menu bar icon or the toolbar would be covered
+   * by the chat or answer window. While such a menu is open the overlay
+   * windows drop just below menus; they go back when it closes. Two levels
+   * that are both above normal windows, so nothing hides or blinks.
+   */
+  setOverlayBelowMenus(below) {
+    if (process.platform !== 'darwin' || !!this._overlayBelowMenus === !!below) return;
+    this._overlayBelowMenus = !!below;
+    this.windows.forEach((win, type) => {
+      if (type === 'settings' || !win || win.isDestroyed()) return;
+      try {
+        if (below) win.setAlwaysOnTop(true, 'pop-up-menu', -1);
+        else win.setAlwaysOnTop(true, OVERLAY_LEVEL, OVERLAY_RELATIVE_LEVEL);
+      } catch (error) {
+        logger.debug('Could not change the overlay level for a menu', { type, error: error.message });
+      }
+    });
+  }
+
+  applyStealthMeasures(window, type) {
+    // One fixed level for the life of the window (see pinOverlayOnTop).
+    this.pinOverlayOnTop(window);
 
     // Ensure window appears on all workspaces/desktops initially
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -896,62 +828,14 @@ class WindowManager {
       logger.debug('Content protection not supported on this platform');
     }
     
-    // More aggressive event listeners to maintain always-on-top behavior
-    const enforceAlwaysOnTop = () => {
-      // The overlay stays put while Settings has focus, so it never covers it.
-      if (this.isSettingsFocused()) return;
-      if (!window.isDestroyed()) {
-        try {
-          if (process.platform === 'darwin') {
-            // Try multiple levels on macOS
-            window.setAlwaysOnTop(true, 'floating', 1);
-            setTimeout(() => {
-              if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true, 'screen-saver', 1);
-              }
-            }, 50);
-          } else {
-            window.setAlwaysOnTop(true);
-          }
-        } catch (error) {
-          logger.debug('Error in enforceAlwaysOnTop', { error: error.message });
-        }
-      }
-    };
-    
-    // Event-based enforcement
-    window.on('blur', () => {
-      setTimeout(enforceAlwaysOnTop, 50);
-      setTimeout(enforceAlwaysOnTop, 200);
-      setTimeout(enforceAlwaysOnTop, 500);
-    });
-    
-    window.on('show', () => {
-      setTimeout(enforceAlwaysOnTop, 50);
-      setTimeout(enforceAlwaysOnTop, 200);
-    });
-    
-    window.on('focus', () => {
-      setTimeout(enforceAlwaysOnTop, 50);
-    });
-    
-    window.on('restore', () => {
-      setTimeout(enforceAlwaysOnTop, 50);
-    });
-    
-    // Periodic enforcement every 3 seconds (more frequent)
-    const periodicEnforcement = setInterval(() => {
-      if (window.isDestroyed()) {
-        clearInterval(periodicEnforcement);
-        return;
-      }
-      enforceAlwaysOnTop();
-    }, 3000);
-    
-    logger.debug('Applied enhanced stealth measures with aggressive always-on-top', {
+    // Pinned again only if something took the window off the top (a no-op
+    // otherwise): no timers, no level changes while it is on screen.
+    window.on('show', () => this.pinOverlayOnTop(window));
+
+    logger.debug('Applied stealth measures', {
       type,
       platform: process.platform,
-      alwaysOnTop: true,
+      level: process.platform === 'darwin' ? `${OVERLAY_LEVEL}+${OVERLAY_RELATIVE_LEVEL}` : 'always-on-top',
       visibleOnAllWorkspaces: true,
       skipTaskbar: true
     });
@@ -1129,15 +1013,7 @@ class WindowManager {
     }
 
     if (canUseWorkspaces) win.setVisibleOnAllWorkspaces(true, workspaceOptions);
-    if (process.platform === 'darwin') {
-      try {
-        win.setAlwaysOnTop(true, 'screen-saver', 2);
-      } catch {
-        try { win.setAlwaysOnTop(true, 'floating', 2); } catch { win.setAlwaysOnTop(true); }
-      }
-    } else {
-      win.setAlwaysOnTop(true);
-    }
+    this.pinOverlayOnTop(win);
 
     // The chat and answer windows fade in. On macOS the native glass is drawn
     // by the system, so the fade is done on the window; the pages add the
@@ -1511,60 +1387,12 @@ class WindowManager {
     return this.isInteractive;
   }
 
-  // New method to enforce always-on-top for all windows
+  /** Make sure every overlay window is at the overlay level (no-op when it is). */
   enforceAlwaysOnTopForAllWindows() {
     this.windows.forEach((window, type) => {
       // Settings is only on top while focused (applySettingsWindowMeasures).
       if (type === 'settings') return;
-      if (!window.isDestroyed()) {
-        try {
-          if (process.platform === 'darwin') {
-            // Try multiple levels for macOS
-            window.setAlwaysOnTop(true, 'pop-up-menu', 1);
-            
-            setTimeout(() => {
-              if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true, 'floating', 1);
-              }
-            }, 100);
-            
-            setTimeout(() => {
-              if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true, 'screen-saver', 1);
-              }
-            }, 200);
-          } else {
-            // Windows and Linux
-            window.setAlwaysOnTop(true);
-            
-            // Additional enforcement after a short delay
-            setTimeout(() => {
-              if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true);
-              }
-            }, 100);
-          }
-        } catch (error) {
-          logger.warn('Error enforcing always-on-top', { 
-            type, 
-            error: error.message 
-          });
-          // Fallback to basic always-on-top
-          try {
-            window.setAlwaysOnTop(true);
-          } catch (fallbackError) {
-            logger.error('Fallback always-on-top failed', { 
-              type, 
-              error: fallbackError.message 
-            });
-          }
-        }
-      }
-    });
-    
-    logger.debug('Enforced always-on-top for all windows with aggressive strategy', {
-      platform: process.platform,
-      windowCount: this.windows.size
+      this.pinOverlayOnTop(window);
     });
   }
 
@@ -1583,28 +1411,7 @@ class WindowManager {
         try {
           const isAlwaysOnTop = window.isAlwaysOnTop();
           
-          if (process.platform === 'darwin') {
-            // Test different levels on macOS
-            window.setAlwaysOnTop(true, 'screen-saver', 2);
-            setTimeout(() => {
-              if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true, 'pop-up-menu', 2);
-                setTimeout(() => {
-                  if (!window.isDestroyed()) {
-                    window.setAlwaysOnTop(true, 'floating', 2);
-                  }
-                }, 50);
-              }
-            }, 50);
-          } else {
-            // For other platforms
-            window.setAlwaysOnTop(true);
-            setTimeout(() => {
-              if (!window.isDestroyed()) {
-                window.setAlwaysOnTop(true);
-              }
-            }, 50);
-          }
+          if (type !== 'settings') this.pinOverlayOnTop(window);
           
           results[type] = {
             success: true,
@@ -1907,14 +1714,18 @@ class WindowManager {
 
     let onboardingWindow = this.windows.get('onboarding');
     if (!onboardingWindow) {
-      onboardingWindow = await this.createWindow('onboarding');
-      this.windows.set('onboarding', onboardingWindow);
-
-      // Once the wizard renderer signals it's ready, send it the
-      // current first-run status so it can pre-populate correctly.
-      onboardingWindow.webContents.once('did-finish-load', () => {
-        logger.info('Onboarding window loaded');
-      });
+      // A second call while the page loads (startup, the tray, a second
+      // launch) waits for the same window instead of opening another one.
+      if (!this._onboardingCreating) {
+        this._onboardingCreating = this.createWindow('onboarding')
+          .then((win) => {
+            this.windows.set('onboarding', win);
+            return win;
+          })
+          .finally(() => { this._onboardingCreating = null; });
+      }
+      onboardingWindow = await this._onboardingCreating;
+      if (onboardingWindow.isDestroyed()) return null;
     }
 
     this.showOnCurrentDesktop(onboardingWindow);
@@ -2164,13 +1975,7 @@ class WindowManager {
         }
         
         window.setPosition(Math.round(newX), Math.round(newY));
-        
-        // Ensure always-on-top is maintained after moving
-        if (process.platform === 'darwin') {
-          window.setAlwaysOnTop(true, 'screen-saver', 1);
-        } else {
-          window.setAlwaysOnTop(true);
-        }
+        this.pinOverlayOnTop(window);
         
         // Ensure window appears on current desktop if it's visible
         if (window.isVisible()) {

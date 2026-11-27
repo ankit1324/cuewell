@@ -44,7 +44,11 @@ function runPreload(file, type) {
   return { exposed, calls, handlers, errors, document: fakeDocument };
 }
 
-/** Call every exposed method once and return the channels each kind reached. */
+/**
+ * Call every exposed method once, then deliver every event the preload
+ * listens for once (a preload may answer an event itself, e.g. the quit
+ * flush ack), and return the channels each kind reached.
+ */
 function exercise(file, type) {
   const run = runPreload(file, type);
   const received = [];
@@ -56,9 +60,10 @@ function exercise(file, type) {
     }
   }
   // window.api.send only passes its own channels; try every channel there is.
-  if (run.exposed.api) {
+  if (run.exposed.api && run.exposed.api.send) {
     for (const channel of [...Object.keys(IPC_ALLOWED_WINDOWS), 'evil-channel']) run.exposed.api.send(channel, {});
   }
+  for (const handler of [...run.handlers.values()]) handler({ sender: {} }, { id: 1 });
   const outgoing = run.calls.filter((c) => c.kind !== 'on').map((c) => c.channel);
   return { ...run, outgoing: [...new Set(outgoing)].sort(), received };
 }
@@ -121,11 +126,52 @@ describe('preloads', () => {
     assert.ok(names('settings').includes('saveProfile'));
   });
 
-  it('window.api.send drops channels outside its list', () => {
-    const run = runPreload('preload.js', 'settings');
-    run.exposed.api.send('install-whisper', {});
-    run.exposed.api.send('close-settings', {});
-    assert.deepEqual(run.calls.map((c) => c.channel), ['close-settings']);
+  // window.api is the toolbar's receive-only channel API (main-window.js
+  // listens through it). Settings calls electronAPI only, so it has none.
+  it('window.api only receives its own channels and sends nothing', () => {
+    const run = runPreload('preload.js', 'main');
+    assert.deepEqual(Object.keys(run.exposed.api), ['receive']);
+    run.exposed.api.receive('install-progress', () => {});
+    run.exposed.api.receive('skill-updated', 'not a function');
+    run.exposed.api.receive('skill-updated', () => {});
+    assert.deepEqual(run.calls, [{ kind: 'on', channel: 'skill-updated' }]);
+    for (const type of ['settings', 'onboarding']) assert.equal(runPreload('preload.js', type).exposed.api, undefined, type);
+  });
+
+  describe('Settings quit flush', () => {
+    const acks = (run) => run.calls.filter((c) => c.channel === 'flush-before-quit-done').map((c) => c.args);
+
+    it('acks on the next task when the page set no callback', async () => {
+      const run = runPreload('preload.js', 'settings');
+      run.handlers.get('flush-before-quit')({ sender: {} }, { id: 7 });
+      assert.deepEqual(acks(run), []);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.deepEqual(acks(run), [[7]]);
+    });
+
+    it('acks once, after the page\'s save settles, with the request id', async () => {
+      const run = runPreload('preload.js', 'settings');
+      let finish;
+      run.exposed.electronAPI.onFlushBeforeQuit(() => new Promise((resolve) => { finish = resolve; }));
+      run.handlers.get('flush-before-quit')({ sender: {} }, { id: 3 });
+      await Promise.resolve();
+      assert.deepEqual(acks(run), [], 'acked before the save finished');
+      finish();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(acks(run), [[3]]);
+    });
+
+    it('still acks when the page\'s save throws or rejects, and sends no bad id', async () => {
+      const run = runPreload('preload.js', 'settings');
+      const off = run.exposed.electronAPI.onFlushBeforeQuit(() => { throw new Error('boom'); });
+      run.handlers.get('flush-before-quit')({ sender: {} }, { id: 1 });
+      off();
+      run.exposed.electronAPI.onFlushBeforeQuit(() => Promise.reject(new Error('nope')));
+      run.handlers.get('flush-before-quit')({ sender: {} }, { id: '2; evil' });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(acks(run), [[1], [null]]);
+      assert.equal(run.errors.length, 1);
+    });
   });
 
   for (const file of ['preload.js', 'preload-content.js']) {
@@ -138,10 +184,9 @@ describe('preloads', () => {
     });
 
     // The window type comes from --si-window, which only the window manager
-    // sets, so this is hardening rather than a hole: PAGES[type] also finds
-    // inherited names. "constructor" exposes an empty electronAPI and
-    // "__proto__" throws inside the preload. Object.hasOwn(PAGES, type) fixes it.
-    it(`${file} ignores inherited names as window types`, { todo: 'PAGES lookup is not own-property only' }, () => {
+    // sets, so this is hardening: the PAGES lookup is own-property only, so
+    // inherited names such as "constructor" or "__proto__" expose nothing.
+    it(`${file} ignores inherited names as window types`, () => {
       for (const type of ['constructor', '__proto__', 'toString']) {
         let run;
         assert.doesNotThrow(() => { run = runPreload(file, type); }, `type "${type}"`);

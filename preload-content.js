@@ -97,7 +97,9 @@ const PAGES = {
   })
 }
 
-const build = PAGES[windowType()]
+// Own properties only: "constructor" or "__proto__" must expose nothing.
+const type = windowType()
+const build = Object.hasOwn(PAGES, type) ? PAGES[type] : null
 if (build) {
   contextBridge.exposeInMainWorld('electronAPI', build())
 } else {
