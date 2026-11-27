@@ -48,7 +48,9 @@ class WhisperWorkerService {
       model: options.model || 'small',
       language: options.language || 'auto',
       model_dir: options.modelDir || null,
-      device: options.device || 'auto'
+      device: options.device || 'auto',
+      // Optional: sent only when set, so older workers see the same request.
+      ...(options.prompt ? { initial_prompt: String(options.prompt) } : {})
     });
     this._scheduleIdleUnload();
     return result;

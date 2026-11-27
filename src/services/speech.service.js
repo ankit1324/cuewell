@@ -2418,6 +2418,7 @@ class SpeechService extends EventEmitter {
         const result = await this.whisperWorker.transcribe(audioFilePath, {
           model: this._getWhisperModel(),
           language: decode.language,
+          prompt: decode.prompt,
           modelDir: this._getWhisperModelDir(),
           device: this._getWhisperDevice()
         });

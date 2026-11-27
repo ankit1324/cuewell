@@ -7,8 +7,10 @@
 // Download: writes <file>.part next to the final file, resumes with a Range
 // request when a part file exists and the server answers 206 (restarts from
 // zero otherwise), checks the size and SHA-256, then renames the part file
-// into place. A bad checksum deletes the part file. Cancelling keeps it so
-// the next try resumes.
+// into place. A bad checksum deletes the part file, and so does any failure
+// after an old part file was given up and the download restarted from zero.
+// Cancelling, or a dropped connection during a valid resume, keeps it so the
+// next try resumes.
 
 const fs = require('fs');
 const path = require('path');
@@ -431,11 +433,32 @@ async function downloadModel(id, { modelDir, onProgress, signal, httpGet = https
 
   // A part file at least as big as the model cannot be resumed.
   let startAt = fileSize(partPath);
+  // Set once an existing part file is given up. A failure after that deletes
+  // the part file (except on cancel), so no stale or half-restarted bytes are
+  // left for a later resume.
+  const restarted = { value: false };
   if (startAt > model.bytes) {
     removeFile(partPath);
+    restarted.value = true;
     startAt = 0;
   }
 
+  try {
+    return await downloadPasses({
+      id, model, dir, partPath, finalPath, startAt, restarted, onProgress, signal, httpGet,
+    });
+  } catch (error) {
+    if (restarted.value && error && error.code !== 'ABORTED' && error.name !== 'AbortError') {
+      removeFile(partPath);
+    }
+    throw error;
+  }
+}
+
+/** The request, write and check passes of downloadModel; sets `restarted.value` when it starts over. */
+async function downloadPasses({
+  id, model, dir, partPath, finalPath, startAt, restarted, onProgress, signal, httpGet,
+}) {
   // At most two passes: a resume the server refuses restarts from zero once.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     if (signal && signal.aborted) throw abortError();
@@ -451,6 +474,7 @@ async function downloadModel(id, { modelDir, onProgress, signal, httpGet = https
     } catch (error) {
       if (error.name === 'AbortError') throw error;
       removeFile(partPath);
+      if (startAt > 0) restarted.value = true;
       startAt = 0;
       hash = crypto.createHash('sha256');
     }
@@ -476,6 +500,7 @@ async function downloadModel(id, { modelDir, onProgress, signal, httpGet = https
           // A range we did not ask for: start over cleanly.
           destroyResponse(res, req);
           removeFile(partPath);
+          restarted.value = true;
           startAt = 0;
           continue;
         }
@@ -483,11 +508,13 @@ async function downloadModel(id, { modelDir, onProgress, signal, httpGet = https
       } else if (status === 416 && startAt > 0) {
         destroyResponse(res, req);
         removeFile(partPath);
+        restarted.value = true;
         startAt = 0;
         continue;
       } else if (status === 200) {
         // The server ignored the Range header: the body starts at byte 0.
         if (startAt > 0) {
+          restarted.value = true;
           startAt = 0;
           hash = crypto.createHash('sha256');
         }

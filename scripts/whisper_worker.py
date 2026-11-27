@@ -102,10 +102,16 @@ def transcribe(request):
     language = request.get('language') or None
     if language in ('auto', 'detect'):
         language = None
+    # Optional; requests from older apps have none. Hinglish sends a
+    # Roman-script prompt so Hindi comes back in Latin letters.
+    initial_prompt = request.get('initial_prompt')
+    if not isinstance(initial_prompt, str) or not initial_prompt.strip():
+        initial_prompt = None
 
     result = loaded_model.transcribe(
         load_audio_input(request['audio_path']),
         language=language,
+        initial_prompt=initial_prompt,
         task='transcribe',
         fp16=device == 'cuda',
         verbose=None,

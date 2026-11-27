@@ -334,6 +334,52 @@ describe('downloadModel', { concurrency: true }, () => {
     assert.equal(fs.existsSync(final), false);
   });
 
+  it('deletes the stale part file when a Range request gets a 200 of the wrong size', async (t) => {
+    const dir = tempDir(t);
+    const { final, part } = paths(dir);
+    const have = 4096;
+    fs.writeFileSync(part, FIXTURE.subarray(0, have));
+    const httpGet = hfServer((headers) => {
+      assert.equal(headers.Range, `bytes=${have}-`);
+      return { status: 200, headers: { 'content-length': '1234' }, body: FIXTURE.subarray(0, 1234) };
+    });
+    await assert.rejects(models.downloadModel('base-q5_1', { modelDir: dir, httpGet }), { code: 'SIZE' });
+    assert.equal(fs.existsSync(part), false, 'the old bytes are not kept for a resume');
+    assert.equal(fs.existsSync(final), false);
+  });
+
+  it('deletes the part file when a download that restarted from zero then fails', async (t) => {
+    const dir = tempDir(t);
+    const { final, part } = paths(dir);
+    const have = 4096;
+    fs.writeFileSync(part, FIXTURE.subarray(0, have));
+    // The server ignores Range (200), then the connection drops.
+    const httpGet = hfServer(() => ({ ...full(), endEarly: 1024 * 1024 }));
+    await assert.rejects(models.downloadModel('base-q5_1', { modelDir: dir, httpGet }), { code: 'NETWORK' });
+    assert.equal(fs.existsSync(part), false);
+    assert.equal(fs.existsSync(final), false);
+  });
+
+  it('a dropped connection during a valid resume keeps the part file for Retry', async (t) => {
+    const dir = tempDir(t);
+    const { final, part } = paths(dir);
+    const have = 4096;
+    const dropAfter = 1024 * 1024;
+    fs.writeFileSync(part, FIXTURE.subarray(0, have));
+    const httpGet = hfServer(() => ({ ...partial(have), endEarly: dropAfter }));
+    await assert.rejects(models.downloadModel('base-q5_1', { modelDir: dir, httpGet }), { code: 'NETWORK' });
+    assert.equal(fs.statSync(part).size, have + dropAfter, 'the resumed bytes are kept');
+    assert.equal(fs.existsSync(final), false);
+
+    const resumed = hfServer((headers) => {
+      assert.equal(headers.Range, `bytes=${have + dropAfter}-`);
+      return partial(have + dropAfter);
+    });
+    await models.downloadModel('base-q5_1', { modelDir: dir, httpGet: resumed });
+    assert.equal(realCreateHash('sha256').update(fs.readFileSync(final)).digest('hex'), FIXTURE_SHA);
+    assert.equal(fs.existsSync(part), false);
+  });
+
   it('fails without writing when the server announces the wrong size', async (t) => {
     const dir = tempDir(t);
     const { final, part } = paths(dir);

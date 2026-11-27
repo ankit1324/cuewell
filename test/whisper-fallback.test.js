@@ -391,6 +391,38 @@ describe('speech service engine choice', () => {
       assert.deepEqual(service._getWhisperCppDecodeOptions(), { language: 'auto', prompt: '' }, 'unset is auto');
     });
 
+    it('Hinglish sends language hi and the same prompt to the Python worker', async () => {
+      init({ engine: 'python', pythonCommand: PY(), pythonWorks: true, language: 'hinglish' });
+      assert.equal(service.whisperEngine, 'python');
+      const worker = service.whisperWorker;
+      const requests = [];
+      const saved = { isConfigured: worker.isConfigured, _request: worker._request, _scheduleIdleUnload: worker._scheduleIdleUnload };
+      worker.isConfigured = () => true;
+      worker._scheduleIdleUnload = () => {};
+      worker._request = async (request) => {
+        requests.push(request);
+        return { text: 'Haan, main explain karta hoon', language: 'hi' };
+      };
+      try {
+        const text = await service._transcribeWhisperFile(path.join(ROOT, 'clip.wav'));
+        assert.equal(text, 'Haan, main explain karta hoon');
+        assert.equal(requests.length, 1);
+        const [request] = requests;
+        assert.equal(request.action, 'transcribe');
+        assert.equal(request.language, 'hi');
+        assert.equal(request.initial_prompt, service._getWhisperCppDecodeOptions().prompt, 'the whisper.cpp prompt');
+        assert.match(request.initial_prompt, /^[\x20-\x7E]+$/);
+
+        // Other languages send no prompt, so older workers see the same request as before.
+        init({ engine: 'python', pythonCommand: PY(), pythonWorks: true, language: 'en' });
+        await service._transcribeWhisperFile(path.join(ROOT, 'clip.wav'));
+        assert.equal(requests[1].language, 'en');
+        assert.equal('initial_prompt' in requests[1], false);
+      } finally {
+        Object.assign(worker, saved);
+      }
+    });
+
     it('Hinglish gives the Python CLI the same language and prompt (--language hi --initial_prompt)', () => {
       process.env.WHISPER_LANGUAGE = 'Hinglish';
       const decode = service._getWhisperDecodeOptions();
