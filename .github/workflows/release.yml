@@ -124,7 +124,9 @@ jobs:
 
           PREV_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || true)
           if [ -z "$PREV_TAG" ]; then
-            PREV_TAG=$(git tag --sort=-creatordate | grep -vx "${CURRENT_TAG}" | while read -r t; do
+            # On the first release there is no other tag: grep matches nothing
+            # and exits 1, which pipefail would turn into a failed step.
+            PREV_TAG=$( { git tag --sort=-creatordate | grep -vx "${CURRENT_TAG}" || true; } | while read -r t; do
               if git merge-base --is-ancestor "$t" "${CURRENT_TAG}" 2>/dev/null; then echo "$t"; break; fi
             done | head -1)
           fi
@@ -233,10 +235,10 @@ jobs:
         run: |
           mkdir -p release
           # Installers only. This drops .blockmap files and latest-*.yml
-          # (electron-updater metadata) and the macOS .zip files (used for
-          # auto-update only). The order below is the order on the release page.
+          # (electron-updater metadata). The macOS .zip files are kept: the
+          # website links them. The order below is the order on the release page.
           for pattern in 'Cuewell-*-win-*-setup.exe' 'Cuewell-*-win-*-portable.exe' \
-                         'Cuewell-*-mac-*.dmg' \
+                         'Cuewell-*-mac-*.dmg' 'Cuewell-*-mac-*.zip' \
                          'Cuewell-*-linux-*.deb' 'Cuewell-*-linux-*.AppImage'; do
             found=$(find artifacts -type f -name "$pattern")
             if [ -z "$found" ]; then

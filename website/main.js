@@ -570,12 +570,12 @@
 
   /* ---------- Downloads ---------- */
 
-  /* TODO(owner): set to https://github.com/<owner>/cuewell/releases/latest
+  /* GitHub releases of Cuewell; assets download from <url>/download/<file>
      once a release is published. While this is a "#..." placeholder, the page
      shows "Coming soon" and every download link stays on this page.
      A /releases/tag/vX.Y.Z URL also works. File names live in index.html
      (data-file on each .dl-file link). */
-  var RELEASES_URL = '#download';
+  var RELEASES_URL = 'https://github.com/ankit1324/cuewell/releases/latest';
   var VERSION = '1.0.0';
 
   function releaseBase() {
