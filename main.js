@@ -204,6 +204,8 @@ const speechService = require("./src/services/speech.service");
 // resolved against the folder of the .env loaded above.
 speechService.setEnvPath(ENV_PATH);
 const llmService = require("./src/services/llm.service");
+const { promptLoader } = require("./prompt-loader");
+const profileStore = require("./src/core/profile-store");
 const { getActiveProviderId, getProviderConfig, listProviders, isPlaceholderKey } = require("./src/services/providers");
 
 // AI-provider fields the Settings window edits, mapped to their .env keys.
@@ -255,7 +257,7 @@ const SETTINGS_FIELDS_BY_WINDOW = {
     "whisperCommand", "whisperModel", "whisperLanguage", "whisperDevice",
     "whisperCaptureMode", "whisperResponseTarget", "whisperSegmentMs",
     "geminiKey", "llmProvider", ...Object.keys(LLM_SETTING_ENV_KEYS),
-    "windowGap", "codingLanguage", "activeSkill", "selectedIcon",
+    "windowGap", "codingLanguage", "activeSkill", "answerLength", "selectedIcon",
   ],
   // whisperModelDownload is recorded by the wizard but not stored.
   onboarding: [
@@ -281,7 +283,7 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   "get-speech-availability": ["main", "chat"],
   "start-speech-recognition": ["main", "chat"],
   "stop-speech-recognition": ["main", "chat"],
-  // Settings reads; the toolbar reads codingLanguage/activeSkill only
+  // Settings reads; the toolbar reads codingLanguage/activeSkill/modes only
   "get-settings": ["main", "settings"],
   // Field-level limits per window are in SETTINGS_FIELDS_BY_WINDOW
   "save-settings": ["main", "settings", "onboarding"],
@@ -294,6 +296,9 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   // Settings (settings.html)
   "close-settings": ["settings"],
   "update-skill": ["settings"],
+  // Interview context (userData/profile.json)
+  "get-profile": ["settings"],
+  "save-profile": ["settings"],
   // Onboarding (onboarding.html)
   "get-first-run-status": ["onboarding"],
   "complete-first-run": ["onboarding"],
@@ -328,7 +333,8 @@ const MODEL_NAME_RE = /^[A-Za-z0-9._:/-]{1,100}$/;
 const WHISPER_MODEL_NAME_RE = /^[A-Za-z0-9._-]{1,40}$/;
 const isWhisperModelName = (name) => WHISPER_MODEL_NAME_RE.test(name) && !name.includes("..");
 const AZURE_REGION_RE = /^[a-z0-9]+$/;
-const SKILL_NAME_RE = /^[a-z0-9_-]{1,40}$/i;
+// Interview modes are the prompt-loader's mode ids ('dsa' is Coding).
+const isInterviewMode = (value) => promptLoader.isMode(value);
 // Printable ASCII without spaces: what every provider's API keys use.
 const SECRET_VALUE_RE = /^[\x21-\x7E]{1,1000}$/;
 const LOCAL_HOSTNAMES = ["localhost", "127.0.0.1", "[::1]"];
@@ -411,7 +417,17 @@ class ApplicationController {
   constructor() {
     this.isReady = false;
     this.starting = false;
-    this.activeSkill = "dsa";
+    // Interview mode, persisted in .env as INTERVIEW_MODE. Auto when unset,
+    // for new and existing users (earlier builds never saved a mode).
+    this.activeSkill = isInterviewMode(process.env.INTERVIEW_MODE)
+      ? process.env.INTERVIEW_MODE
+      : promptLoader.getDefaultMode();
+    // Answer length (auto | short | standard | detailed), in .env as ANSWER_LENGTH.
+    this.answerLength = promptLoader.isAnswerLength(process.env.ANSWER_LENGTH) ? process.env.ANSWER_LENGTH : "auto";
+    // Interview context, stored in userData/profile.json.
+    this.profilePath = path.join(app.getPath("userData"), "profile.json");
+    this.profile = this.loadProfile();
+    llmService.setPromptContext({ answerLength: this.answerLength, profile: this.profile });
   // Default to C++ so language is enforced from first run
   this.codingLanguage = "cpp";
     this.speechAvailable = false;
@@ -1108,12 +1124,34 @@ class ApplicationController {
     });
 
     this.handleIpc("update-active-skill", (event, skill) => {
-      if (typeof skill !== "string" || !SKILL_NAME_RE.test(skill)) {
+      if (!isInterviewMode(skill)) {
         return { success: false, error: "Invalid skill" };
       }
-      this.activeSkill = skill;
-      windowManager.broadcastToAllWindows("skill-changed", { skill });
+      this.setActiveMode(skill);
       return { success: true };
+    });
+
+    this.handleIpc("get-profile", () => {
+      return { success: true, profile: { ...this.profile }, limits: profileStore.PROFILE_FIELD_LIMITS };
+    });
+
+    this.handleIpc("save-profile", (event, profile) => {
+      try {
+        this.profile = profileStore.writeProfile(this.profilePath, profile);
+      } catch (error) {
+        if (error instanceof profileStore.ProfileValidationError) {
+          logger.warn("Interview context rejected", { field: error.field, reason: error.message });
+          return { success: false, error: error.message, field: error.field };
+        }
+        logger.error("Failed to save interview context", { error: error.message });
+        return { success: false, error: "Could not save the interview context." };
+      }
+      llmService.setPromptContext({ profile: this.profile });
+      // Field names only: the values are personal data.
+      logger.info("Interview context saved", {
+        fields: Object.keys(this.profile).filter((field) => this.profile[field]),
+      });
+      return { success: true, profile: { ...this.profile } };
     });
 
     this.handleIpc("close-window", (event) => {
@@ -1141,9 +1179,8 @@ class ApplicationController {
 
     // Handle update skill
     this.onIpc("update-skill", (event, skill) => {
-      if (typeof skill !== "string" || !SKILL_NAME_RE.test(skill)) return;
-      this.activeSkill = skill;
-      windowManager.broadcastToAllWindows("skill-updated", { skill });
+      if (!isInterviewMode(skill)) return;
+      this.setActiveMode(skill);
     });
 
     this.onIpc("quit-app", () => {
@@ -1244,9 +1281,7 @@ class ApplicationController {
   }
 
   navigateSkill(direction) {
-    const availableSkills = [
-      "dsa",
-    ];
+    const availableSkills = promptLoader.getAvailableSkills();
 
     const currentIndex = availableSkills.indexOf(this.activeSkill);
     if (currentIndex === -1) {
@@ -1266,10 +1301,6 @@ class ApplicationController {
     }
 
     const newSkill = availableSkills[newIndex];
-    this.activeSkill = newSkill;
-
-    // Update session manager with the new skill
-    sessionManager.setActiveSkill(newSkill);
 
     logger.info("Skill navigated via global shortcut", {
       from: availableSkills[currentIndex],
@@ -1277,8 +1308,34 @@ class ApplicationController {
       direction: direction > 0 ? "down" : "up",
     });
 
-    // Broadcast the skill change to all windows
-    windowManager.broadcastToAllWindows("skill-updated", { skill: newSkill });
+    this.setActiveMode(newSkill);
+  }
+
+  /**
+   * Switch the interview mode: update the session, persist it to .env as
+   * INTERVIEW_MODE and tell every window. `mode` must be a known mode id.
+   */
+  setActiveMode(mode) {
+    if (!isInterviewMode(mode)) return false;
+    const changed = mode !== this.activeSkill;
+    this.activeSkill = mode;
+    if (changed) {
+      sessionManager.setActiveSkill(mode);
+    }
+    if (process.env.INTERVIEW_MODE !== mode) {
+      this.persistEnvUpdates({ INTERVIEW_MODE: mode });
+    }
+    // The toolbar listens to both; the settings window to skill-updated.
+    windowManager.broadcastToAllWindows("skill-updated", { skill: mode });
+    windowManager.broadcastToAllWindows("skill-changed", { skill: mode });
+    return true;
+  }
+
+  /** The saved interview context, or an empty one when there is none or it cannot be read. */
+  loadProfile() {
+    const { profile, error } = profileStore.readProfile(this.profilePath);
+    if (error) logger.warn("Could not read the interview context; using an empty one", { error });
+    return profile;
   }
 
   async triggerScreenshotOCR() {
@@ -1305,8 +1362,8 @@ class ApplicationController {
       // Use image directly with LLM and active skill; do not send chat messages here
       const sessionHistory = sessionManager.getOptimizedHistory();
 
-      const skillsRequiringProgrammingLanguage = ['dsa'];
-      const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
+      // Auto and Coding take the coding language.
+      const needsProgrammingLanguage = promptLoader.requiresProgrammingLanguage(this.activeSkill);
 
       // The start event goes out before show-loading, as in the chat and
       // voice paths, so the answer window knows which request it is waiting
@@ -1406,8 +1463,8 @@ class ApplicationController {
       // The send-chat-message handler has already stored `text` in session memory.
 
       // Check if current skill needs programming language context
-      const skillsRequiringProgrammingLanguage = ['dsa'];
-      const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
+      // Auto and Coding take the coding language.
+      const needsProgrammingLanguage = promptLoader.requiresProgrammingLanguage(this.activeSkill);
 
       this._responseSeq = (this._responseSeq || 0) + 1;
       messageId = `chat-${Date.now()}-${this._responseSeq}`;
@@ -1586,8 +1643,8 @@ class ApplicationController {
       });
 
       // Check if current skill needs programming language context
-      const skillsRequiringProgrammingLanguage = ['dsa'];
-      const needsProgrammingLanguage = skillsRequiringProgrammingLanguage.includes(this.activeSkill);
+      // Auto and Coding take the coding language.
+      const needsProgrammingLanguage = promptLoader.requiresProgrammingLanguage(this.activeSkill);
 
       // Stream the answer progressively to the configured speech target.
       // A unique messageId ties the start/chunk/final events to one bubble so
@@ -1845,13 +1902,14 @@ class ApplicationController {
   /**
    * Settings for the renderer. Secrets are only returned masked
    * ({ set, last4 }); their values never leave the main process. The toolbar
-   * only gets the two values it reads.
+   * only gets the values it reads (language, mode and the mode list).
    */
   getSettings(windowType = "settings") {
     if (windowType === "main") {
       return {
         codingLanguage: this.codingLanguage || "cpp",
-        activeSkill: this.activeSkill || "dsa",
+        activeSkill: this.activeSkill || promptLoader.getDefaultMode(),
+        modes: promptLoader.getModes(),
       };
     }
 
@@ -1868,7 +1926,9 @@ class ApplicationController {
 
     return {
       codingLanguage: this.codingLanguage || "cpp",
-      activeSkill: this.activeSkill || "dsa",
+      activeSkill: this.activeSkill || promptLoader.getDefaultMode(),
+      modes: promptLoader.getModes(),
+      answerLength: this.answerLength || "auto",
       appIcon: this.appIcon || "terminal",
       selectedIcon: this.appIcon || "terminal",
       windowGap: windowManager.windowGap,
@@ -1962,10 +2022,19 @@ class ApplicationController {
     check(() => {
       if (has("activeSkill")) {
         const value = text("activeSkill");
-        if (value && !SKILL_NAME_RE.test(value)) {
-          throw new SettingsValidationError("activeSkill", "Unknown skill.");
+        if (value && !isInterviewMode(value)) {
+          throw new SettingsValidationError("activeSkill", "Unknown interview mode.");
         }
         clean.activeSkill = value;
+      }
+    });
+    check(() => {
+      if (has("answerLength")) {
+        const value = text("answerLength");
+        if (!promptLoader.isAnswerLength(value)) {
+          throw new SettingsValidationError("answerLength", "Answer length must be Auto, Short, Standard or Detailed.");
+        }
+        clean.answerLength = value;
       }
     });
     check(() => {
@@ -2124,10 +2193,11 @@ class ApplicationController {
         });
       }
       if (settings.activeSkill) {
-        this.activeSkill = settings.activeSkill;
-        windowManager.broadcastToAllWindows("skill-updated", {
-          skill: settings.activeSkill,
-        });
+        this.setActiveMode(settings.activeSkill);
+      }
+      if (settings.answerLength) {
+        this.answerLength = settings.answerLength;
+        llmService.setPromptContext({ answerLength: settings.answerLength });
       }
       if (settings.selectedIcon) {
         this.appIcon = settings.selectedIcon;
@@ -2179,6 +2249,9 @@ class ApplicationController {
       }
       if (settings.llmProvider) {
         envUpdates.LLM_PROVIDER = settings.llmProvider;
+      }
+      if (settings.answerLength) {
+        envUpdates.ANSWER_LENGTH = settings.answerLength;
       }
       for (const [field, envKey] of Object.entries(LLM_SETTING_ENV_KEYS)) {
         if (SECRET_SETTING_ENV_KEYS[field] ? !!settings[field] : settings[field] !== undefined) {

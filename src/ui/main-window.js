@@ -10,7 +10,7 @@ class MainWindowUI {
     constructor() {
         this.isInteractive = false;
         this.isHidden = false;
-        this.currentSkill = 'dsa'; // Default, will be updated from settings
+        this.currentSkill = 'auto'; // Default, will be updated from settings
         this.statusDot = null;
         this.skillIndicator = null;
         this.micButton = null;
@@ -23,10 +23,17 @@ class MainWindowUI {
         this._scriptNode = null;
         this._captureInterval = null;
         
-        // Define available skills for navigation
-        this.availableSkills = [
-            'dsa'
+        // Interview modes in cycle order; replaced by the list from main
+        // (get-settings) on load. 'dsa' is Coding.
+        this.modes = [
+            { id: 'auto', label: 'Auto', usesLanguage: true },
+            { id: 'dsa', label: 'Coding', usesLanguage: true },
+            { id: 'technical', label: 'Technical', usesLanguage: false },
+            { id: 'system-design', label: 'System design', usesLanguage: false },
+            { id: 'behavioral', label: 'Behavioral', usesLanguage: false },
+            { id: 'hr', label: 'HR', usesLanguage: false }
         ];
+        this.availableSkills = this.modes.map((mode) => mode.id);
         
         this.init();
     }
@@ -73,6 +80,12 @@ class MainWindowUI {
         try {
             if (window.electronAPI && window.electronAPI.getSettings) {
                 const settings = await window.electronAPI.getSettings();
+                if (settings && Array.isArray(settings.modes) && settings.modes.length > 0) {
+                    this.modes = settings.modes
+                        .filter((mode) => mode && typeof mode.id === 'string' && typeof mode.label === 'string')
+                        .map((mode) => ({ id: mode.id, label: mode.label, usesLanguage: !!mode.usesLanguage }));
+                    this.availableSkills = this.modes.map((mode) => mode.id);
+                }
                 if (settings && settings.activeSkill) {
                     this.currentSkill = settings.activeSkill;
                     logger.debug('Loaded current skill from settings', {
@@ -329,16 +342,19 @@ class MainWindowUI {
             }
         });
 
-        // Skill indicator click handler toggles DSA skill
-        this.skillIndicator.addEventListener('click', () => {
+        // Mode chip: click for the next interview mode, Shift+click for the previous one
+        this.skillIndicator.addEventListener('click', (e) => {
             if (!this.isInteractive) return;
-            const newSkill = 'dsa';
+            const newSkill = this.adjacentMode(e.shiftKey ? -1 : 1);
+            if (!newSkill) return;
+            this.handleSkillActivated(newSkill);
             if (window.electronAPI && window.electronAPI.updateActiveSkill) {
-                window.electronAPI.updateActiveSkill(newSkill).then(() => {
-                    this.handleSkillActivated(newSkill);
+                window.electronAPI.updateActiveSkill(newSkill).catch((error) => {
+                    logger.error('Failed to switch interview mode', {
+                        component: 'MainWindowUI',
+                        error: error.message
+                    });
                 });
-            } else {
-                this.handleSkillActivated(newSkill);
             }
         });
 
@@ -794,59 +810,76 @@ class MainWindowUI {
         }
     }
 
+    getMode(id) {
+        return this.modes.find((mode) => mode.id === id) || null;
+    }
+
+    modeLabel(id) {
+        const mode = this.getMode(id);
+        return mode ? mode.label : String(id || '');
+    }
+
+    // The mode `direction` steps away from the current one, wrapping around.
+    adjacentMode(direction) {
+        const ids = this.availableSkills;
+        if (!ids.length) return null;
+        const index = ids.indexOf(this.currentSkill);
+        const next = index === -1 ? 0 : (index + direction + ids.length) % ids.length;
+        return ids[next];
+    }
+
     updateSkillIndicator() {
-        const skillNames = {
-            'dsa': 'DSA',
-            'behavioral': 'Behavioral', 
-            'sales': 'Sales',
-            'presentation': 'Presentation',
-            'data-science': 'Data Science',
-            'programming': 'Programming',
-            'devops': 'DevOps',
-            'system-design': 'System Design',
-            'negotiation': 'Negotiation'
-        };
-        
-        logger.info('Updating skill indicator', {
-            component: 'MainWindowUI',
-            currentSkill: this.currentSkill,
-            skillIndicatorExists: !!this.skillIndicator
-        });
-        
         if (!this.skillIndicator) {
             logger.error('Skill indicator element not found!');
             return;
         }
-        
-        const skillName = skillNames[this.currentSkill] || this.currentSkill.toUpperCase();
+
+        const modeIcons = {
+            'auto': 'fa-wand-magic-sparkles',
+            'dsa': 'fa-terminal',
+            'technical': 'fa-book-open',
+            'system-design': 'fa-sitemap',
+            'behavioral': 'fa-comments',
+            'hr': 'fa-user-tie'
+        };
+        const skillName = this.modeLabel(this.currentSkill);
         const skillSpan = this.skillIndicator.querySelector('span');
-        
-        logger.info('Looking for skill span element', {
-            component: 'MainWindowUI',
-            spanExists: !!skillSpan,
-            skillName: skillName
-        });
-        
+        const icon = this.skillIndicator.querySelector('i');
+
         if (skillSpan) {
             const oldText = skillSpan.textContent;
             skillSpan.textContent = skillName;
-                        
-            const tooltip = this.isInteractive ? 
-                `${skillName} - Use ⌘↑/↓ to navigate skills` : 
-                `${skillName} - Enable interactive mode (Alt+A) to navigate`;
+            if (icon) icon.className = `fas ${modeIcons[this.currentSkill] || 'fa-brain'}`;
+
+            const tooltip = this.isInteractive
+                ? `Interview mode: ${skillName}. Click to switch (Shift+click or ⌘↑ for previous)`
+                : `Interview mode: ${skillName}. Enable interactive mode (Alt+A) to switch`;
             this.skillIndicator.title = tooltip;
-            
-            // Add visual feedback for skill change
-            this.animateSkillChange();
-            
-            logger.info('Skill indicator updated successfully', {
-                component: 'MainWindowUI',
-                oldText: oldText,
-                newText: skillName,
-                interactive: this.isInteractive
-            });
+            this.skillIndicator.setAttribute('aria-label', tooltip);
+
+            if (oldText !== skillName) {
+                this.animateSkillChange();
+                // Mode names differ in width; keep the window fitted to the bar.
+                this.resizeWindowToContent();
+            }
         } else {
             logger.error('Skill span element not found within skill indicator!');
+        }
+
+        this.updateLanguageSelectorVisibility();
+    }
+
+    // The coding-language picker applies to the modes that write code (Auto, Coding).
+    updateLanguageSelectorVisibility() {
+        const selector = document.getElementById('languageSelector');
+        if (!selector) return;
+        const mode = this.getMode(this.currentSkill);
+        const show = !!(mode && mode.usesLanguage);
+        const wasShown = selector.style.display !== 'none';
+        selector.style.display = show ? '' : 'none';
+        if (show !== wasShown) {
+            if (show) this.fitLanguageSelect();
+            this.resizeWindowToContent();
         }
     }
 
@@ -908,25 +941,13 @@ class MainWindowUI {
     }
 
     showSkillChangeNotification(skill, direction) {
-        const skillNames = {
-            'dsa': 'DSA',
-            'behavioral': 'Behavioral', 
-            'sales': 'Sales',
-            'presentation': 'Presentation',
-            'data-science': 'Data Science',
-            'programming': 'Programming',
-            'devops': 'DevOps',
-            'system-design': 'System Design',
-            'negotiation': 'Negotiation'
-        };
-        
-        const displayName = skillNames[skill] || skill.toUpperCase();
+        const displayName = this.modeLabel(skill);
         const arrow = direction > 0 ? '↓' : '↑';
         
         // Create temporary notification
         const notification = document.createElement('div');
         notification.className = 'skill-change-notification';
-        notification.innerHTML = `${arrow} ${displayName}`;
+        notification.textContent = `${arrow} ${displayName}`;
         notification.style.cssText = `
             position: fixed;
             top: 50%;

@@ -125,8 +125,12 @@ const PAGES = {
     electronAPI: {
       getSettings: invoke('get-settings'),
       saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+      // Interview context (userData/profile.json); main validates on save.
+      getProfile: invoke('get-profile'),
+      saveProfile: (profile) => ipcRenderer.invoke('save-profile', profile),
       quit,
       onCodingLanguageChanged: listen('coding-language-changed'),
+      onSkillUpdated: listen('skill-updated'),
       onSettingsWindowShown: listen('settings-window-shown')
     },
     api: channelApi(['close-settings', 'quit-app', 'update-skill'], ['load-settings'])
