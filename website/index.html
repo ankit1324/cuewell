@@ -63,6 +63,8 @@
       <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9.5L5 19.5V16H4z"/><path d="M8 9.5h8M8 12.5h5"/></symbol>
       <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
       <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/><path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3"/></symbol>
+      <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="11.5" rx="1.5"/><path d="M9 20h6M12 16v4"/></symbol>
+      <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.5M9.5 10h.5M13.5 10h.5M17.5 10h.5M6 13.5h.5M17.5 13.5h.5M9 14h6"/></symbol>
     </defs>
   </svg>
 
@@ -74,6 +76,7 @@
       </a>
       <nav class="nav" aria-label="Primary">
         <a href="#features">Features</a>
+        <a href="#everything">Everything</a>
         <a href="#how">How it works</a>
         <a href="#providers">AI providers</a>
         <a href="#data">Privacy</a>
@@ -365,6 +368,171 @@
       </div>
     </section>
 
+    <!-- ============ EVERYTHING ============ -->
+    <!-- Every item here is checked against the app code. Update it when a
+         feature changes. The test count is the number of node:test cases in
+         test/*.test.js, including the ones generated in loops. -->
+    <section class="section" id="everything" aria-labelledby="everything-title">
+      <div class="wrap">
+        <div class="section-head section-head--split reveal">
+          <div>
+            <p class="eyebrow">Everything in Cuewell</p>
+            <h2 id="everything-title" class="h2">The whole feature list, on one page.</h2>
+          </div>
+          <p class="lede">What the app does today, grouped so you can scan it. No paid tier and nothing locked.</p>
+        </div>
+
+        <div class="ev-grid reveal">
+          <section class="ev-group" aria-labelledby="ev-answers">
+            <div class="ev-head">
+              <svg class="ev-ic" aria-hidden="true"><use href="#i-stream"/></svg>
+              <h3 class="ev-label" id="ev-answers">Answers</h3>
+            </div>
+            <ul class="ev-list">
+              <li><strong>Auto mode</strong> works out the question type: coding, technical theory, system design, behavioral, HR, managerial, puzzles and cases.</li>
+              <li><strong>Fixed modes</strong> when you want one shape: Coding, Technical, System design, Behavioral or HR.</li>
+              <li><strong>One line to say first</strong>, then the details.</li>
+              <li><strong>Answer length:</strong> Auto, Short, Standard or Detailed. Auto is short for voice, standard otherwise.</li>
+              <li><strong>Live streaming</strong> into the answer panel, the chat or both.</li>
+              <li><strong>Highlighted code</strong> with a copy button on every block.</li>
+              <li><strong>Coding language picker</strong> on the toolbar: C++, C, Python, Java or JavaScript.</li>
+              <li><strong>Text and code side by side</strong> in the answer panel when an answer has code.</li>
+            </ul>
+          </section>
+
+          <section class="ev-group" aria-labelledby="ev-ask">
+            <div class="ev-head">
+              <svg class="ev-ic" aria-hidden="true"><use href="#i-chat"/></svg>
+              <h3 class="ev-label" id="ev-ask">Ways to ask</h3>
+            </div>
+            <ul class="ev-list">
+              <li><strong>Screenshot</strong> of the display under your pointer, on any monitor. The image goes to the model directly, with no OCR step.</li>
+              <li><strong>Voice</strong> with local Whisper on your computer, or Azure Speech. Pause detection or manual start and stop.</li>
+              <li><strong>Typed chat</strong> in its own window.</li>
+              <li><strong>Follow-ups keep context:</strong> typed and voice questions include recent history from the session.</li>
+            </ul>
+          </section>
+
+          <section class="ev-group" aria-labelledby="ev-context">
+            <div class="ev-head">
+              <svg class="ev-ic" aria-hidden="true"><use href="#i-card"/></svg>
+              <h3 class="ev-label" id="ev-context">Your context</h3>
+            </div>
+            <ul class="ev-list">
+              <li><strong>Role, company, job description, resume and notes</strong>, added in Settings.</li>
+              <li><strong>Stored on your computer</strong> in the app data folder, readable only by you on macOS and Linux.</li>
+              <li><strong>Sent with each question</strong> to your AI provider, so answers fit the job and your experience.</li>
+            </ul>
+          </section>
+
+          <section class="ev-group" aria-labelledby="ev-control">
+            <div class="ev-head">
+              <svg class="ev-ic" aria-hidden="true"><use href="#i-sliders"/></svg>
+              <h3 class="ev-label" id="ev-control">Control and comfort</h3>
+            </div>
+            <ul class="ev-list">
+              <li><strong>Settings window with search.</strong> Changes save as you make them.</li>
+              <li><strong>Menu bar icon</strong> on macOS, <strong>tray icon</strong> on Windows and Linux: show or hide, screenshot, chat, Settings and Quit.</li>
+              <li><strong>Toolbar menu</strong> (the ⋯ button) with About, Settings, updates, logs and Quit.</li>
+              <li><strong>Click-through</strong> lets clicks pass to the app underneath.
+                <span class="ev-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌥</kbd><kbd>A</kbd></span><span class="sr-only">Option A</span></span></li>
+              <li><strong>Show or hide everything</strong> in one keystroke.
+                <span class="ev-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>V</kbd></span><span class="sr-only">Command Shift V</span></span></li>
+              <li><strong>Global shortcuts</strong> for screenshot, voice and chat.
+                <span class="ev-keys">
+                  <span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>S</kbd></span><span class="sr-only">Command Shift S,</span>
+                  <span class="kbd-group" aria-hidden="true"><kbd class="sym">⌥</kbd><kbd>R</kbd></span><span class="sr-only">Option R,</span>
+                  <span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>C</kbd></span><span class="sr-only">Command Shift C</span>
+                </span>
+                Settings shows any shortcut another app has taken.</li>
+              <li><strong>Stays on top</strong>, including over full-screen apps on macOS.</li>
+              <li><strong>Steady windows:</strong> they fade in and keep one window level, so they don't blink.</li>
+              <li><strong>Reduced motion</strong> is respected when your system asks for it.</li>
+              <li><strong>Window gap</strong> between the toolbar and the answer panel, in pixels.</li>
+            </ul>
+          </section>
+
+          <section class="ev-group" aria-labelledby="ev-providers">
+            <div class="ev-head">
+              <svg class="ev-ic" aria-hidden="true"><use href="#i-cpu"/></svg>
+              <h3 class="ev-label" id="ev-providers">AI providers</h3>
+            </div>
+            <ul class="chips ev-chips" aria-label="Supported AI providers">
+              <li>Gemini</li><li>Claude</li><li>OpenAI</li><li>OpenRouter</li><li>Groq</li><li>DeepSeek</li><li>Ollama</li>
+            </ul>
+            <ul class="ev-list">
+              <li><strong>Ollama</strong> runs a model on your own machine, with no key.</li>
+              <li><strong>Guided setup</strong> tests the connection before you continue, and can install local Whisper for you.</li>
+              <li><strong>Switch any time</strong>: provider, key and model in Settings, with Test connection there too.</li>
+            </ul>
+          </section>
+
+          <section class="ev-group" aria-labelledby="ev-privacy">
+            <div class="ev-head">
+              <svg class="ev-ic" aria-hidden="true"><use href="#i-lock"/></svg>
+              <h3 class="ev-label" id="ev-privacy">Privacy and security</h3>
+            </div>
+            <ul class="ev-list">
+              <li><strong>Keys stay on your computer</strong>, in a file only you can read on macOS and Linux. Settings shows at most the last 4 characters.</li>
+              <li><strong>No Cuewell servers</strong>, no account, no telemetry.</li>
+              <li><strong>History lasts one session.</strong> It is kept in memory and cleared when you quit.</li>
+              <li><strong>Locked-down windows:</strong> sandboxed pages, per-window permissions and a strict content security policy.</li>
+              <li><strong>Screen-capture protection</strong> on macOS and Windows hides the windows from most capture and sharing. Some sharing can still see them, and Linux has none.</li>
+            </ul>
+          </section>
+
+          <section class="ev-group" aria-labelledby="ev-platforms">
+            <div class="ev-head">
+              <svg class="ev-ic" aria-hidden="true"><use href="#i-monitor"/></svg>
+              <h3 class="ev-label" id="ev-platforms">Platforms and updates</h3>
+            </div>
+            <ul class="ev-list">
+              <li><strong>macOS 13 or later</strong>, Apple silicon and Intel.</li>
+              <li><strong>Windows 10 and 11</strong>, 64-bit: installer or portable app.</li>
+              <li><strong>Linux</strong>, 64-bit: AppImage or .deb.</li>
+              <!-- Update checks and Report a Problem stay off until UPDATE_REPO
+                   in src/core/update-checker.js names the real repository. -->
+              <li><strong>Update notices</strong> when a new version is out. Cuewell never installs anything by itself.</li>
+              <li><strong>Crash recovery:</strong> a window that stops is reloaded, and errors say what went wrong, such as a bad key, a rate limit or no connection.</li>
+              <li><strong>Free and open source</strong> under Apache-2.0, with 239 automated tests.</li>
+            </ul>
+          </section>
+        </div>
+
+        <!-- Every shortcut main.js registers (SHORTCUT_ACTIONS), plus Quit from the macOS menu. -->
+        <div class="sc reveal" id="shortcuts" role="group" aria-labelledby="shortcuts-title">
+          <div class="sc-head">
+            <svg class="ev-ic" aria-hidden="true"><use href="#i-keyboard"/></svg>
+            <h3 class="h3" id="shortcuts-title">Keyboard shortcuts</h3>
+            <p class="sc-note">macOS keys shown. On Windows and Linux, use Ctrl for ⌘ and Alt for ⌥.</p>
+          </div>
+          <div class="sc-grid">
+            <div class="sc-col">
+              <p class="sc-scope" id="sc-global"><span class="sc-dot" aria-hidden="true"></span>Work anywhere</p>
+              <ul class="sc-list" aria-labelledby="sc-global">
+                <li><span class="sc-act">Capture the screen under the pointer and ask</span><span class="sc-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>S</kbd></span><span class="sr-only">Command Shift S</span></span></li>
+                <li><span class="sc-act">Start or stop voice input</span><span class="sc-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌥</kbd><kbd>R</kbd></span><span class="sr-only">Option R</span></span></li>
+                <li><span class="sc-act">Show or hide all windows</span><span class="sc-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>V</kbd></span><span class="sr-only">Command Shift V</span></span></li>
+                <li><span class="sc-act">Turn click-through on or off</span><span class="sc-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>I</kbd></span><span class="sc-or" aria-hidden="true">or</span><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌥</kbd><kbd>A</kbd></span><span class="sr-only">Command Shift I, or Option A</span></span></li>
+                <li><span class="sc-act">Show or hide the chat window</span><span class="sc-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>C</kbd></span><span class="sr-only">Command Shift C</span></span></li>
+                <li><span class="sc-act">Clear the conversation history</span><span class="sc-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>\</kbd></span><span class="sr-only">Command Shift Backslash</span></span></li>
+              </ul>
+            </div>
+            <div class="sc-col">
+              <p class="sc-scope" id="sc-focus"><span class="sc-dot sc-dot--focus" aria-hidden="true"></span>When a Cuewell window has focus</p>
+              <ul class="sc-list" aria-labelledby="sc-focus">
+                <li><span class="sc-act">Open Settings</span><span class="sc-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd>,</kbd></span><span class="sr-only">Command Comma</span></span></li>
+                <li><span class="sc-act">Switch interview mode, or move the windows when click-through is on</span><span class="sc-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">↑</kbd></span><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">↓</kbd></span><span class="sr-only">Command Up, Command Down</span></span></li>
+                <li><span class="sc-act">Move the windows when click-through is on</span><span class="sc-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">←</kbd></span><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd class="sym">→</kbd></span><span class="sr-only">Command Left, Command Right</span></span></li>
+                <li><span class="sc-act">Quit (macOS menu)</span><span class="sc-keys"><span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd>Q</kbd></span><span class="sr-only">Command Q</span></span></li>
+              </ul>
+              <p class="sc-fine">If another app already owns a shortcut, Cuewell can't use it. Settings &gt; Shortcuts marks it, and the menu bar or tray icon still offers show or hide, screenshot, chat and Settings.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ HOW IT WORKS ============ -->
     <section class="section section--tint gridbg gridbg--soft" id="how" aria-labelledby="how-title">
       <div class="wrap">
@@ -519,6 +687,22 @@
             <p>macOS 13 (Ventura) or later on Apple silicon or Intel, 64-bit Windows 10 or 11, and 64-bit Linux (AppImage or .deb). On Linux, privacy mode does not work, so the overlay shows in screen shares. See <a href="#download">Download</a> for each file.</p>
           </details>
           <details>
+            <summary>How do Windows and Linux differ from macOS?</summary>
+            <p>Shortcuts use Ctrl for ⌘ and Alt for ⌥. There is no menu bar for the overlay, so the app commands (About, updates, Settings, logs, Quit) are in the toolbar's ⋯ menu and the tray icon. Screen-capture protection needs Windows 10 version 2004 or later, and Linux has none. On Linux with Wayland, global shortcuts go through the desktop's shortcuts portal, which may ask you once to allow them, and voice input needs alsa-utils or sox.</p>
+          </details>
+          <details>
+            <summary>What can I change in Settings?</summary>
+            <p>Settings is its own window with sections for General (interview mode, coding language, answer length), AI provider, Interview context, Voice, Shortcuts, Privacy and appearance, and About. A search box finds any setting, and each change saves as you make it. Open it with <span class="kbd-group" aria-hidden="true"><kbd class="sym">⌘</kbd><kbd>,</kbd></span><span class="sr-only">Command Comma</span>, the gear on the toolbar, or the menu bar or tray icon.</p>
+          </details>
+          <details>
+            <summary>Where is the menu bar or tray icon?</summary>
+            <p>On macOS it sits in the menu bar. On Windows and Linux it is in the system tray. Its menu shows or hides Cuewell, takes a screenshot, opens the chat, Settings or Check for Updates…, and quits. On GNOME, tray icons need an AppIndicator extension; Ubuntu includes one.</p>
+          </details>
+          <details>
+            <summary>Does Cuewell update itself?</summary>
+            <p>No. The builds are not code-signed, so Cuewell only tells you when a new release is out. About 15 seconds after launch, at most once a day, it asks GitHub for the latest release and shows a notification if it is newer; click it to open the release page. <strong>Check for Updates…</strong> checks right away. The request names only the app version. To turn off the automatic check, add <code>UPDATE_CHECKS=off</code> to <code>.env</code>.</p>
+          </details>
+          <details>
             <summary>Can people on a screen share see the overlay?</summary>
             <p>On macOS and Windows, the windows are excluded from most screen capture and screen sharing, which use the operating system's capture APIs. Some older browser-based sharing can still capture them, and on Linux they are always visible. Treat privacy mode as a convenience, not a guarantee.</p>
           </details>
@@ -657,6 +841,7 @@
         <div>
           <p class="footer-h">Product</p>
           <a href="#features">Features</a>
+          <a href="#everything">All features</a>
           <a href="#how">How it works</a>
           <a href="#providers">AI providers</a>
           <a href="#faq">FAQ</a>
