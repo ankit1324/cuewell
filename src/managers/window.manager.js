@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, desktopCapturer, shell } = require('electron');
+const { app, BrowserWindow, screen, desktopCapturer, shell, systemPreferences } = require('electron');
 const path = require('path');
 // Node's URL on purpose: speech.service.js replaces globalThis.URL with a
 // stand-in that reports every URL as https:.
@@ -18,6 +18,12 @@ const PRELOAD_BY_TYPE = {
   llmResponse: path.join(APP_ROOT, 'preload-content.js'),
 };
 
+// Motion and sizing for the chat and answer windows.
+const WINDOW_FADE_MS = 160;          // window appear: fade (plus a 4 px rise in the page)
+const ANSWER_REVEAL_TIMEOUT_MS = 150; // longest wait for the answer page's first frame
+const ANSWER_MIN_HEIGHT = 120;       // title bar plus a line or two
+const ANSWER_SCREEN_MARGIN = 12;     // kept free below the answer window
+
 /** Open http(s) URLs in the system browser and drop every other scheme. */
 function openExternalHttpUrl(url) {
   let parsed;
@@ -30,6 +36,14 @@ function openExternalHttpUrl(url) {
   shell.openExternal(parsed.href).catch((error) => {
     logger.warn('Failed to open external URL', { error: error.message });
   });
+}
+
+/** Move a window only when its position actually changes. */
+function setPositionIfMoved(win, x, y) {
+  const [currentX, currentY] = win.getPosition();
+  const nextX = Math.round(x);
+  const nextY = Math.round(y);
+  if (currentX !== nextX || currentY !== nextY) win.setPosition(nextX, nextY);
 }
 
 class WindowManager {
@@ -861,12 +875,12 @@ class WindowManager {
     // Position main window (top)
     const mainX = adjustedMainX;
     const mainY = startY;
-    mainWindow.setPosition(mainX, mainY);
+    setPositionIfMoved(mainWindow, mainX, mainY);
     
     // Position LLM response window below with gap
     const llmX = adjustedLlmX;
     const llmY = startY + mainHeight + this.windowGap;
-    llmWindow.setPosition(llmX, llmY);
+    setPositionIfMoved(llmWindow, llmX, llmY);
     
     // Update stored position (use main window position as reference)
     this.boundWindowsPosition = { x: adjustedMainX, y: startY };
@@ -934,72 +948,147 @@ class WindowManager {
    * { focus: false } for windows the user did not ask to type into (answers,
    * the loading state, restored or repositioned windows): they appear without
    * taking keyboard focus from the app the user is working in.
+   *
+   * The workspace and window-level settings are applied only when the window
+   * goes from hidden to shown. This method never hides and re-shows a window
+   * that is already on screen, or changes its level: on macOS that made it
+   * blink. setVisibleOnAllWorkspaces is always called with
+   * skipTransformProcessType, because without it Electron switches the app
+   * between a Dock app and a UI-element app on every call, which hides every
+   * window and the Dock icon for a moment. The app stays the UI-element app
+   * that applyStealthMeasures makes it when the windows are created (no Dock
+   * icon), which is what lets the windows float over full-screen apps.
    */
   showOnCurrentDesktop(win, { focus = true } = {}) {
     if (!win || win.isDestroyed()) return;
-    const reveal = () => {
-      if (focus) {
-        win.show();
-        win.focus();
-      } else {
-        win.showInactive();
+    this.watchShownWindow(win);
+    const type = this.getWindowTypeForWebContents(win.webContents);
+    const isLLM = type === 'llmResponse';
+    const workspaceOptions = { visibleOnFullScreen: true, skipTransformProcessType: true };
+    const canUseWorkspaces = process.platform === 'darwin' || process.platform === 'linux';
+
+    if (win.isVisible()) {
+      if (!focus) return;
+      // A window kept on one macOS Space would switch the user to that Space
+      // when focused; let it join the current one first (no hide, no flash).
+      if (process.platform === 'darwin' && !isLLM && !win.isVisibleOnAllWorkspaces()) {
+        win.setVisibleOnAllWorkspaces(true, workspaceOptions);
+        this.pinToCurrentWorkspaceLater(win);
       }
-    };
-
-    const llmWin = this.windows.get('llmResponse');
-    const isLLM = llmWin && !llmWin.isDestroyed() && win.id === llmWin.id;
-
-    if (process.platform === 'darwin') {
-      // macOS: prevent space switching and keep visibility stable
-      win.hide();
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-
-      const setMacOSAlwaysOnTop = () => {
-        if (win.isDestroyed()) return;
-        try {
-          win.setAlwaysOnTop(true, 'screen-saver', 2);
-        } catch {
-          try { win.setAlwaysOnTop(true, 'pop-up-menu', 2); }
-          catch { try { win.setAlwaysOnTop(true, 'floating', 2); }
-          catch { win.setAlwaysOnTop(true); }}
-        }
-      };
-
-      setMacOSAlwaysOnTop();
-
-      setTimeout(() => {
-        if (win.isDestroyed()) return;
-        reveal();
-        setMacOSAlwaysOnTop();
-        setTimeout(() => { if (!win.isDestroyed()) setMacOSAlwaysOnTop(); }, 100);
-        // Keep LLM window visible across workspaces; others revert
-        setTimeout(() => {
-          if (win.isDestroyed()) return;
-          if (!isLLM) {
-            win.setVisibleOnAllWorkspaces(false);
-          }
-          setMacOSAlwaysOnTop();
-        }, 300);
-      }, 50);
-    } else {
-      // Linux/Windows
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-      win.setAlwaysOnTop(true);
-      reveal();
-      setTimeout(() => {
-        if (win.isDestroyed()) return;
-        if (!isLLM) {
-          win.setVisibleOnAllWorkspaces(false);
-        }
-        win.setAlwaysOnTop(true);
-      }, 500);
+      win.focus();
+      return;
     }
 
-    logger.debug('Showing window on current desktop with enhanced always-on-top', {
+    if (canUseWorkspaces) win.setVisibleOnAllWorkspaces(true, workspaceOptions);
+    if (process.platform === 'darwin') {
+      try {
+        win.setAlwaysOnTop(true, 'screen-saver', 2);
+      } catch {
+        try { win.setAlwaysOnTop(true, 'floating', 2); } catch { win.setAlwaysOnTop(true); }
+      }
+    } else {
+      win.setAlwaysOnTop(true);
+    }
+
+    // The chat and answer windows fade in. On macOS the native glass is drawn
+    // by the system, so the fade is done on the window; the pages add the
+    // 4 px rise (and, on Windows and Linux, the fade) in CSS.
+    const fade = process.platform === 'darwin' &&
+      (type === 'llmResponse' || type === 'chat') && !this.prefersReducedMotion();
+    if (fade) win.setOpacity(0);
+    if (focus) {
+      win.show();
+      win.focus();
+    } else {
+      win.showInactive();
+    }
+    if (fade) this.fadeInWindow(win);
+
+    // The answer window stays on every Space; the others are pinned to the
+    // Space they were shown on.
+    if (!isLLM && canUseWorkspaces) this.pinToCurrentWorkspaceLater(win);
+
+    logger.debug('Window shown on current desktop', {
+      type,
       platform: process.platform,
       windowId: win.id,
-      isDestroyed: win.isDestroyed()
+      faded: fade
     });
+  }
+
+  /** Stop a window following every Space shortly after it was shown. */
+  pinToCurrentWorkspaceLater(win) {
+    setTimeout(() => {
+      if (win.isDestroyed() || !win.isVisible()) return;
+      win.setVisibleOnAllWorkspaces(false, { skipTransformProcessType: true });
+    }, process.platform === 'darwin' ? 300 : 500);
+  }
+
+  /** True when the OS asks for reduced motion. */
+  prefersReducedMotion() {
+    try {
+      const settings = systemPreferences.getAnimationSettings();
+      return !!(settings && settings.prefersReducedMotion);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
+   * Fade a window's opacity from 0 to 1 over WINDOW_FADE_MS with the theme's
+   * ease-out curve. A hide or close during the fade ends it at full opacity,
+   * so the next show never starts from an invisible window.
+   */
+  fadeInWindow(win) {
+    this.stopWindowFade(win);
+    const start = Date.now();
+    const step = () => {
+      if (win.isDestroyed()) return;
+      const t = Math.min(1, (Date.now() - start) / WINDOW_FADE_MS);
+      win.setOpacity(1 - Math.pow(1 - t, 3));
+      if (t < 1) {
+        this.windowFades.set(win.id, setTimeout(step, 16));
+      } else {
+        this.windowFades.delete(win.id);
+      }
+    };
+    this.windowFades.set(win.id, setTimeout(step, 16));
+  }
+
+  stopWindowFade(win) {
+    const timer = this.windowFades.get(win.id);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.windowFades.delete(win.id);
+    if (!win.isDestroyed()) win.setOpacity(1);
+  }
+
+  /**
+   * One-time listeners for a window shown by showOnCurrentDesktop: a hide
+   * ends its fade, and for the answer window cancels a reveal still waiting
+   * for the page and records the height the user drags it to.
+   */
+  watchShownWindow(win) {
+    if (!this.windowFades) this.windowFades = new Map();
+    if (!this.watchedWindows) this.watchedWindows = new WeakSet();
+    if (this.watchedWindows.has(win)) return;
+    this.watchedWindows.add(win);
+    const id = win.id;
+    win.on('hide', () => this.stopWindowFade(win));
+    win.on('closed', () => {
+      const timer = this.windowFades.get(id);
+      if (timer) clearTimeout(timer);
+      this.windowFades.delete(id);
+    });
+    if (this.getWindowTypeForWebContents(win.webContents) === 'llmResponse') {
+      win.on('hide', () => this.cancelAnswerReveal());
+      // Only emitted for resizes the user makes (macOS and Windows).
+      win.on('will-resize', (_event, newBounds) => {
+        if (newBounds && Number.isFinite(newBounds.height)) {
+          this.answerState().preferredHeight = Math.round(newBounds.height);
+        }
+      });
+    }
   }
   
   setupWindowEventHandlers() {
@@ -1393,6 +1482,132 @@ class WindowManager {
     return results;
   }
 
+  /**
+   * Answer window state: `seq` numbers each loading/answer message sent to the
+   * page, `pendingSeq` is the message whose first frame the window waits for
+   * before it is revealed, and `preferredHeight` is the height the user last
+   * dragged the window to.
+   */
+  answerState() {
+    if (!this._answerState) {
+      this._answerState = { seq: 0, pendingSeq: null, revealTimer: null, revealWhileVisible: true, preferredHeight: null };
+    }
+    return this._answerState;
+  }
+
+  /** Work area of the display the answer window is (or will be) on. */
+  answerWorkArea(llmWindow) {
+    try {
+      return screen.getDisplayMatching(llmWindow.getBounds()).workArea;
+    } catch (_) {
+      return (this.currentDisplay || screen.getPrimaryDisplay()).workArea;
+    }
+  }
+
+  /** Tallest the answer window may be at its current position. */
+  answerMaxHeight(llmWindow) {
+    const workArea = this.answerWorkArea(llmWindow);
+    const [, y] = llmWindow.getPosition();
+    return Math.max(ANSWER_MIN_HEIGHT, workArea.y + workArea.height - y - ANSWER_SCREEN_MARGIN);
+  }
+
+  /** Height a new answer starts at: the user's last height, or the default. */
+  answerStandardHeight(llmWindow) {
+    const preferred = this.answerState().preferredHeight;
+    const wanted = Number.isFinite(preferred) && preferred > 0 ? preferred : this.windowConfigs.llmResponse.height;
+    return Math.max(ANSWER_MIN_HEIGHT, Math.min(wanted, this.answerMaxHeight(llmWindow)));
+  }
+
+  /** Change only the height, keeping the width and the top edge. */
+  setAnswerHeight(llmWindow, height) {
+    const [width, currentHeight] = llmWindow.getSize();
+    const next = Math.round(height);
+    if (!Number.isFinite(next) || Math.abs(next - currentHeight) < 2) return false;
+    llmWindow.setSize(width, next);
+    return true;
+  }
+
+  /**
+   * Put the hidden answer window under the toolbar, where the toolbar is now,
+   * so the toolbar does not move when an answer appears.
+   */
+  placeAnswerWindow(llmWindow) {
+    if (!this.bindWindows) return;
+    const mainWindow = this.windows.get('main');
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) {
+      this.positionBoundWindows();
+      return;
+    }
+    const [mainX, mainY] = mainWindow.getPosition();
+    const [, mainHeight] = mainWindow.getSize();
+    const [llmWidth] = llmWindow.getSize();
+    let workArea;
+    try {
+      workArea = screen.getDisplayMatching(mainWindow.getBounds()).workArea;
+    } catch (_) {
+      workArea = (this.currentDisplay || screen.getPrimaryDisplay()).workArea;
+    }
+    const y = mainY + mainHeight + this.windowGap;
+    if (workArea.y + workArea.height - y - ANSWER_SCREEN_MARGIN < ANSWER_MIN_HEIGHT) {
+      // No room under the toolbar: use the default column at the top.
+      this.positionBoundWindows();
+      return;
+    }
+    const x = Math.max(workArea.x, Math.min(workArea.x + workArea.width - llmWidth, mainX));
+    setPositionIfMoved(llmWindow, x, y);
+  }
+
+  /**
+   * Number the next message for the answer page. A hidden window is sized and
+   * placed now, before its first frame, and is revealed once the page reports
+   * that it has drawn the new state (handleAnswerContentReport) or after
+   * ANSWER_REVEAL_TIMEOUT_MS. A window already on screen is never hidden,
+   * moved or re-leveled here.
+   */
+  prepareAnswerWindow(llmWindow) {
+    const state = this.answerState();
+    state.seq += 1;
+    const appearing = !llmWindow.isVisible();
+    // Shown some other way (e.g. restored by showAllWindows) while waiting.
+    if (!appearing) this.cancelAnswerReveal();
+    if (appearing) {
+      this.placeAnswerWindow(llmWindow);
+      this.setAnswerHeight(llmWindow, this.answerStandardHeight(llmWindow));
+    }
+    return { seq: state.seq, appearing };
+  }
+
+  revealAnswerWindowWhenDrawn(llmWindow, seq) {
+    const state = this.answerState();
+    if (state.pendingSeq === null) state.revealWhileVisible = this.isVisible;
+    state.pendingSeq = seq;
+    if (!state.revealTimer) {
+      state.revealTimer = setTimeout(() => {
+        state.revealTimer = null;
+        logger.debug('Answer page did not report its first frame in time; showing the window anyway');
+        this.revealAnswerWindow();
+      }, ANSWER_REVEAL_TIMEOUT_MS);
+    }
+  }
+
+  cancelAnswerReveal() {
+    const state = this.answerState();
+    if (state.revealTimer) clearTimeout(state.revealTimer);
+    state.revealTimer = null;
+    state.pendingSeq = null;
+  }
+
+  revealAnswerWindow() {
+    const state = this.answerState();
+    const hiddenMeanwhile = state.revealWhileVisible && !this.isVisible;
+    this.cancelAnswerReveal();
+    // Screen sharing began, or every window was hidden, while the page drew.
+    if (this.isScreenBeingShared || hiddenMeanwhile) return;
+    const llmWindow = this.windows.get('llmResponse');
+    if (!llmWindow || llmWindow.isDestroyed()) return;
+    this.showOnCurrentDesktop(llmWindow, { focus: false });
+  }
+
   showLLMResponse(content, metadata = {}) {
     logger.debug('showLLMResponse called', {
       isScreenBeingShared: this.isScreenBeingShared,
@@ -1406,36 +1621,25 @@ class WindowManager {
     }
 
     const llmWindow = this.windows.get('llmResponse');
-    if (!llmWindow) {
+    if (!llmWindow || llmWindow.isDestroyed()) {
       logger.error('LLM response window not available');
       return;
     }
 
-    // Ensure window is not destroyed before use
-    if (llmWindow.isDestroyed()) {
-      logger.error('LLM response window is destroyed');
-      return;
-    }
-
-    logger.debug('Sending display-llm-response event to window');
+    const { seq, appearing } = this.prepareAnswerWindow(llmWindow);
     llmWindow.webContents.send('display-llm-response', {
       content,
       metadata,
+      seq,
+      appearing,
       timestamp: new Date().toISOString()
     });
-    
-    logger.debug('Showing LLM window without taking focus');
-    this.showOnCurrentDesktop(llmWindow, { focus: false });
-    
-    // Position bound windows when LLM response is shown
-    if (this.bindWindows) {
-      this.positionBoundWindows();
-    }
-        
+    if (appearing) this.revealAnswerWindowWhenDrawn(llmWindow, seq);
+
     logger.info('LLM response displayed', {
       contentLength: content.length,
       skill: metadata.skill,
-      windowVisible: llmWindow.isVisible(),
+      appearing,
       boundWindows: this.bindWindows
     });
   }
@@ -1447,27 +1651,71 @@ class WindowManager {
     }
 
     const llmWindow = this.windows.get('llmResponse');
-    if (llmWindow) {
-      logger.debug('Showing LLM loading state');
-      llmWindow.webContents.send('show-loading');
-      this.showOnCurrentDesktop(llmWindow, { focus: false });
-      
-      // Position bound windows when LLM loading is shown
-      if (this.bindWindows) {
-        this.positionBoundWindows();
-      }
-      
-      logger.debug('LLM loading window shown');
-    } else {
+    if (!llmWindow || llmWindow.isDestroyed()) {
       logger.error('LLM window not available for loading state');
+      return;
     }
+
+    const { seq, appearing } = this.prepareAnswerWindow(llmWindow);
+    llmWindow.webContents.send('show-loading', { seq, appearing });
+    if (appearing) {
+      this.revealAnswerWindowWhenDrawn(llmWindow, seq);
+    } else {
+      // A window left small by a short answer grows back while it shows
+      // "Thinking", so the new answer has room. The top edge stays put.
+      const standard = this.answerStandardHeight(llmWindow);
+      if (llmWindow.getSize()[1] < standard) this.setAnswerHeight(llmWindow, standard);
+    }
+    logger.debug('LLM loading state shown', { appearing });
   }
 
   hideLLMResponse() {
+    this.cancelAnswerReveal();
     const llmWindow = this.windows.get('llmResponse');
-    if (llmWindow) {
+    if (llmWindow && !llmWindow.isDestroyed()) {
       llmWindow.hide();
     }
+  }
+
+  /**
+   * The answer page reports after it has drawn a state:
+   *   { phase: 'loading' | 'final', seq, height }
+   * `seq` is the number of the message it drew, `height` (final only) the
+   * window height its content needs. A report for the message the hidden
+   * window waits for reveals it. A final answer fits the window once: a
+   * window on screen only shrinks (content never moves), a window not yet
+   * shown is sized either way. Nothing is resized while text streams.
+   */
+  handleAnswerContentReport(report) {
+    if (!report || typeof report !== 'object') return { success: false };
+    const phase = report.phase === 'loading' || report.phase === 'final' ? report.phase : null;
+    const seq = Number.isSafeInteger(report.seq) ? report.seq : null;
+    const height = typeof report.height === 'number' && Number.isFinite(report.height) &&
+      report.height > 0 && report.height < 20000 ? report.height : null;
+    if (!phase || seq === null) return { success: false };
+
+    const state = this.answerState();
+    // A report for an older message than the latest one changes nothing.
+    if (seq !== state.seq) return { success: true, applied: false };
+    const llmWindow = this.windows.get('llmResponse');
+    if (!llmWindow || llmWindow.isDestroyed()) return { success: false };
+
+    const revealing = state.pendingSeq === seq;
+    if (phase === 'final' && height !== null && (revealing || llmWindow.isVisible())) {
+      this.fitAnswerWindowToContent(llmWindow, height, { canGrow: revealing });
+    }
+    if (revealing) this.revealAnswerWindow();
+    return { success: true, applied: true };
+  }
+
+  fitAnswerWindowToContent(llmWindow, neededHeight, { canGrow = false } = {}) {
+    const [, currentHeight] = llmWindow.getSize();
+    const ceiling = canGrow ? this.answerStandardHeight(llmWindow) : currentHeight;
+    const target = Math.max(ANSWER_MIN_HEIGHT, Math.min(Math.ceil(neededHeight), ceiling));
+    // Small differences are left alone, so the edge does not twitch.
+    if (Math.abs(target - currentHeight) < 8) return;
+    this.setAnswerHeight(llmWindow, target);
+    logger.debug('Answer window fitted to its content', { from: currentHeight, to: target });
   }
 
   showSettings() {
@@ -1529,53 +1777,6 @@ class WindowManager {
       onboardingWindow.close();
     }
     this.windows.delete('onboarding');
-  }
-
-  expandLLMWindow(contentMetrics = null) {
-    const llmWindow = this.windows.get('llmResponse');
-    if (!llmWindow || this.isScreenBeingShared) return;
-
-    const optimalSize = this.calculateOptimalWindowSize(contentMetrics);
-    
-    // Ensure we have valid numbers for setSize
-    const width = Math.round(Number(optimalSize.width)) || 840;
-    const height = Math.round(Number(optimalSize.height)) || 480;
-    
-    llmWindow.setSize(width, height);
-    
-    // If windows are bound, position them together; otherwise center the LLM window
-    if (this.bindWindows) {
-      this.positionBoundWindows();
-    } else {
-      this.centerWindow(llmWindow);
-    }
-    
-    logger.debug('LLM window resized', { 
-      newSize: `${width}x${height}`,
-      basedOnContent: !!contentMetrics,
-      boundWindows: this.bindWindows
-    });
-  }
-
-  calculateOptimalWindowSize(contentMetrics) {
-    const display = this.currentDisplay || screen.getPrimaryDisplay();
-    const { width: screenWidth, height: screenHeight } = display.workArea || display.workAreaSize;
-    
-    let width = 840; // Default LLM window width
-    let height = 480; // Default LLM window height
-    
-    if (contentMetrics && typeof contentMetrics === 'object') {
-      const lineCount = Number(contentMetrics.lineCount) || 20;
-      const avgLineLength = Number(contentMetrics.avgLineLength) || 80;
-      
-      width = Math.min(Math.max(avgLineLength * 8, 500), screenWidth * 0.8);
-      height = Math.min(Math.max(lineCount * 25 + 100, 300), screenHeight * 0.8);
-    }
-    
-    return { 
-      width: Math.round(Number(width)) || 840, 
-      height: Math.round(Number(height)) || 480 
-    };
   }
 
   centerWindow(window) {

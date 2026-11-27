@@ -1600,9 +1600,11 @@ class ApplicationController {
       return { success: true };
     });
 
-    this.handleIpc("resize-llm-window-for-content", (event, contentMetrics) => {
-      windowManager.expandLLMWindow(contentMetrics);
-      return { success: true, contentMetrics };
+    // The answer page reports each state it has drawn ({ phase, seq, height }).
+    // The window manager validates it, reveals a window waiting for its first
+    // frame and fits the height once per final answer.
+    this.handleIpc("resize-llm-window-for-content", (event, report) => {
+      return windowManager.handleAnswerContentReport(report);
     });
 
     // Handle close settings

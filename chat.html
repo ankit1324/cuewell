@@ -251,6 +251,19 @@
       }
 
       .chat-messages .message.thinking { animation: oc-rise var(--oc-t) var(--oc-ease) both; }
+      /* An answer that is only code: the row keeps its head above the cards. */
+      .chat-messages .message.no-text .message-text { display: none; }
+
+      /* Hint while there are no messages; the text is set by chat-page.js. */
+      .chat-messages:empty::before {
+        content: attr(data-empty);
+        margin: auto;
+        max-width: 80%;
+        text-align: center;
+        font-size: var(--oc-fs-sm);
+        line-height: 1.5;
+        color: var(--oc-text-3);
+      }
       .chat-messages .message.thinking .message-text { font-size: var(--oc-fs-sm); font-weight: 600; }
 
       /* ---------- Live partial transcription ---------- */

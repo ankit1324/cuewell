@@ -116,6 +116,8 @@
   --oc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --oc-t-fast: 120ms;
   --oc-t: 180ms;
+  --oc-t-swap: 140ms;   /* cross-fade between two states of one panel */
+  --oc-t-appear: 160ms; /* a panel window appearing */
 }
 
 /*
@@ -453,6 +455,34 @@ select.oc-input {
   to { opacity: 1; transform: none; }
 }
 .oc-rise { animation: oc-rise var(--oc-t) var(--oc-ease) both; }
+
+/* A panel window appearing: 160 ms fade and 4 px rise. Put .oc-appear on the
+   root surface; .is-held keeps the first frame until the window is on
+   screen. On macOS the main process fades the whole window (the native glass
+   cannot be faded from CSS), so the page only adds the rise, on the
+   surface's children so the tint stays aligned with the glass. */
+@keyframes oc-appear {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes oc-appear-rise {
+  from { transform: translateY(4px); }
+  to { transform: none; }
+}
+.oc-appear { animation: oc-appear var(--oc-t-appear) var(--oc-ease) both; }
+html[data-platform="darwin"] .oc-window--native.oc-appear { animation: none; }
+html[data-platform="darwin"] .oc-window--native.oc-appear > * {
+  animation: oc-appear-rise var(--oc-t-appear) var(--oc-ease) both;
+}
+.oc-appear.is-held,
+.oc-appear.is-held > * { animation-play-state: paused !important; }
+
+/* Content that replaces a placeholder in place: fade only, no movement. */
+@keyframes oc-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.oc-fade-in { animation: oc-fade-in var(--oc-t-swap) var(--oc-ease) both; }
 
 /* ---------- Markdown answers ---------- */
 

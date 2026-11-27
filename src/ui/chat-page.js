@@ -29,14 +29,17 @@ const RECENT_HASH_LIMIT = 50;
 // Live answers. Main sends transcription-llm-response-start, then -chunk
 // events, then transcription-llm-response (or llm-error), all with the same
 // messageId. Each request gets one assistant row: the "Thinking…" row
-// becomes the streaming text, and the final answer replaces it in place,
-// with its code split out into snippet cards. Markdown is re-rendered at
-// most every STREAM_RENDER_INTERVAL_MS while text streams; Prism runs only
-// on the final snippets.
+// becomes the streaming text, with its code split out into snippet cards
+// below it as it arrives, which is also how the final answer looks, so the
+// end of a stream moves nothing. Markdown is re-rendered at most every
+// STREAM_RENDER_INTERVAL_MS and only the blocks that changed are replaced;
+// copy buttons and Prism wait for the final answer.
 const STREAM_RENDER_INTERVAL_MS = 80;
-const streams = new Map(); // messageId -> { el, text, timer, lastRenderAt, live }
+const streams = new Map(); // messageId -> { el, text, timer, lastRenderAt, live, cards }
 const finishedStreamIds = new Set();
 const FINISHED_ID_LIMIT = 100;
+
+const EMPTY_ANSWER_MESSAGE = 'No answer came back from the AI provider. Try asking again.';
 
 function hashString(str) {
   try {
@@ -81,6 +84,12 @@ function clearChatHistory(skipConfirm = false) {
 function applyMicVisibility() {
   if (micButton) {
     micButton.style.display = speechAvailable ? '' : 'none';
+  }
+  // Shown by CSS while the message list is empty.
+  if (chatMessages) {
+    chatMessages.dataset.empty = speechAvailable
+      ? 'Type a question below, or press Alt+R to ask by voice.'
+      : 'Type a question below to ask the AI.';
   }
 }
 
@@ -281,7 +290,7 @@ function openStream(messageId, source) {
   const el = (claimable && unclaimedThinking(source)) || addThinkingRow(null);
   el.dataset.messageId = messageId;
   el.removeAttribute('id');
-  const entry = { el, text: '', timer: null, lastRenderAt: 0, live: false };
+  const entry = { el, text: '', timer: null, lastRenderAt: 0, live: false, cards: [] };
   streams.set(messageId, entry);
   return entry;
 }
@@ -319,11 +328,12 @@ function resetStream(messageId) {
   entry.text = '';
   if (!entry.live) return;
   entry.live = false;
-  entry.el.classList.remove('streaming');
+  removeCards(entry);
+  entry.el.classList.remove('streaming', 'no-text');
   entry.el.classList.add('thinking');
   const textDiv = entry.el.querySelector('.message-text');
   if (!textDiv) return;
-  textDiv.classList.remove('oc-prose');
+  textDiv.classList.remove('oc-prose', 'oc-fade-in');
   const shimmer = document.createElement('span');
   shimmer.className = 'oc-shimmer';
   shimmer.textContent = 'Thinking…';
@@ -335,22 +345,81 @@ function renderStream(entry) {
   if (!entry.el.isConnected || !entry.text) return;
   entry.lastRenderAt = Date.now();
   const follow = isNearBottom();
-  const textDiv = entry.el.querySelector('.message-text');
-  if (!entry.live) {
-    // The first text replaces "Thinking…".
-    entry.live = true;
-    entry.el.classList.remove('thinking');
-    entry.el.classList.add('streaming');
-    textDiv.classList.add('oc-prose');
-  }
-  // Code stays inline while streaming; the final answer splits it out.
-  textDiv.innerHTML = sanitizeHtml(formatMarkdown(entry.text));
-  if (window.renderMathInElement) window.renderMathInElement(textDiv);
+  makeRowLive(entry);
+  const { text: prose, blocks } = splitCodeBlocks(entry.text);
+  showRowProse(entry, prose, blocks.length > 0);
+  syncCards(entry, blocks);
   if (follow) chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// The final answer for messageId: its prose replaces the streaming row and
-// each code block follows it as a snippet card.
+// The first text replaces "Thinking…" with a short fade, in place.
+function makeRowLive(entry) {
+  if (entry.live) return;
+  entry.live = true;
+  entry.el.classList.remove('thinking');
+  entry.el.classList.add('streaming');
+  const textDiv = entry.el.querySelector('.message-text');
+  if (!textDiv) return;
+  textDiv.classList.add('oc-prose', 'oc-fade-in');
+  textDiv.replaceChildren();
+}
+
+// The row's prose. An answer that is only code keeps just the row's head
+// above its snippet cards.
+function showRowProse(entry, prose, hasBlocks) {
+  const textDiv = entry.el.querySelector('.message-text');
+  if (!textDiv) return;
+  const hasProse = !!(prose && prose.trim());
+  entry.el.classList.toggle('no-text', !hasProse && hasBlocks);
+  patchChildren(textDiv, hasProse ? sanitizeHtml(formatMarkdown(prose)) : '', { math: true });
+}
+
+// Make the snippet cards after the row match `blocks`: new blocks get a
+// card, the growing last block has its text updated, and cards for blocks
+// that are gone (a retry) are removed.
+function syncCards(entry, blocks) {
+  blocks.forEach((block, index) => {
+    const lang = (block.language || 'text').toLowerCase();
+    let card = entry.cards[index];
+    if (!card) {
+      const after = index > 0 ? entry.cards[index - 1] : entry.el;
+      card = buildSnippet(lang, block.code, { rise: false, copy: false });
+      chatMessages.insertBefore(card, after.nextSibling);
+      entry.cards.push(card);
+      return;
+    }
+    const label = card.querySelector('.code-head .oc-label');
+    if (label && label.textContent !== lang) label.textContent = lang;
+    const codeEl = card.querySelector('pre code');
+    if (codeEl && codeEl.textContent !== block.code) {
+      codeEl.className = `language-${lang}`;
+      codeEl.textContent = block.code;
+    }
+  });
+  removeCards(entry, blocks.length);
+}
+
+function removeCards(entry, keep = 0) {
+  while (entry.cards.length > keep) entry.cards.pop().remove();
+}
+
+// Make target's children match `html`, keeping the leading children that
+// are already identical, so the start of a streaming answer is not redrawn.
+function patchChildren(target, html, { math = false } = {}) {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  const fragment = template.content;
+  if (math && window.renderMathInElement) window.renderMathInElement(fragment);
+  const current = Array.from(target.childNodes);
+  const next = Array.from(fragment.childNodes);
+  let same = 0;
+  while (same < current.length && same < next.length && current[same].isEqualNode(next[same])) same++;
+  for (let i = current.length - 1; i >= same; i--) target.removeChild(current[i]);
+  for (let i = same; i < next.length; i++) target.appendChild(next[i]);
+}
+
+// The final answer for messageId: the row keeps its place and becomes the
+// answer's prose, and its snippet cards get copy buttons and highlighting.
 function finishStream(messageId, response) {
   const entry = closeStream(messageId);
   if (!entry) {
@@ -368,17 +437,28 @@ function finishStream(messageId, response) {
 
   const follow = isNearBottom();
   const { text: prose, blocks } = splitCodeBlocks(text);
-  let anchor = entry.el.nextSibling;
-  if (prose && prose.trim().length) {
-    const row = buildMessage(prose, 'assistant', false);
-    entry.el.replaceWith(row);
-    anchor = row.nextSibling;
-    chatHistory.push({ kind: 'message', type: 'assistant', text: prose });
+  if (!(prose && prose.trim()) && !blocks.length) {
+    // Nothing came back: say so instead of leaving an empty row.
+    removeCards(entry);
+    entry.el.replaceWith(buildMessage(EMPTY_ANSWER_MESSAGE, 'error', false));
+    chatHistory.push({ kind: 'message', type: 'error', text: EMPTY_ANSWER_MESSAGE });
     saveHistory();
-  } else {
-    entry.el.remove();
+    if (follow) chatMessages.scrollTop = chatMessages.scrollHeight;
+    return;
   }
-  blocks.forEach(b => addCodeSnippet(b.language, b.code, false, { before: anchor, scroll: false }));
+  makeRowLive(entry);
+  entry.el.classList.remove('streaming');
+  showRowProse(entry, prose, blocks.length > 0);
+  syncCards(entry, blocks);
+  if (prose && prose.trim()) {
+    chatHistory.push({ kind: 'message', type: 'assistant', text: prose });
+  }
+  entry.cards.forEach((card, index) => {
+    const lang = (blocks[index].language || 'text').toLowerCase();
+    finishSnippet(card, blocks[index].code);
+    chatHistory.push({ kind: 'snippet', language: lang, code: blocks[index].code || '' });
+  });
+  saveHistory();
   if (follow) chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
@@ -393,6 +473,7 @@ function failStream(messageId, message) {
     return;
   }
   const follow = isNearBottom();
+  removeCards(entry);
   entry.el.replaceWith(buildMessage(message, 'error', false));
   chatHistory.push({ kind: 'message', type: 'error', text: message });
   saveHistory();
@@ -479,7 +560,7 @@ function handleRecordingStopped() {
   }
 
   hideListeningAnimation();
-  if (wasRecording) addMessage('Stopped Listening', 'system');
+  if (wasRecording) addMessage('Stopped listening', 'system');
 }
 
 function handleTranscription(text) {
@@ -602,13 +683,13 @@ function attachCopy(btn, codeText) {
     }
   });
 }
-// options.before: insert ahead of this node (default: at the end);
-// options.scroll: scroll to the bottom afterwards (default true).
-function addCodeSnippet(language, code, skipPersist = false, options = {}) {
-  if (!chatMessages) return;
+// A snippet card. `rise` plays the entry animation (not for cards that
+// appear while an answer streams); `copy` adds the copy button and
+// highlights the code, which a streaming card gets from finishSnippet.
+function buildSnippet(language, code, { rise = true, copy = true } = {}) {
   const messageDiv = document.createElement('div');
   messageDiv.className = 'message assistant snippet';
-  if (!skipPersist) messageDiv.classList.add('oc-rise');
+  if (rise) messageDiv.classList.add('oc-rise');
   const timeDiv = document.createElement('div');
   timeDiv.className = 'message-time';
   timeDiv.textContent = new Date().toLocaleTimeString();
@@ -619,14 +700,7 @@ function addCodeSnippet(language, code, skipPersist = false, options = {}) {
   const pre = document.createElement('pre');
   const codeEl = document.createElement('code');
   codeEl.className = `language-${lang}`;
-  codeEl.innerHTML = escapeHtml(code || '');
-
-  const copyBtn = document.createElement('button');
-  copyBtn.className = 'copy-btn';
-  copyBtn.type = 'button';
-  copyBtn.setAttribute('aria-label', 'Copy code');
-  copyBtn.textContent = 'Copy';
-  attachCopy(copyBtn, code || '');
+  codeEl.textContent = code || '';
 
   pre.appendChild(codeEl);
 
@@ -637,7 +711,6 @@ function addCodeSnippet(language, code, skipPersist = false, options = {}) {
   const head = document.createElement('div');
   head.className = 'code-head';
   head.appendChild(label);
-  head.appendChild(copyBtn);
 
   const block = document.createElement('div');
   block.className = 'code-block';
@@ -648,10 +721,33 @@ function addCodeSnippet(language, code, skipPersist = false, options = {}) {
 
   messageDiv.appendChild(buildMessageHead('assistant', timeDiv));
   messageDiv.appendChild(textDiv);
-  chatMessages.insertBefore(messageDiv, options.before || null);
-  if (options.scroll !== false) chatMessages.scrollTop = chatMessages.scrollHeight;
+  if (copy) finishSnippet(messageDiv, code);
+  return messageDiv;
+}
 
-  try { if (window.Prism && Prism.highlightElement) { Prism.highlightElement(codeEl); } } catch (_) {}
+// Add the copy button (the head bar is as tall as the button, so nothing
+// moves) and highlight the code. Prism keeps the code's font and line
+// height, so the card does not change size.
+function finishSnippet(card, code) {
+  const head = card.querySelector('.code-head');
+  if (head && !head.querySelector('.copy-btn')) {
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'copy-btn';
+    copyBtn.type = 'button';
+    copyBtn.setAttribute('aria-label', 'Copy code');
+    copyBtn.textContent = 'Copy';
+    attachCopy(copyBtn, code || '');
+    head.appendChild(copyBtn);
+  }
+  const codeEl = card.querySelector('pre code');
+  try { if (codeEl && window.Prism && Prism.highlightElement) { Prism.highlightElement(codeEl); } } catch (_) {}
+}
+
+function addCodeSnippet(language, code, skipPersist = false) {
+  if (!chatMessages) return;
+  const lang = (language || 'text').toLowerCase();
+  chatMessages.appendChild(buildSnippet(lang, code, { rise: !skipPersist, copy: true }));
+  chatMessages.scrollTop = chatMessages.scrollHeight;
 
   if (!skipPersist) {
     chatHistory.push({ kind: 'snippet', language: lang, code: code || '' });
@@ -721,7 +817,7 @@ if (whysperAPI) {
   });
 
   whysperAPI.onSessionCleared(() => {
-    addMessage('Session memory has been cleared', 'system');
+    addMessage('Conversation history cleared', 'system');
   });
 
   // A request failed: say why instead of leaving "Thinking…" forever.
@@ -784,7 +880,7 @@ if (micButton) {
         }
       }
     } catch (error) {
-      addMessage("Error in recognizing speech", 'error');
+      addMessage('Voice input could not start. Check the microphone permission and the speech settings.', 'error');
     }
   });
 }
@@ -861,7 +957,5 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Initialize
-if (!chatHistory || chatHistory.length === 0) {
-  addMessage('Recording in Progress. press Alt+R to stop recording.', 'system');
-}
+// The empty message list shows a hint (see applyMicVisibility).
+applyMicVisibility();
