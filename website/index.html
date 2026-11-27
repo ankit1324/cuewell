@@ -344,7 +344,7 @@
             <p class="card-label">04 / Voice, locally transcribed</p>
             <svg class="card-ic" aria-hidden="true"><use href="#i-mic"/></svg>
             <h3 class="h3">Ask out loud</h3>
-            <p>Press <span class="kbd-group"><kbd class="sym">⌥</kbd><kbd>R</kbd></span> and speak. Whisper transcribes on your computer, and only the text goes to your AI provider. Start and stop by hand, or let pause detection end the question.</p>
+            <p>Press <span class="kbd-group"><kbd class="sym">⌥</kbd><kbd>R</kbd></span> and speak in English, Hindi or Hinglish. The built-in whisper.cpp engine transcribes on your computer, with no Python to install, and only the text goes to your AI provider. Start and stop by hand, or let pause detection end the question.</p>
           </article>
 
           <article class="card reveal">
@@ -403,7 +403,9 @@
             </div>
             <ul class="ev-list">
               <li><strong>Screenshot</strong> of the display under your pointer, on any monitor. The image goes to the model directly, with no OCR step.</li>
-              <li><strong>Voice</strong> with local Whisper on your computer, or Azure Speech. Pause detection or manual start and stop.</li>
+              <li><strong>Voice</strong> transcribed on your computer by the built-in whisper.cpp engine, or by Azure Speech. Pause detection or manual start and stop.</li>
+              <li><strong>English, Hindi and Hinglish</strong> voice. Hinglish transcripts are written in Roman script.</li>
+              <li><strong>No Python needed</strong> for local voice: download a speech model once, Small (190 MB, best for Hindi and Hinglish) or Base (60 MB, faster).</li>
               <li><strong>Typed chat</strong> in its own window.</li>
               <li><strong>Follow-ups keep context:</strong> typed and voice questions include recent history from the session.</li>
             </ul>
@@ -458,7 +460,7 @@
             </ul>
             <ul class="ev-list">
               <li><strong>Ollama</strong> runs a model on your own machine, with no key.</li>
-              <li><strong>Guided setup</strong> tests the connection before you continue, and can install local Whisper for you.</li>
+              <li><strong>Guided setup</strong> tests the connection before you continue, and downloads the speech model for local voice.</li>
               <li><strong>Switch any time</strong>: provider, key and model in Settings, with Test connection there too.</li>
             </ul>
           </section>
@@ -627,7 +629,7 @@
               </tr>
               <tr role="row">
                 <th scope="row" role="rowheader">Microphone audio</th>
-                <td role="cell" data-label="Where it lives">Transcribed on your computer by local Whisper</td>
+                <td role="cell" data-label="Where it lives">Transcribed on your computer by the built-in whisper.cpp engine</td>
                 <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--local">Stays</span> only the text transcript is sent. If you choose Azure Speech instead, audio goes to Azure.</td>
               </tr>
               <tr role="row">
@@ -708,7 +710,15 @@
           </details>
           <details>
             <summary>What does it send, and to whom?</summary>
-            <p>Only the AI provider you choose receives your question or transcript, screenshots you capture, recent history and your interview context. With local Whisper, audio is transcribed on your computer. See <a href="#data">Where your data goes</a> for the full list.</p>
+            <p>Only the AI provider you choose receives your question or transcript, screenshots you capture, recent history and your interview context. With local voice, audio is transcribed on your computer and never leaves it. See <a href="#data">Where your data goes</a> for the full list.</p>
+          </details>
+          <details>
+            <summary>Does voice need Python or an internet connection?</summary>
+            <p>No Python. Cuewell includes the whisper.cpp speech engine. The first time, you download one speech model from the setup wizard or Settings: Small (190 MB, recommended, best for Hindi and Hinglish) or Base (60 MB, faster). After that, voice is transcribed on your computer, even offline. Your AI provider still needs a connection, unless you use Ollama.</p>
+          </details>
+          <details>
+            <summary>Which languages does voice understand?</summary>
+            <p>English, Hindi and Hinglish, or Auto-detect. Pick Hinglish when you mix Hindi and English in one sentence: the transcript comes out in Roman script, such as “Haan, main is approach ko explain karta hoon”, not Devanagari.</p>
           </details>
           <details>
             <summary>Is it allowed in interviews?</summary>
@@ -717,7 +727,7 @@
           <details>
             <summary>How do I install it?</summary>
             <p data-dl-live hidden>Pick the file for your system under <a href="#download">Download</a> and open it. The builds are not code-signed yet, so the first launch shows a security warning; each download card says how to get past it. You can also build from source with <code>./setup.sh</code> (macOS, Linux) or <code>setup.ps1</code> (Windows).</p>
-            <p data-dl-soon>Packaged downloads for macOS, Windows and Linux are coming soon. Today you can build it from source: clone the repository and run <code>./setup.sh</code> on macOS or Linux, or <code>setup.ps1</code> in PowerShell on Windows. The script installs dependencies, sets up local Whisper and launches the app. You need Node.js 22.12 or newer.</p>
+            <p data-dl-soon>Packaged downloads for macOS, Windows and Linux are coming soon. Today you can build it from source: clone the repository and run <code>./setup.sh</code> on macOS or Linux, or <code>setup.ps1</code> in PowerShell on Windows. The script installs dependencies, fetches the local voice engine and launches the app. You need Node.js 22.12 or newer; on macOS, building the voice engine also needs cmake and the Xcode Command Line Tools.</p>
           </details>
           <details>
             <summary>How is it related to OpenCluely?</summary>

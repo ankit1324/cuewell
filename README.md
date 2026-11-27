@@ -15,7 +15,7 @@ Cuewell is free and open source (Apache-2.0), built on Electron, and maintained 
 - **About you.** Settings > About you holds your name, current title and company, years of experience, skills, projects, education, location, relocation, notice period, expected salary, languages, and the tone and language for answers. Every field is optional. Answers use these real details instead of blanks like [X years] and never make up employers, numbers or degrees. They are stored with the interview context in `profile.json` and sent to your AI provider with every question. **Clear all** removes them.
 - **Three ways to ask.**
   - Screenshot: capture the display under the mouse pointer. The image goes to the AI provider directly, with no OCR step.
-  - Voice: local Whisper by default, or Azure Speech. Capture is automatic (pause detection) or manual start/stop.
+  - Voice: transcribed on your computer by the built-in whisper.cpp engine, or by Azure Speech. Local voice needs no Python and handles English, Hindi and Hinglish (written in Roman script). Capture is automatic (pause detection) or manual start/stop.
   - Chat: type a question. Typed and voice questions include recent conversation history, so follow-ups keep their context.
 - **Live answers.** Answers stream into the answer panel, the chat or both (configurable for voice). Code blocks get syntax highlighting and a copy button.
 - **Your choice of AI provider.** Gemini (default), Claude, OpenAI, OpenRouter, Groq, DeepSeek or a local Ollama model.
@@ -23,7 +23,7 @@ Cuewell is free and open source (Apache-2.0), built on Electron, and maintained 
 
 ## Quick start
 
-You need Node.js 22.12 or newer. For local voice you also need Python 3.10 or newer (see [Requirements](#requirements)).
+You need Node.js 22.12 or newer. Local voice needs no Python (see [Local voice](#local-voice)).
 
 **macOS and Linux:**
 
@@ -41,13 +41,13 @@ cd cuewell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-Both scripts check your Node version, create `.env` from `env.example` (readable by your account only), install Node dependencies, set up local Whisper in `.venv-whisper`, run a short speech test and start the app. If Python is missing, they skip Whisper and tell you how to install it; you can also set Whisper up later from the onboarding wizard.
+Both scripts check your Node version, create `.env` from `env.example` (readable by your account only), install Node dependencies, fetch the local voice engine (whisper.cpp) into `vendor/whisper/` with `npm run fetch:whisper`, and start the app. On macOS the engine is compiled from source the first time, which needs cmake and the Xcode Command Line Tools (`xcode-select --install`, `brew install cmake`). If the engine cannot be set up, the scripts say why and carry on without local voice.
 
 On first launch, the onboarding wizard opens. It walks you through:
 
 1. Choosing an AI provider and entering its key (or the Ollama server URL), with a **Test connection** button.
-2. Choosing a speech provider: local Whisper, Azure Speech, or skip.
-3. For Whisper: detecting it, installing it into a virtual environment if needed, and downloading a model.
+2. Choosing a speech provider: local voice (built in), Azure Speech, or skip.
+3. For local voice: downloading a speech model once, with progress and a Cancel button, and choosing the voice language.
 
 After setup, start the app with `npm start` (or `npm run dev`, which also disables the GPU). Both work from any terminal, including PowerShell and `cmd.exe`.
 
@@ -56,7 +56,8 @@ After setup, start the app with `npm start` (or `npm run dev`, which also disabl
 ```bash
 ./setup.sh --no-run               # Set up only, do not launch
 ./setup.sh --ci                   # Use npm ci instead of npm install
-./setup.sh --skip-whisper         # Skip the local Whisper setup
+./setup.sh --skip-whisper         # Skip the local voice engine setup
+./setup.sh --python-whisper       # Advanced: install Python Whisper instead (see Local voice)
 ./setup.sh --install-system-deps  # Linux: install arecord (alsa-utils) for voice input
 ./setup.sh --build                # Build a distributable for this OS, then start the app
 ./setup.sh --build --no-run       # Build only
@@ -69,12 +70,13 @@ After setup, start the app with `npm start` (or `npm run dev`, which also disabl
 ```powershell
 .\setup.ps1 -NoRun          # Set up only, do not launch
 .\setup.ps1 -Ci             # Use npm ci instead of npm install
-.\setup.ps1 -SkipWhisper    # Skip the local Whisper setup
+.\setup.ps1 -SkipWhisper    # Skip the local voice engine setup
+.\setup.ps1 -PythonWhisper  # Advanced: install Python Whisper instead (see Local voice)
 .\setup.ps1 -Build -NoRun   # Build the installer and portable app only
 .\setup.ps1 -Help           # Show all options
 ```
 
-`setup.ps1` finds Python through the `py` launcher, preferring 3.12, then 3.11, 3.10 and 3.13. Install Python from [python.org](https://www.python.org/downloads/) (turn on "Add python.exe to PATH") or with `winget install Python.Python.3.12`. If PowerShell refuses to run the script, the `-ExecutionPolicy Bypass` form above runs it without changing your system policy.
+If PowerShell refuses to run the script, the `-ExecutionPolicy Bypass` form above runs it without changing your system policy.
 
 ## Requirements
 
@@ -84,7 +86,7 @@ After setup, start the app with `npm start` (or `npm run dev`, which also disabl
 | macOS | 13 (Ventura) or later |
 | Windows | 10 or later, 64-bit |
 | Linux | 64-bit, X11 or XWayland. Privacy mode has no effect (see below) |
-| Local Whisper | Python 3.10 or newer (3.12 recommended), about 3 to 5 GB of disk for Whisper and its dependencies |
+| Local voice | Nothing to install. A one-time speech model download: Small (190 MB) or Base (60 MB). Available on macOS (Apple silicon and Intel), 64-bit Windows and 64-bit (x64) Linux |
 | Azure Speech | An Azure Speech resource key and region |
 
 How each system records the microphone:
@@ -95,7 +97,26 @@ How each system records the microphone:
 | Windows | Built in (the app's own audio capture) | Microphone access on in Settings > Privacy & security > Microphone |
 | Linux | `arecord` (alsa-utils), or `sox` | `sudo apt install alsa-utils` (the `.deb` installs it for you). Without either, voice input shows an error that names the missing package. |
 
-ffmpeg is usually not needed: the app records PCM WAV, and its Python Whisper worker reads it directly. If that worker is unavailable, the app falls back to the `whisper` command-line tool, which needs ffmpeg.
+ffmpeg is not needed: the app records PCM WAV, which whisper.cpp reads directly. Only the advanced Python Whisper setup can need it, when its worker is unavailable and the app falls back to the `whisper` command-line tool.
+
+## Local voice
+
+Cuewell includes [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (build `b5907`), so voice runs on your computer with no Python, pip or virtual environment. The engine needs a speech model, which you download once from the onboarding wizard or Settings > Voice:
+
+| Model | Download | Use it for |
+|---|---|---|
+| Small (default) | 190 MB | Recommended. Best for Hindi and Hinglish |
+| Base | 60 MB | Faster and smaller, less accurate |
+
+Models come from `huggingface.co` over HTTPS. Cuewell checks each file's size and SHA-256 before it uses it, and resumes a stopped download when the server allows it. They are stored in the app data folder (or `WHISPER_MODEL_DIR`). After the download, voice works offline.
+
+Voice language is Auto-detect, English, Hindi or Hinglish. Hinglish is for Hindi and English mixed in one sentence: the transcript is written in Roman script ("Haan, main is approach ko explain karta hoon"), not Devanagari.
+
+While you use voice, Cuewell runs whisper.cpp as a background process that listens only on `127.0.0.1` (this computer). It stops the process after a while without voice questions, starts it again on the next one, and stops it when you quit.
+
+Installed builds include the engine. When you run from source, `setup.sh` and `setup.ps1` fetch it, or run `npm run fetch:whisper` yourself. It goes into `vendor/whisper/<platform>-<arch>/`, which git ignores. On Windows and Linux this downloads the official whisper.cpp release and checks its SHA-256. On macOS it compiles whisper.cpp from the pinned source, which needs cmake and the Xcode Command Line Tools. Other systems, such as Linux on ARM, have no built-in engine; Settings says so, and Azure Speech still works.
+
+**Advanced: existing Python Whisper setups keep working.** If your `.env` already points `WHISPER_COMMAND` at a working Python openai-whisper install, Cuewell keeps using it until you switch to the built-in engine in Settings > Voice. To set one up from scratch, run `./setup.sh --python-whisper` or `.\setup.ps1 -PythonWhisper`. It needs Python 3.10 or newer (3.12 recommended) and about 3 to 5 GB of disk, installs into `.venv-whisper`, and sets `WHISPER_ENGINE=python`. On Windows, `setup.ps1` finds Python through the `py` launcher, preferring 3.12, then 3.11, 3.10 and 3.13; install it from [python.org](https://www.python.org/downloads/) (turn on "Add python.exe to PATH") or with `winget install Python.Python.3.12`.
 
 ## Building
 
@@ -105,7 +126,7 @@ npm run build:win     # NSIS installer and portable .exe (x64)
 npm run build:linux   # AppImage and .deb (x64)
 ```
 
-Output goes to `dist/`. `./setup.sh --build --no-run` (or `.\setup.ps1 -Build -NoRun` on Windows) runs the right one for your OS. Windows and Linux builds can also be made on a Mac; macOS builds need a Mac.
+Output goes to `dist/`. Each build fetches the whisper.cpp engine for its target first and bundles it outside the app's asar archive. `./setup.sh --build --no-run` (or `.\setup.ps1 -Build -NoRun` on Windows) runs the right one for your OS. Windows and Linux builds can also be made on a Mac; macOS builds need a Mac.
 
 | System | Files in `dist/` |
 |---|---|
@@ -113,7 +134,7 @@ Output goes to `dist/`. `./setup.sh --build --no-run` (or `.\setup.ps1 -Build -N
 | Windows | `Cuewell-<version>-win-x64-setup.exe` (installer), `Cuewell-<version>-win-x64-portable.exe` (no install) |
 | Linux | `Cuewell-<version>-linux-amd64.deb`, `Cuewell-<version>-linux-x86_64.AppImage` |
 
-The Windows installer installs for the current user only (no admin prompt), lets you choose the folder, adds Start menu and desktop shortcuts, and can start Cuewell when it finishes. Uninstalling keeps your settings, keys and Whisper files in the app data folder.
+The Windows installer installs for the current user only (no admin prompt), lets you choose the folder, adds Start menu and desktop shortcuts, and can start Cuewell when it finishes. Uninstalling keeps your settings, keys and speech models in the app data folder.
 
 On Debian and Ubuntu, install the `.deb` with `sudo apt install ./Cuewell-<version>-linux-amd64.deb`; it adds Cuewell to the app menu and the `cuewell` command. For the AppImage, run `chmod +x Cuewell-<version>-linux-x86_64.AppImage`, then run the file. Some distributions need `libfuse2` for AppImages.
 
@@ -206,10 +227,9 @@ WINDOW_GAP=10                # pixels, 0 to 100
 
 # Speech: whisper (local) or azure
 SPEECH_PROVIDER=whisper
-WHISPER_COMMAND=whisper
-WHISPER_MODEL=small
-WHISPER_LANGUAGE=auto
-WHISPER_DEVICE=auto          # auto | cpu | cuda
+WHISPER_ENGINE=whispercpp    # whispercpp (built in) | python (advanced)
+WHISPER_CPP_MODEL=small-q5_1 # small-q5_1 (Small, 190 MB) | base-q5_1 (Base, 60 MB)
+WHISPER_LANGUAGE=auto        # auto | en | hi | hinglish
 WHISPER_CAPTURE_MODE=vad     # vad (pause detection) | manual
 WHISPER_RESPONSE_TARGET=both # both | chat | overlay
 WHISPER_MANUAL_MAX_MS=90000
@@ -218,7 +238,7 @@ AZURE_SPEECH_KEY=
 AZURE_SPEECH_REGION=
 ```
 
-See `env.example` for the full list. `setup.sh` configures Whisper with the `base` model and English; change either in Settings.
+See `env.example` for the full list, including the keys for the advanced Python Whisper setup (`WHISPER_COMMAND`, `WHISPER_MODEL`, `WHISPER_DEVICE`, `WHISPER_PYTHON`). `setup.sh --python-whisper` configures that setup with its `base` model and English; change either in Settings.
 
 Settings also has:
 
@@ -239,7 +259,7 @@ Cuewell has no server and no account, and sends no telemetry or analytics. Your 
 | Screenshot (the whole display under the mouse pointer, including anything else on it) | In memory while the request runs | Your AI provider. Sent without conversation history. |
 | Typed question or voice transcript | In memory for the session | Your AI provider, with recent history: up to 14 earlier messages for typed questions, up to 8 for voice |
 | Interview context (role, company, job description, resume, notes) | `profile.json` in the app data folder (owner-only on macOS and Linux) | Your AI provider, with every question (typed, voice and screenshot) |
-| Microphone audio, local Whisper | A temporary WAV file in the system temp folder, deleted after transcription | Nowhere. Only the text transcript goes to the AI provider. |
+| Microphone audio, local voice | In memory, or briefly in a temporary WAV file in the system temp folder that is deleted after transcription | Nowhere. The local engine listens only on `127.0.0.1`. Only the text transcript goes to the AI provider. |
 | Microphone audio, Azure Speech | Not saved by the app | Microsoft (Azure Speech) |
 | API keys | `.env` (owner-only on macOS and Linux) | Only the provider each key belongs to |
 | Conversation history | In memory only. Cleared on restart or with `Cmd/Ctrl + Shift + \`. The chat window's clear button clears only the messages it shows. | Recent part, as above |
@@ -247,7 +267,7 @@ Cuewell has no server and no account, and sends no telemetry or analytics. Your 
 
 With Ollama on `localhost`, AI requests stay on your machine. The built-in endpoints for the cloud providers use HTTPS.
 
-Setting up local Whisper also downloads Python packages from PyPI and model weights from OpenAI's download servers. No questions, audio or keys are sent with those downloads.
+Downloading a speech model fetches one file from `huggingface.co` (served from its `hf.co` download hosts). Running from source, `npm run fetch:whisper` downloads whisper.cpp from GitHub. The advanced Python Whisper setup downloads Python packages from PyPI and model weights from OpenAI's download servers. No questions, audio or keys are sent with any of these downloads.
 
 ## Privacy mode
 
@@ -296,7 +316,13 @@ Start Ollama (the app, or `ollama serve`) and check the server URL in Settings. 
 Groq and DeepSeek accept text only. Switch to Gemini, Claude, OpenAI, OpenRouter or Ollama for screenshots.
 
 **The mic button is missing.**
-No speech provider is available. Run `./setup.sh` again, finish the Whisper step in onboarding, or enter Azure Speech credentials in Settings.
+No speech provider is ready. Download a speech model in Settings > Voice, or enter Azure Speech credentials there. When running from source, also run `npm run fetch:whisper` (or `./setup.sh` again).
+
+**The speech model download fails or stops.**
+Check your network connection and choose **Retry** in Settings > Voice; a stopped download resumes where it left off when the server allows it. A file that fails the size or SHA-256 check is deleted, and the next try starts over. Networks that block `huggingface.co` or `*.hf.co` prevent the download; use another network once, or Azure Speech.
+
+**Settings says local voice is not available.**
+This build or system has no whisper.cpp engine. Installed builds for macOS, 64-bit Windows and 64-bit (x64) Linux include it. From source, run `npm run fetch:whisper` and read its error (on macOS it needs cmake and the Xcode Command Line Tools). Azure Speech works everywhere.
 
 **A shortcut does not work.**
 Another app may own it; check the log in `~/.Cuewell/logs`. `Cmd/Ctrl + ,` and the arrow shortcuts only work while a Cuewell window has focus.
@@ -330,14 +356,15 @@ settings.html             Settings
 onboarding.html/.js       First-run wizard
 prompt-loader.js          Builds the system prompt: mode, answer format, length, context
 prompts/                  Mode prompts (auto, dsa, technical, system-design, behavioral, hr)
-src/core/                 Config, logging, first run, profile store, menus, tray icon, updates, Whisper installer
+src/core/                 Config, logging, first run, profile store, menus, tray icon, updates, speech models, whisper.cpp binary lookup, Python Whisper installer
 src/managers/             Window and session (conversation history) managers
-src/services/             Screen capture, LLM, speech and Whisper worker services
+src/services/             Screen capture, LLM, speech, whisper.cpp engine and Python Whisper worker services
 src/services/providers/   Claude and OpenAI-compatible provider adapters
 src/ui/                   Renderer scripts for each window
 lib/                      Markdown rendering and HTML sanitizing
-scripts/                  Start script, Whisper worker (Python), speech test, installer hook
+scripts/                  Start script, whisper.cpp fetch script, Python Whisper worker, speech test, installer hook
 assests/                  Icons, fonts and vendored Font Awesome (the folder name is spelled this way)
+vendor/whisper/           whisper.cpp engine per platform, fetched by npm run fetch:whisper (git-ignored)
 website/                  Landing page; not included in app builds
 setup.sh, setup.ps1       Setup scripts (macOS/Linux, Windows)
 env.example               Configuration template

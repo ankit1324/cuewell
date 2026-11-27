@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Set up Cuewell on Windows: check Node.js, create .env, install Node
-  dependencies, optionally set up local Whisper, then start the app.
+  dependencies, fetch the built-in voice engine, then start the app.
 
 .DESCRIPTION
   The Windows counterpart of setup.sh. Run it from the project folder:
@@ -12,9 +12,13 @@
     1. Check that Node.js 22.12 or newer and npm are installed.
     2. Create .env from env.example if it does not exist.
     3. Install Node dependencies (npm install, or npm ci with -Ci).
-    4. Set up local Whisper in .venv-whisper with Python 3.10 or newer
-       (Python 3.12 preferred, found through the py launcher). Skip with
-       -SkipWhisper.
+    4. Fetch the built-in local voice engine (whisper.cpp) into
+       vendor\whisper with npm run fetch:whisper. It needs no Python. Skip
+       with -SkipWhisper. The speech model (Small 190 MB or Base 60 MB)
+       downloads once from the Cuewell setup wizard or Settings > Voice.
+       Advanced: -PythonWhisper installs the Python openai-whisper engine
+       into .venv-whisper instead (Python 3.10 or newer, 3.12 preferred,
+       found through the py launcher; 3 to 5 GB of disk).
     5. Optionally build the Windows installer (-Build).
     6. Start Cuewell (skip with -NoRun).
 
@@ -26,6 +30,8 @@
   .\setup.ps1 -SkipWhisper -NoRun
 .EXAMPLE
   .\setup.ps1 -Build -NoRun
+.EXAMPLE
+  .\setup.ps1 -PythonWhisper
 #>
 [CmdletBinding()]
 param(
@@ -35,8 +41,10 @@ param(
   [switch]$NoRun,
   # Use 'npm ci' instead of 'npm install'.
   [switch]$Ci,
-  # Skip the local Whisper setup.
+  # Skip the local voice engine setup.
   [switch]$SkipWhisper,
+  # Advanced: install the Python openai-whisper engine instead of whisper.cpp.
+  [switch]$PythonWhisper,
   # Show help and exit.
   [switch]$Help
 )
@@ -105,7 +113,7 @@ function Invoke-Checked {
 }
 
 # Run a script block without API keys, tokens or secrets in the environment,
-# so pip, Python and Whisper never see them. They are restored afterwards.
+# so downloads, pip, Python and Whisper never see them. They are restored afterwards.
 # Returns the block's output.
 function Invoke-WithoutSecrets([scriptblock]$Block) {
   $saved = @{}
@@ -260,17 +268,69 @@ function Find-Python {
   return $null
 }
 
-function Initialize-Whisper {
-  if ($SkipWhisper) {
-    Write-Host 'Skipping local Whisper setup.'
-    return
-  }
-  if ($Build -and $NoRun) {
-    Write-Host 'Skipping local Whisper setup (build only).'
+# Clear the env.example Azure placeholders, but never a real Azure key.
+function Clear-AzurePlaceholders {
+  if ((Get-EnvValue 'AZURE_SPEECH_KEY') -eq 'your_azure_speech_key_here') { Set-EnvValue 'AZURE_SPEECH_KEY' '' }
+  if ((Get-EnvValue 'AZURE_SPEECH_REGION') -eq 'your_azure_region_here') { Set-EnvValue 'AZURE_SPEECH_REGION' '' }
+}
+
+# Fetch the pinned whisper.cpp whisper-server for this machine into
+# vendor\whisper\<platform>-<arch> with the project's own script. It skips the
+# work when a valid binary is already there. A failure only disables local
+# voice; setup carries on.
+function Initialize-WhisperCpp {
+  # No double quotes in the script: Windows PowerShell 5.1 strips them from
+  # native command arguments.
+  $hasScript = Invoke-Native 'node' @('-e', 'const s = require(''./package.json'').scripts || {}; process.exit(s[''fetch:whisper''] ? 0 : 1)')
+  if ($hasScript.Code -ne 0) {
+    Write-Warn "This checkout has no 'npm run fetch:whisper' script, so the built-in voice engine was not set up."
+    Write-Host 'Update the repository and run this script again.'
     return
   }
 
-  Write-Step 'Setting up local Whisper'
+  Write-Step 'Setting up the built-in voice engine (whisper.cpp)'
+  $fetchCode = Invoke-WithoutSecrets {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      # Out-Host shows the download progress live instead of returning it.
+      & $Npm run fetch:whisper | Out-Host
+      $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $previous
+    }
+  }
+  if ($fetchCode -ne 0) {
+    Write-Warn 'The built-in voice engine could not be set up, so local voice is off.'
+    Write-Host 'Check your network connection. Only 64-bit (x64) Windows is supported.'
+    Write-Host 'Then run this script again, or use Azure Speech in Settings > Voice.'
+    return
+  }
+  Clear-AzurePlaceholders
+  Write-Host 'The built-in voice engine is ready.'
+  Write-Host 'Cuewell downloads a speech model once (Small 190 MB or Base 60 MB) from the setup wizard or Settings > Voice.'
+}
+
+function Initialize-Voice {
+  if ($SkipWhisper) {
+    Write-Host 'Skipping local voice setup.'
+    return
+  }
+  if ($Build -and $NoRun) {
+    # The build scripts fetch the engine they bundle.
+    Write-Host 'Skipping local voice setup (build only).'
+    return
+  }
+  if ($PythonWhisper) {
+    Initialize-PythonWhisper
+  } else {
+    Initialize-WhisperCpp
+  }
+}
+
+# Advanced (-PythonWhisper): install openai-whisper into a Python venv.
+function Initialize-PythonWhisper {
+  Write-Step 'Setting up Python Whisper'
   $venvPython = Join-Path $WhisperVenvDir 'Scripts\python.exe'
   if (-not (Test-Path -LiteralPath $venvPython)) {
     $python = Find-Python
@@ -278,7 +338,8 @@ function Initialize-Whisper {
       Write-Warn 'Python 3.10 or newer was not found, so local Whisper was not set up.'
       Write-Host 'Install Python 3.12 from https://www.python.org/downloads/ (turn on "Add python.exe to PATH"),'
       Write-Host 'or run: winget install Python.Python.3.12'
-      Write-Host 'Then run this script again, or set up Whisper from the Cuewell setup wizard.'
+      Write-Host 'Then run this script with -PythonWhisper again, or run it without -PythonWhisper'
+      Write-Host 'to use the built-in engine, which needs no Python.'
       return
     }
     Write-Host "Using Python $($python.Version): $($python.Command) $($python.Arguments -join ' ')"
@@ -321,15 +382,14 @@ function Initialize-Whisper {
   # A relative path, like setup.sh writes: the app resolves it against the
   # project folder, and it avoids quoting problems with spaces in user names.
   Set-EnvValue 'SPEECH_PROVIDER' 'whisper'
+  Set-EnvValue 'WHISPER_ENGINE' 'python'
   Set-EnvValue 'WHISPER_COMMAND' "$WhisperVenvDir\Scripts\python.exe -m whisper"
   Set-EnvValue 'WHISPER_MODEL_DIR' $WhisperModelDir
   Set-EnvValue 'WHISPER_MODEL' $WhisperModel
   Set-EnvValue 'WHISPER_LANGUAGE' $WhisperLanguage
   Set-EnvValue 'WHISPER_SEGMENT_MS' $WhisperSegmentMs
-  # Clear the env.example placeholders, but never a real Azure key.
-  if ((Get-EnvValue 'AZURE_SPEECH_KEY') -eq 'your_azure_speech_key_here') { Set-EnvValue 'AZURE_SPEECH_KEY' '' }
-  if ((Get-EnvValue 'AZURE_SPEECH_REGION') -eq 'your_azure_region_here') { Set-EnvValue 'AZURE_SPEECH_REGION' '' }
-  Write-Host 'Local Whisper is set up.'
+  Clear-AzurePlaceholders
+  Write-Host 'Python Whisper is set up.'
 
   Write-Step 'Running the speech test'
   Invoke-WithoutSecrets {
@@ -353,7 +413,7 @@ try {
   Test-NodeVersion
   Initialize-EnvFile
   Install-NodeDependencies
-  Initialize-Whisper
+  Initialize-Voice
 
   if ($Build) {
     Write-Step 'Building the Windows installer and portable app (npm run build:win)'
