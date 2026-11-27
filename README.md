@@ -27,7 +27,7 @@ You need Node.js 22.12 or newer. For local voice you also need Python 3.10 or ne
 **macOS and Linux:**
 
 ```bash
-git clone <repo-url>   # TODO(owner): replace with the repository URL
+git clone https://github.com/ankit1324/cuewell.git
 cd cuewell
 ./setup.sh
 ```
@@ -35,7 +35,7 @@ cd cuewell
 **Windows (PowerShell):**
 
 ```powershell
-git clone <repo-url>   # TODO(owner): replace with the repository URL
+git clone https://github.com/ankit1324/cuewell.git
 cd cuewell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```

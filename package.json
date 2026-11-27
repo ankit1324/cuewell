@@ -2,7 +2,7 @@
   "name": "cuewell",
   "version": "1.0.0",
   "description": "AI interview copilot",
-  "homepage": "https://cuewell.ai/",
+  "homepage": "https://github.com/ankit1324/cuewell",
   "desktopName": "cuewell.desktop",
   "main": "main.js",
   "scripts": {
@@ -224,5 +224,12 @@
     "portable": {
       "artifactName": "Cuewell-${version}-win-${arch}-portable.${ext}"
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ankit1324/cuewell.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ankit1324/cuewell/issues"
   }
 }

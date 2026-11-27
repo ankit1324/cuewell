@@ -15,10 +15,9 @@ const path = require('path');
 // stand-in that reports every URL as https:.
 const { URL } = require('url');
 
-// TODO(owner): set to the GitHub "owner/repo" that publishes Cuewell
-// releases. While this is the placeholder, update checks are skipped and the
-// update and problem-report menu items are hidden.
-const UPDATE_REPO = 'TODO-owner/cuewell';
+// The GitHub "owner/repo" that publishes Cuewell releases. Update checks and
+// the Report a Problem link use it.
+const UPDATE_REPO = 'ankit1324/cuewell';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 10000;
