@@ -119,8 +119,7 @@
             "x64"
           ]
         }
-      ],
-      "sign": null
+      ]
     },
     "linux": {
       "target": [
