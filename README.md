@@ -1,226 +1,290 @@
-<div align="center">
-
 # Super Interview
 
-**The invisible AI interview copilot.**
+A desktop AI interview copilot for practice, mock interviews and conversations where AI help is allowed. Ask by screenshot, voice or typed chat, and read a structured answer as it streams in, starting with one line you can say first.
 
-Real-time AI help on a stealth overlay that screen sharing cannot see. Ask by voice or screenshot, and get clear answers that stream in as you need them.
+Super Interview is free and open source (Apache-2.0), built on Electron, and maintained by Ankit Chaudhary. You bring your own AI provider and key. A landing page lives in [`website/`](website/index.html).
 
-<a href="#download">Download</a> &nbsp;|&nbsp;
-<a href="#quick-start">Quick start</a> &nbsp;|&nbsp;
-<a href="#how-it-works">How it works</a>
+## Features
 
-</div>
-
-## Demo
-
-https://github.com/user-attachments/assets/896a7140-1e85-405d-bfbe-e05c9f3a816b
-
-## What it is
-
-Super Interview is a desktop app for technical interviews and practice. It places a small overlay on your screen that recording and conferencing tools do not capture. You can speak a question or take a screenshot, and the AI answers in real time. The answer streams into a floating window and an optional chat panel, with clean code blocks and syntax highlighting.
-
-It is free and open source. Processing stays on your machine, and the only thing that leaves your device is the request you send to the AI provider.
-
-## Highlights
-
-- **Invisible overlay.** On macOS and Windows the windows are excluded from screen capture by apps that use the OS capture APIs (macOS ScreenCaptureKit, Windows Graphics Capture). Some older capture paths, for example Chromium 122-era screen sharing, still capture them on macOS, and Linux has no protection.
-- **Flexible local voice.** Choose manual start/stop capture or automatic voice-activity detection without fixed-timer sentence cuts.
-- **Configurable streamed answers.** Route voice replies to chat, the floating overlay, or both.
-- **Your choice of AI provider.** Gemini, Claude, OpenAI, OpenRouter, Groq, DeepSeek or Ollama, chosen in Settings. Groq and DeepSeek do not accept screenshots.
-- **Direct image analysis.** Screenshots go straight to the AI provider for visual reasoning, with no slow OCR step in between.
-- **Session memory.** Typed and voice questions include recent conversation history (up to the last 15 events), so follow-ups keep their context. Screenshots are sent without history, and that history is cleared when the app restarts.
-- **Language aware.** Tailored answers for C++, C, Python, Java, and JavaScript.
-- **Stealthy by design.** Runs under ordinary system names, ships with no telemetry, and keeps your session local.
-- **Cross platform.** Runs on macOS, Windows and Linux. Build from source with `./setup.sh`.
-
-## Download
-
-There are no pre-built installers for this fork. Build from source with `./setup.sh`, as described in [Quick start](#quick-start).
+- **Small overlay.** A toolbar, a floating answer panel, a chat window, Settings and a first-run onboarding wizard. Windows stay on top, and click-through mode lets clicks pass to the app underneath.
+- **Interview modes.** Auto (the default) works out the question type: coding, technical theory, system design, behavioral, HR, managerial or situational, puzzles and case questions. You can also pin a mode: Coding, Technical, System design, Behavioral or HR.
+- **One-line answer first.** Every answer opens with one sentence you can say right away, then the details. Answer length is Auto, Short, Standard or Detailed. Auto is Short for voice and Standard for typed and screenshot questions.
+- **Coding language.** In Auto and Coding modes, code is written in C++, C, Python, Java or JavaScript, as chosen on the toolbar or in Settings.
+- **Interview context.** Add your target role, company, job description, resume and notes in Settings. They are stored in `profile.json` in the app data folder and sent to your AI provider with every question, so answers fit the job and your experience.
+- **Three ways to ask.**
+  - Screenshot: capture the display under the mouse pointer. The image goes to the AI provider directly, with no OCR step.
+  - Voice: local Whisper by default, or Azure Speech. Capture is automatic (pause detection) or manual start/stop.
+  - Chat: type a question. Typed and voice questions include recent conversation history, so follow-ups keep their context.
+- **Live answers.** Answers stream into the answer panel, the chat or both (configurable for voice). Code blocks get syntax highlighting and a copy button.
+- **Your choice of AI provider.** Gemini (default), Claude, OpenAI, OpenRouter, Groq, DeepSeek or a local Ollama model.
+- **Privacy mode.** On macOS and Windows the windows are hidden from most screen capture and screen sharing. See [Privacy mode](#privacy-mode) for the limits.
 
 ## Quick start
 
-If you would rather build from source, three steps are all it takes.
-
-1. Clone the repository.
-
-   ```bash
-   git clone <your-repo-url>
-   cd super-interview
-   ```
-
-2. Run the setup script.
-
-   ```bash
-   ./setup.sh
-   ```
-
-   The script installs Node dependencies, creates your `.env` from the example, sets up a local Whisper virtual environment, points the config at it, and launches the app.
-
-3. Add your Gemini key.
-
-   On first launch the Settings window opens automatically. Get a free key from [Google AI Studio](https://aistudio.google.com/) and paste it in, or edit `.env` directly. Both work: keys saved in Settings take effect right away, and direct edits to `.env` apply the next time the app starts. Gemini is the default; to use another AI provider, pick it in Settings and enter its key there.
-
-### Platform notes
-
-- On Windows, use Git Bash (included with Git for Windows) or WSL to run `setup.sh`.
-- On macOS and Linux, your normal terminal works.
-- You need Node.js 22.12 or newer. `setup.sh` checks this and stops with a message if your Node is older.
-- The app runs on Electron 45, which supports macOS 13 (Ventura) or later and 64-bit Windows 10 or later. 32-bit Windows is no longer supported.
-- **macOS users must build from source** (steps above) — there is no pre-built `.dmg`. Because the app is unsigned, a downloaded build would be blocked by Gatekeeper as "damaged"; running from source avoids that entirely.
-- No manual `npm` commands are needed. The script handles everything.
-
-### Setup script options
+You need Node.js 22.12 or newer. For local voice you also need Python 3 (see [Requirements](#requirements)).
 
 ```bash
-./setup.sh --build                # Build a distributable for your OS
-./setup.sh --ci                   # Use npm ci instead of npm install
-./setup.sh --no-run               # Set up only, do not launch
-./setup.sh --install-system-deps  # Install sox for the microphone (optional)
-./setup.sh --skip-whisper         # Skip the local Whisper bootstrap
+git clone <repo-url>   # TODO(owner): replace with the repository URL
+cd super-interview
+./setup.sh
 ```
+
+`setup.sh` checks your Node version, creates `.env` from `env.example`, installs Node dependencies, sets up local Whisper in `.venv-whisper`, runs a short speech test and starts the app.
+
+On first launch, the onboarding wizard opens. It walks you through:
+
+1. Choosing an AI provider and entering its key (or the Ollama server URL), with a **Test connection** button.
+2. Choosing a speech provider: local Whisper, Azure Speech, or skip.
+3. For Whisper: detecting it, installing it into a virtual environment if needed, and downloading a model.
+
+After setup, start the app with `npm start` (or `npm run dev`, which also disables the GPU). On Windows, run these from Git Bash: the scripts use the `env` command, which `cmd.exe` does not have.
+
+### setup.sh options
+
+```bash
+./setup.sh --no-run               # Set up only, do not launch
+./setup.sh --ci                   # Use npm ci instead of npm install
+./setup.sh --skip-whisper         # Skip the local Whisper setup
+./setup.sh --install-system-deps  # Install sox (Linux); not needed on macOS
+./setup.sh --build                # Build a distributable for this OS, then start the app
+./setup.sh --build --no-run       # Build only
+```
+
+On Windows, run `setup.sh` from Git Bash. Under WSL the app runs as a Linux app, so privacy mode has no effect.
+
+## Requirements
+
+| | |
+|---|---|
+| Node.js | 22.12 or newer (`setup.sh` checks this; `package.json` declares it) |
+| macOS | 13 (Ventura) or later |
+| Windows | 10 or later, 64-bit |
+| Linux | Runs, but privacy mode has no effect (see below) |
+| Local Whisper | Python 3.10 or newer (3.12 recommended), about 3 to 5 GB of disk for Whisper and its dependencies |
+| Azure Speech | An Azure Speech resource key and region |
+
+ffmpeg is usually not needed: the app records PCM WAV, and its Python Whisper worker reads it directly. If that worker is unavailable, the app falls back to the `whisper` command-line tool, which needs ffmpeg. On Linux, microphone capture needs `arecord` or `sox`.
+
+## Building
+
+```bash
+npm run build:mac     # .dmg and .zip (x64 and arm64)
+npm run build:win     # NSIS installer and portable .exe (x64)
+npm run build:linux   # AppImage and .deb (x64)
+```
+
+Output goes to `dist/`. `./setup.sh --build --no-run` runs the right one for your OS.
+
+Builds are **not code signed or notarized** today. That means:
+
+- **macOS:** a build copied or downloaded to another Mac is blocked by Gatekeeper ("damaged" or "cannot be opened"). Running from source with `./setup.sh` avoids this.
+- **Windows:** SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**, only if you built or trust the file.
+
+No pre-built downloads are linked from this README. The workflow in `.github/workflows/release.yml` builds Windows and Linux artifacts from a version tag.
+
+## Shortcuts
+
+Global shortcuts work from any app. On macOS, `Alt` is the Option key.
+
+| Shortcut | Action |
+|---|---|
+| `Cmd/Ctrl + Shift + S` | Capture the display under the mouse pointer and ask about it |
+| `Alt + R` | Start or stop voice input (when a speech provider is set up) |
+| `Cmd/Ctrl + Shift + V` | Show or hide all windows |
+| `Cmd/Ctrl + Shift + I` or `Alt + A` | Turn click-through on or off |
+| `Cmd/Ctrl + Shift + C` | Open the chat window |
+| `Cmd/Ctrl + Shift + \` | Clear the conversation history |
+
+These work only while a Super Interview window has focus, so other apps keep them:
+
+| Shortcut | Action |
+|---|---|
+| `Cmd/Ctrl + ,` | Open Settings |
+| `Cmd/Ctrl + Up / Down` | Switch interview mode (click-through off), or move the windows (click-through on) |
+| `Cmd/Ctrl + Left / Right` | Move the windows (click-through on) |
+
+With click-through on, you cannot click a window to focus it, so moving the windows by keyboard only works while one still has focus, for example right after you turn click-through on.
+
+If another app already owns a global shortcut, Super Interview cannot register it and logs a warning.
+
+## AI providers
+
+Pick a provider in Settings or during onboarding.
+
+| Provider | Screenshots | Key |
+|---|---|---|
+| Google Gemini (default) | Yes | `GEMINI_API_KEY` ([Google AI Studio](https://aistudio.google.com/)) |
+| Anthropic Claude | Yes | `ANTHROPIC_API_KEY` |
+| OpenAI | Yes | `OPENAI_API_KEY` |
+| OpenRouter | Yes | `OPENROUTER_API_KEY` |
+| Groq | No, text only | `GROQ_API_KEY` |
+| DeepSeek | No, text only | `DEEPSEEK_API_KEY` |
+| Ollama | Yes, with a vision model (default `llama3.2-vision`) | None; runs on your machine |
+
+Keys are stored in a `.env` file:
+
+- Installed builds use `.env` in the app data folder (`~/Library/Application Support/<app>` on macOS, `%APPDATA%\<app>` on Windows, `~/.config/<app>` on Linux).
+- When you run from source, a `.env` in the project folder (the one `setup.sh` creates) is used if the app data folder has none.
+
+On macOS and Linux the app makes this file readable by your user only (mode 0600). Keys entered in Settings take effect right away; direct edits to `.env` apply on the next start.
 
 ## Configuration
 
-The setup script writes sensible defaults. The only required value is the API key for your AI provider: `GEMINI_API_KEY` for the default, Gemini. Ollama runs locally and needs no key.
+Settings writes provider, voice, mode and answer length values to `.env` for you. The main keys:
 
 ```bash
-# Required for the default AI provider (Gemini)
-GEMINI_API_KEY=your_gemini_api_key_here
+# AI provider: gemini | anthropic | openai | openrouter | groq | deepseek | ollama
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=...
+# Optional per-provider model and endpoint overrides, for example:
+# GEMINI_MODEL=, OPENAI_MODEL=, OLLAMA_MODEL=, OLLAMA_BASE_URL=http://localhost:11434/v1
+# OPENAI_BASE_URL=, ANTHROPIC_BASE_URL=, ANTHROPIC_EFFORT=low
+LLM_STREAM_IDLE_TIMEOUT_MS=60000
 
-# Optional speech provider. Pick one.
+# Saved by the app when you change them
+INTERVIEW_MODE=auto          # auto | dsa (Coding) | technical | system-design | behavioral | hr
+ANSWER_LENGTH=auto           # auto | short | standard | detailed
+
+# Speech: whisper (local) or azure
 SPEECH_PROVIDER=whisper
-
-# Azure option
-AZURE_SPEECH_KEY=your_azure_speech_key
-AZURE_SPEECH_REGION=your_region
-
-# Local Whisper option
 WHISPER_COMMAND=whisper
-WHISPER_MODEL_DIR=.whisper-models
 WHISPER_MODEL=small
 WHISPER_LANGUAGE=auto
-WHISPER_DEVICE=auto
-WHISPER_PYTHON=
-WHISPER_CAPTURE_MODE=vad
-WHISPER_RESPONSE_TARGET=both
+WHISPER_DEVICE=auto          # auto | cpu | cuda
+WHISPER_CAPTURE_MODE=vad     # vad (pause detection) | manual
+WHISPER_RESPONSE_TARGET=both # both | chat | overlay
 WHISPER_MANUAL_MAX_MS=90000
 WHISPER_GPU_IDLE_MS=60000
+AZURE_SPEECH_KEY=
+AZURE_SPEECH_REGION=
 ```
 
-Speech is optional. If no provider is configured, the microphone button hides itself across the app.
+See `env.example` for the full list. `setup.sh` configures Whisper with the `base` model and English; change either in Settings.
 
-## Optional voice setup
+Settings also has:
 
-You can use local Whisper for offline transcription or Azure Speech for a cloud option.
+- **Interview context:** role, company, job description, resume and notes, saved to `profile.json` in the app data folder (not in `.env`).
+- **App icon:** the icon and name the app uses for its Dock icon and process title (Terminal, Activity Monitor or System Settings; Terminal is the default).
+- **Window gap:** spacing in pixels between the toolbar and the answer panel.
 
-For local Whisper, `./setup.sh` handles the full setup. It creates `.venv-whisper`, installs `openai-whisper`, points `.env` at the virtual environment, creates `.whisper-models`, and runs a quick speech test. The app reads its own PCM WAV recordings directly; ffmpeg is only needed when transcribing other audio formats through the CLI fallback.
+The app icon, window gap and coding language are not saved yet; they reset when the app restarts (to Terminal, 10 px and C++).
 
-For Azure Speech, create a Speech resource in the [Azure Portal](https://portal.azure.com/), then add the key and region to `.env` with `SPEECH_PROVIDER=azure`.
+If no speech provider is available, the mic buttons are hidden.
 
-## How it works
+## Where your data goes
 
-1. **Ask.** Use automatic pause detection, choose manual start/stop capture in Settings, or use the screenshot shortcut.
-2. **Reason.** Audio is transcribed locally by Whisper, or in the cloud by Azure Speech if you select it. The AI provider receives only text (your typed question or the transcript) and screenshots, plus recent conversation history for typed and voice questions, and works toward a precise answer.
-3. **Answer.** Voice responses stream to chat, the overlay, or both, according to Settings.
+Super Interview has no server and no account, and sends no telemetry or analytics. Your questions, screenshots and interview context go only to the AI provider you picked. Audio leaves your computer only if you choose Azure Speech, and then it goes to Microsoft.
 
-## Keyboard shortcuts
-
-| Action | Shortcut | Description |
+| Data | Stored | Sent to |
 |---|---|---|
-| Screenshot capture | `Cmd/Ctrl + Shift + S` | Capture the screen and analyze it with the AI provider |
-| Toggle speech | `Alt + R` | Start or stop voice recognition, if configured |
-| Toggle visibility | `Cmd/Ctrl + Shift + V` | Show or hide all windows |
-| Toggle interaction | `Cmd/Ctrl + Shift + I` or `Alt + A` | Enable or disable click through |
-| Open chat | `Cmd/Ctrl + Shift + C` | Open the interactive chat window |
-| Clear memory | `Cmd/Ctrl + Shift + \` | Clear the AI's conversation memory |
-| Settings | `Cmd/Ctrl + ,` | Open the settings panel, while a Super Interview window is focused |
-| Move or switch skill | `Cmd/Ctrl + Arrow keys` | While a Super Interview window is focused |
+| Screenshot (the whole display under the mouse pointer, including anything else on it) | In memory while the request runs | Your AI provider. Sent without conversation history. |
+| Typed question or voice transcript | In memory for the session | Your AI provider, with recent history: up to 14 earlier messages for typed questions, up to 8 for voice |
+| Interview context (role, company, job description, resume, notes) | `profile.json` in the app data folder (owner-only on macOS and Linux) | Your AI provider, with every question (typed, voice and screenshot) |
+| Microphone audio, local Whisper | A temporary WAV file in the system temp folder, deleted after transcription | Nowhere. Only the text transcript goes to the AI provider. |
+| Microphone audio, Azure Speech | Not saved by the app | Microsoft (Azure Speech) |
+| API keys | `.env` (owner-only on macOS and Linux) | Only the provider each key belongs to |
+| Conversation history | In memory only. Cleared on restart or with `Cmd/Ctrl + Shift + \`. The chat window's clear button clears only the messages it shows. | Recent part, as above |
+| App logs | `~/.SuperInterview/logs`: app events and errors, kept 14 days (error logs 30) | Nowhere |
 
-`Cmd/Ctrl + ,` and `Cmd/Ctrl + Arrow keys` only work while a Super Interview window is focused, so other apps keep these keys for their own settings and for line and word jumps.
+With Ollama on `localhost`, AI requests stay on your machine. The built-in endpoints for the cloud providers use HTTPS.
 
-## Project status
+Setting up local Whisper also downloads Python packages from PyPI and model weights from OpenAI's download servers. No questions, audio or keys are sent with those downloads.
 
-Super Interview is under active development. The core is stable and improvements ship regularly.
+## Privacy mode
 
-### Done
+On macOS and Windows, every Super Interview window is marked as excluded from screen capture (Electron `setContentProtection`). Most screen recording and screen sharing tools then do not show the overlay. Limits:
 
-- Stealth overlay with a draggable command bar and a click through toggle
-- Screenshot capture with direct analysis by the AI provider, no OCR step
-- AI provider picker: Gemini, Claude, OpenAI, OpenRouter, Groq, DeepSeek or Ollama
-- Configurable manual or VAD-driven voice capture
-- Persistent local Whisper worker with optional CUDA acceleration and idle GPU release
-- Configurable chat/overlay routing for streamed voice answers
-- Whisper hallucination filter that drops phantom phrases on silence
-- AI response window with markdown and syntax highlighting
-- Global shortcuts for capture, visibility, interaction, chat, and settings
-- Session memory and a full chat UI
-- Language picker and a DSA skill prompt
-- Optional Azure Speech and local Whisper, with an auto hiding mic button
-- Multi-monitor and area capture support
-- Window binding and positioning
-- Settings management with disguise and stealth modes
+- Some browser-based screen sharing, and older capture methods, can still capture the windows.
+- On Linux there is no such window flag, so the windows are always visible in screen shares and recordings.
+- Someone looking at your screen, or a camera pointed at it, still sees it.
 
-### Planned
+Treat privacy mode as a convenience for keeping the overlay out of your own recordings and shares, not as a guarantee.
 
-- Auto typing of code snippets into editors and IDEs
-- Export of conversation history to markdown or PDF
-- Deeper stealth, including process name randomization
+## Use it responsibly
+
+Super Interview is made for practice, mock interviews and conversations where AI help is allowed. Many employers do not allow AI assistance in live interviews. Check the rules for each interview before you use it, and follow them. You are responsible for how you use it.
+
+## Security model
+
+- **Sandboxed pages.** Every window runs with `sandbox`, `contextIsolation` and no Node integration.
+- **Minimal per-window APIs.** Each window gets a preload that exposes only the calls that page uses. The main process checks the sender of every IPC message against a per-channel allowlist, and limits which settings fields each window may save.
+- **Keys stay in the main process.** Settings shows masked keys; full keys are never sent to any window.
+- **Strict Content Security Policy.** Pages load only local scripts and cannot make network requests (`connect-src 'none'`). AI output is sanitized with DOMPurify before it is rendered.
+- **Locked-down navigation and permissions.** Links open in your browser, windows cannot navigate away from their own page, and only microphone and screen capture permissions are granted to the app's own pages.
+- **Electron 45 with fuses in packaged builds.** `runAsNode`, `NODE_OPTIONS` and the inspector flags are disabled, and the app loads only from its asar archive, with an integrity check on macOS and Windows. Packaged builds also drop the Reload and Developer Tools menu items.
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Troubleshooting
 
-<details>
-<summary>Setup issues</summary>
+**Screenshots fail on macOS, or the app says screen capture failed.**
+Allow Screen Recording under System Settings > Privacy & Security > Screen & System Audio Recording, then restart the app. When you run from source, the permission belongs to the app that launched it, such as your terminal or editor.
 
-- **setup.sh will not run.** Make sure you are in the project folder (`cd super-interview`) and that the script is executable (`chmod +x setup.sh`). On Windows, use Git Bash.
-- **Setup stops with exit code 130.** That means Ctrl+C was pressed. Run `./setup.sh` again.
-- **Node or npm not found, or Node is too old.** Install Node.js 22.12 or newer from [nodejs.org](https://nodejs.org/), restart the terminal, and retry.
+**Voice does nothing on macOS.**
+Allow Microphone access under System Settings > Privacy & Security > Microphone for Super Interview, or for your terminal or editor when running from source.
 
-</details>
+**The screenshot answer describes a blank or black screen.**
+A locked screen, a sleeping display or a screen saver gives a blank capture. Unlock the screen and try again.
 
-<details>
-<summary>App issues</summary>
+**The onboarding wizard opens every time.**
+It opens when the selected provider has no usable key. Finish onboarding, or open Settings (`Cmd/Ctrl + ,`) and enter a key.
 
-- **Electron will not start or shows a blank window on Linux.** Try `npm run dev`, and make sure X11 or XWayland is available in headless setups.
-- **macOS screen capture does not work.** Grant Screen Recording permission under System Settings, Privacy and Security, then relaunch the app.
-- **Windows SmartScreen blocks the app.** Click More info, then Run anyway, or use `npm start` during development.
-- **Microphone or voice not working.** Voice is optional. For Azure, add valid keys to `.env`. For Whisper, install `openai-whisper`, `ffmpeg`, and `sox`, then set `SPEECH_PROVIDER=whisper`.
+**"Cannot reach Ollama (local) ... Make sure it is running."**
+Start Ollama (the app, or `ollama serve`) and check the server URL in Settings. If the model is missing, run `ollama pull llama3.2-vision` or pick a model you have.
 
-</details>
+**"Groq does not support screenshots."**
+Groq and DeepSeek accept text only. Switch to Gemini, Claude, OpenAI, OpenRouter or Ollama for screenshots.
 
-<details>
+**The mic button is missing.**
+No speech provider is available. Run `./setup.sh` again, finish the Whisper step in onboarding, or enter Azure Speech credentials in Settings.
 
-<summary> Limitations </summary>
+**A shortcut does not work.**
+Another app may own it; check the log in `~/.SuperInterview/logs`. `Cmd/Ctrl + ,` and the arrow shortcuts only work while a Super Interview window has focus.
 
-- **Screen-capture invisibility does not work on Linux.** The overlay stays hidden from screen shares and recordings only on **macOS** and **Windows**. This relies on Electron's `setContentProtection`, which maps to `NSWindowSharingNone` on macOS and `WDA_EXCLUDEFROMCAPTURE` on Windows. Electron provides **no equivalent on Linux** (neither X11 nor Wayland), so on Linux the call is a silent no-op and the overlay **will be visible** to anyone you screen-share with. This is a platform limitation, not a bug — there is no window flag on Linux that excludes a window from framebuffer capture. If you need capture-invisibility, run Super Interview on macOS or Windows. As a partial workaround on Linux, share a single application window instead of your entire screen, or place the overlay on a monitor you are not sharing.
+**Blank window or GPU crash on Linux.**
+The app already disables GPU acceleration on Linux. Make sure an X11 or XWayland display is available, and try `npm run dev`.
 
-</details>
+**setup.sh stops early.**
+Install Node.js 22.12 or newer and retry. Exit code 130 means Ctrl+C was pressed.
 
+## Project structure
 
+```text
+main.js                   Main process: windows, shortcuts, IPC, settings, .env handling
+preload.js                Bridge for the toolbar, Settings and onboarding
+preload-content.js        Smaller bridge for the chat and answer windows
+index.html                Toolbar
+llm-response.html         Answer panel
+chat.html                 Chat window
+settings.html             Settings
+onboarding.html/.js       First-run wizard
+prompt-loader.js          Builds the system prompt: mode, answer format, length, context
+prompts/                  Mode prompts (auto, dsa, technical, system-design, behavioral, hr)
+src/core/                 Config, logging, first run, profile store, Whisper installer
+src/managers/             Window and session (conversation history) managers
+src/services/             Screen capture, LLM, speech and Whisper worker services
+src/services/providers/   Claude and OpenAI-compatible provider adapters
+src/ui/                   Renderer scripts for each window
+lib/                      Markdown rendering and HTML sanitizing
+scripts/                  Whisper worker (Python), speech test, installer hooks
+assests/                  Icons, fonts and vendored Font Awesome (the folder name is spelled this way)
+website/                  Landing page; not included in app builds
+setup.sh, env.example     Setup script and configuration template
+```
 
-## Privacy and ethics
+## Contributing
 
-Super Interview collects no data and sends no telemetry. Processing happens locally, and your session stays on your device. Requests to the AI provider are encrypted in transit.
+Issues and pull requests are welcome.
 
-The app is built for learning and practice. You are responsible for following the rules of any interview you take and the policies of the companies involved.
+- Run from source with `./setup.sh`, then `npm start`.
+- Keep changes small and focused, and match the existing style.
+- There is no automated test suite or linter yet. Test your change by hand on the platforms it touches. `npm run test-speech` checks the Whisper setup.
+- Do not commit `.env`, API keys or files from the app data folder.
 
-## License
+Planned: export of conversation history to Markdown or PDF.
 
-Released under the Apache-2.0 License. See [LICENSE](LICENSE) for details.
+## License and credits
 
-## Acknowledgments
+Released under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-- Google Gemini for the AI reasoning
-- Azure Speech and OpenAI Whisper for optional voice input
-- Electron for the cross platform desktop runtime
-- [Vysper by varun-singhh](https://github.com/varun-singhh/Vysper) for UI and structure inspiration
-
-<div align="center">
-
-Maintained by **Ankit Chaudhary**.
-
-</div>
-
-## Credits and license
-
-Super Interview is a modified version of [OpenCluely](https://github.com/TechyCSR/OpenCluely) by TechyCSR, licensed under the Apache License 2.0. See `LICENSE` and `NOTICE`.
+Super Interview is maintained by Ankit Chaudhary. It is a modified version of [OpenCluely](https://github.com/TechyCSR/OpenCluely) by TechyCSR, licensed under the Apache License 2.0. Bundled fonts (Manrope, JetBrains Mono) are under the SIL Open Font License 1.1. UI and structure were inspired by [Vysper](https://github.com/varun-singhh/Vysper) by varun-singhh.
