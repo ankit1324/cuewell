@@ -274,6 +274,39 @@ function normalizeAppIconKey(key) {
   return Object.prototype.hasOwnProperty.call(LEGACY_APP_ICON_KEYS, key) ? LEGACY_APP_ICON_KEYS[key] : key;
 }
 
+// Window gap (toolbar to answer panel) in pixels, saved as WINDOW_GAP.
+const MAX_WINDOW_GAP = 100;
+/** The gap as a whole number of pixels, or null when `raw` is not one in range. */
+function parseWindowGap(raw) {
+  const text = String(raw === undefined || raw === null ? "" : raw).trim();
+  if (!/^\d{1,3}$/.test(text)) return null;
+  const gap = Number(text);
+  return gap <= MAX_WINDOW_GAP ? gap : null;
+}
+
+const WHISPER_DEVICES = ["auto", "cpu", "cuda"];
+const WHISPER_CAPTURE_MODES = ["vad", "manual"];
+const WHISPER_RESPONSE_TARGETS = ["both", "chat", "overlay"];
+// Whisper model aliases and the weights file each downloads (<name>.pt).
+const WHISPER_MODEL_FILES = { large: "large-v3", turbo: "large-v3-turbo" };
+
+// What each shortcut does, for the Settings shortcuts table. Keys are the
+// accelerators registered in setupGlobalShortcuts / setupFocusShortcuts.
+const SHORTCUT_ACTIONS = Object.freeze({
+  "CommandOrControl+Shift+S": "Capture the screen under the pointer and ask about it",
+  "Alt+R": "Start or stop voice input",
+  "CommandOrControl+Shift+V": "Show or hide all windows",
+  "CommandOrControl+Shift+I": "Turn click-through on or off",
+  "Alt+A": "Turn click-through on or off",
+  "CommandOrControl+Shift+C": "Show or hide the chat window",
+  "CommandOrControl+Shift+\\": "Clear the conversation history",
+  "CommandOrControl+,": "Open Settings",
+  "CommandOrControl+Up": "Previous interview mode, or move the windows up when click-through is on",
+  "CommandOrControl+Down": "Next interview mode, or move the windows down when click-through is on",
+  "CommandOrControl+Left": "Move the windows left when click-through is on",
+  "CommandOrControl+Right": "Move the windows right when click-through is on",
+});
+
 // Which settings fields each window may save. Anything else in the payload
 // rejects the whole save. The toolbar only saves its language picker.
 const SETTINGS_FIELDS_BY_WINDOW = {
@@ -322,7 +355,11 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   "resize-llm-window-for-content": ["llmResponse"],
   // Settings (settings.html)
   "close-settings": ["settings"],
-  "update-skill": ["settings"],
+  // Read-only facts for Settings: version, platform, shortcuts, file paths
+  "get-settings-info": ["settings"],
+  // Removes one saved key (a save with an empty key keeps it)
+  "remove-secret": ["settings"],
+  "get-whisper-status": ["settings"],
   // Interview context (userData/profile.json)
   "get-profile": ["settings"],
   "save-profile": ["settings"],
@@ -330,10 +367,11 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   "get-first-run-status": ["onboarding"],
   "complete-first-run": ["onboarding"],
   "close-onboarding": ["onboarding"],
-  "detect-whisper": ["onboarding"],
-  "install-whisper": ["onboarding"],
-  "download-whisper-model": ["onboarding"],
-  "test-provider": ["onboarding"],
+  // Whisper setup and Test connection: the wizard and Settings
+  "detect-whisper": ["onboarding", "settings"],
+  "install-whisper": ["onboarding", "settings"],
+  "download-whisper-model": ["onboarding", "settings"],
+  "test-provider": ["onboarding", "settings"],
 });
 
 /** Masked form of a secret for the renderer: whether it is set, and its last 4 characters for long keys. */
@@ -458,8 +496,11 @@ class ApplicationController {
     this.profilePath = path.join(app.getPath("userData"), "profile.json");
     this.profile = this.loadProfile();
     llmService.setPromptContext({ answerLength: this.answerLength, profile: this.profile });
-  // Default to C++ so language is enforced from first run
-  this.codingLanguage = "cpp";
+  // Coding language, persisted in .env as CODING_LANGUAGE. C++ when unset.
+  this.codingLanguage = CODING_LANGUAGES.includes(process.env.CODING_LANGUAGE) ? process.env.CODING_LANGUAGE : "cpp";
+    // Saved window gap (WINDOW_GAP); the window manager's default otherwise.
+    const savedWindowGap = parseWindowGap(process.env.WINDOW_GAP);
+    if (savedWindowGap !== null) windowManager.setWindowGap(savedWindowGap);
     this.speechAvailable = false;
 
     // Utterance coalescing: VAD emits a transcript per natural pause, but a
@@ -491,6 +532,8 @@ class ApplicationController {
     // Lazily-initialised in getWhisperInstaller() so tests can mock
     // the constructor without polluting main-process startup.
     this._whisperInstaller = null;
+    // "install" or "download" while one runs; see install-whisper.
+    this._whisperJob = null;
     this.isFirstRun = false;
 
     // Window configurations for reference
@@ -619,8 +662,10 @@ class ApplicationController {
       await windowManager.initializeWindows({ showMainWindow: !isFirstRun });
       this.setupGlobalShortcuts();
 
-      // Initialize default stealth mode with terminal icon
-      this.updateAppIcon("terminal");
+      // App icon and name: the one saved in Settings (APP_ICON), else the
+      // default Terminal disguise.
+      const savedIcon = normalizeAppIconKey(String(process.env.APP_ICON || "").trim());
+      this.updateAppIcon(APP_ICON_KEYS.includes(savedIcon) ? savedIcon : "terminal");
 
       this.starting = false;
       this.isReady = true;
@@ -638,8 +683,8 @@ class ApplicationController {
             logger.warn("Could not open first-run onboarding window", {
               error: e.message
             });
-            // Fallback to legacy settings prompt
-            try { this.showSettings(); } catch (_) { /* ignore */ }
+            // Fall back to Settings, where the same keys can be entered.
+            try { windowManager.showSettings(); } catch (_) { /* ignore */ }
           }
         }, 800);
       } else {
@@ -750,8 +795,11 @@ class ApplicationController {
       "Alt+R": () => this.toggleSpeechRecognition(),
     };
 
+    // accelerator -> whether it registered, for the Settings shortcuts table.
+    this.globalShortcutStatus = {};
     Object.entries(shortcuts).forEach(([accelerator, handler]) => {
       const success = globalShortcut.register(accelerator, handler);
+      this.globalShortcutStatus[accelerator] = !!success;
       if (success) {
         logger.debug("Global shortcut registered", { accelerator });
       } else {
@@ -777,15 +825,21 @@ class ApplicationController {
     };
     this.focusShortcutsActive = false;
 
-    app.on("browser-window-focus", () => this.setFocusShortcutsActive(true));
+    // Not while Settings has focus: its text fields need Cmd/Ctrl+arrows for
+    // moving the caret, and it is already open.
+    const wanted = () => {
+      const focused = BrowserWindow.getFocusedWindow();
+      return !!focused && focused !== windowManager.getWindow("settings");
+    };
+    app.on("browser-window-focus", () => this.setFocusShortcutsActive(wanted()));
     app.on("browser-window-blur", () => {
       // Focus may be moving to another window of this app; check after the
       // focus change has settled.
       setTimeout(() => {
-        this.setFocusShortcutsActive(!!BrowserWindow.getFocusedWindow());
+        this.setFocusShortcutsActive(wanted());
       }, 0);
     });
-    this.setFocusShortcutsActive(!!BrowserWindow.getFocusedWindow());
+    this.setFocusShortcutsActive(wanted());
   }
 
   setFocusShortcutsActive(active) {
@@ -1028,23 +1082,18 @@ class ApplicationController {
       return windowManager.getWindowStats();
     });
 
-    // Settings handlers
+    // Settings handlers. The page loads its own values when it is shown
+    // (settings-window-shown -> get-settings).
     this.handleIpc("show-settings", () => {
       windowManager.showSettings();
-
-      // Send current settings to the settings window
-      const settingsWindow = windowManager.getWindow("settings");
-      if (settingsWindow) {
-        const currentSettings = this.getSettings("settings");
-        setTimeout(() => {
-          if (!settingsWindow.isDestroyed()) {
-            settingsWindow.webContents.send("load-settings", currentSettings);
-          }
-        }, 100);
-      }
-
       return { success: true };
     });
+
+    this.handleIpc("get-settings-info", () => this.getSettingsInfo());
+
+    this.handleIpc("remove-secret", (_event, field) => this.removeSecret(field));
+
+    this.handleIpc("get-whisper-status", () => this.getWhisperStatus());
 
     this.handleIpc("get-settings", (event) => {
       return this.getSettings(this.windowTypeForSender(event));
@@ -1113,6 +1162,12 @@ class ApplicationController {
     // Install Whisper. Streams progress lines back via `webContents.send`
     // so the renderer can paint them as they arrive.
     this.handleIpc("install-whisper", async (event) => {
+      // One Whisper install or download at a time (the wizard and Settings
+      // can both start one).
+      if (this._whisperJob) {
+        return { ok: false, command: null, message: "Whisper setup is already running. Wait for it to finish.", logs: "" };
+      }
+      this._whisperJob = "install";
       try {
         const installer = this.getWhisperInstaller();
         const sender = event.sender;
@@ -1125,6 +1180,8 @@ class ApplicationController {
       } catch (e) {
         logger.error("Whisper install failed", { error: e.message });
         return { ok: false, command: null, message: e.message, logs: "" };
+      } finally {
+        this._whisperJob = null;
       }
     });
 
@@ -1134,6 +1191,10 @@ class ApplicationController {
       if (typeof name !== "string" || !isWhisperModelName(name)) {
         return { ok: false, message: "Invalid Whisper model name", path: null };
       }
+      if (this._whisperJob) {
+        return { ok: false, message: "Whisper setup is already running. Wait for it to finish.", path: null };
+      }
+      this._whisperJob = "download";
       try {
         const installer = this.getWhisperInstaller();
         const sender = event.sender;
@@ -1146,11 +1207,13 @@ class ApplicationController {
       } catch (e) {
         logger.error("Whisper model download failed", { error: e.message });
         return { ok: false, message: e.message, path: null };
+      } finally {
+        this._whisperJob = null;
       }
     });
 
-    // Test an AI provider from the wizard without saving it or changing the
-    // running provider.
+    // Test an AI provider from the wizard or Settings without saving it or
+    // changing the running provider.
     this.handleIpc("test-provider", (_event, input) => this.testProvider(input));
 
     this.handleIpc("save-settings", (event, settings) => {
@@ -1209,12 +1272,6 @@ class ApplicationController {
       if (settingsWindow) {
         settingsWindow.hide();
       }
-    });
-
-    // Handle update skill
-    this.onIpc("update-skill", (event, skill) => {
-      if (!isInterviewMode(skill)) return;
-      this.setActiveMode(skill);
     });
 
     this.onIpc("quit-app", () => {
@@ -2009,6 +2066,111 @@ class ApplicationController {
     };
   }
 
+  /**
+   * Read-only facts for the Settings window: app version, platform, whether
+   * screen-capture protection exists here, every shortcut with its scope and
+   * whether it registered, and where settings, the profile and logs live.
+   */
+  getSettingsInfo() {
+    const global = this.globalShortcutStatus || {};
+    const focus = this.focusShortcuts ? Object.keys(this.focusShortcuts) : [];
+    const shortcuts = [
+      ...Object.keys(global).map((accelerator) => ({
+        accelerator, scope: "global", registered: global[accelerator],
+      })),
+      ...focus.map((accelerator) => ({ accelerator, scope: "focus", registered: null })),
+    ].map((entry) => ({ ...entry, action: SHORTCUT_ACTIONS[entry.accelerator] || "" }));
+    let logs = "";
+    try {
+      logs = require("./src/core/logger").logDir || "";
+    } catch (_) { /* shown as unknown */ }
+    return {
+      version: app.getVersion(),
+      platform: process.platform,
+      versions: {
+        electron: process.versions.electron || "",
+        chrome: process.versions.chrome || "",
+        node: process.versions.node || "",
+      },
+      // setContentProtection only has an effect on macOS and Windows.
+      contentProtection: process.platform === "darwin" || process.platform === "win32",
+      shortcuts,
+      paths: { settingsFile: ENV_PATH, profile: this.profilePath, logs },
+    };
+  }
+
+  /**
+   * Remove one saved secret (an API key or the Azure key). Saving an empty
+   * key keeps the saved one, so this is the only way to clear it. Returns
+   * { success, field }, plus { persisted: false, warning } when only the
+   * running app changed, or { success: false, error }.
+   */
+  removeSecret(field) {
+    if (typeof field !== "string" || !Object.prototype.hasOwnProperty.call(SECRET_SETTING_ENV_KEYS, field)) {
+      return { success: false, error: "Unknown key." };
+    }
+    const envKey = SECRET_SETTING_ENV_KEYS[field];
+    const persisted = this.persistEnvUpdates({ [envKey]: "" });
+    // The running app picks the change up either way (process.env is updated first).
+    try {
+      if (field === "azureKey") {
+        if (speechService.provider === "azure") {
+          speechService.initializeClient();
+          this.speechAvailable = speechService.isAvailable ? speechService.isAvailable() : false;
+          windowManager.broadcastToAllWindows("speech-availability", { available: this.speechAvailable });
+        }
+      } else {
+        llmService.initializeClient();
+      }
+    } catch (e) {
+      logger.warn("Service reinitialization after removing a key failed", { field, error: e.message });
+    }
+    logger.info("Saved key removed", { field, persisted: persisted.includes(envKey) });
+    if (!persisted.includes(envKey)) {
+      return {
+        success: true,
+        persisted: false,
+        field,
+        warning: "Removed for now, but Cuewell could not write its settings file, so the key comes back when it restarts.",
+      };
+    }
+    return { success: true, field };
+  }
+
+  /**
+   * Local Whisper status for Settings: whether a Whisper program is found
+   * (and its command and version), the configured model and whether its
+   * weights are already downloaded.
+   */
+  async getWhisperStatus() {
+    let detected;
+    try {
+      detected = await this.getWhisperInstaller().detect();
+    } catch (e) {
+      logger.warn("Whisper detection failed", { error: e.message });
+      detected = { found: false, command: null, version: null, error: e.message };
+    }
+    const model = String(process.env.WHISPER_MODEL || "small").trim() || "small";
+    const fileName = WHISPER_MODEL_FILES[model] || model;
+    let modelDir = "";
+    let modelDownloaded = false;
+    try {
+      modelDir = speechService.getWhisperModelDir() || "";
+      modelDownloaded = !!modelDir && isWhisperModelName(fileName) &&
+        fs.existsSync(path.join(modelDir, `${fileName}.pt`));
+    } catch (_) { /* reported as not downloaded */ }
+    return {
+      found: !!detected.found,
+      command: detected.command || null,
+      version: detected.version || null,
+      error: detected.error || null,
+      model,
+      modelDownloaded,
+      modelDir,
+      busy: this._whisperJob || null,
+    };
+  }
+
   /** Bare Whisper commands the installer probes, e.g. ["whisper"], ["python3", "-m", "whisper"]. */
   knownBareWhisperCommands() {
     try {
@@ -2101,7 +2263,15 @@ class ApplicationController {
         clean.selectedIcon = value;
       }
     });
-    check(() => { if (has("windowGap")) clean.windowGap = text("windowGap"); });
+    check(() => {
+      if (has("windowGap")) {
+        const gap = parseWindowGap(text("windowGap"));
+        if (gap === null) {
+          throw new SettingsValidationError("windowGap", `Window gap must be a whole number from 0 to ${MAX_WINDOW_GAP}.`);
+        }
+        clean.windowGap = gap;
+      }
+    });
 
     check(() => {
       if (has("speechProvider")) {
@@ -2112,10 +2282,17 @@ class ApplicationController {
         clean.speechProvider = value;
       }
     });
-    for (const field of ["whisperDevice", "whisperCaptureMode", "whisperResponseTarget"]) {
+    const whisperOptions = {
+      whisperDevice: [WHISPER_DEVICES, "Compute device must be Auto, CPU or CUDA."],
+      whisperCaptureMode: [WHISPER_CAPTURE_MODES, "Capture mode must be Automatic or Manual."],
+      whisperResponseTarget: [WHISPER_RESPONSE_TARGETS, "Show voice answers must be Chat and answer panel, Chat only or Answer panel only."],
+    };
+    for (const [field, [options, message]] of Object.entries(whisperOptions)) {
       check(() => {
-        // Checked against their option lists in saveSettings().
-        if (has(field)) clean[field] = text(field);
+        if (!has(field)) return;
+        const value = text(field);
+        if (value && !options.includes(value)) throw new SettingsValidationError(field, message);
+        clean[field] = value;
       });
     }
 
@@ -2259,8 +2436,7 @@ class ApplicationController {
         this.updateAppIcon(this.appIcon);
       }
       if (settings.windowGap !== undefined) {
-        const gap = Number(settings.windowGap);
-        if (Number.isFinite(gap)) windowManager.setWindowGap(gap);
+        windowManager.setWindowGap(settings.windowGap);
       }
 
       // ── Persist provider / API-key fields back to .env ──
@@ -2269,6 +2445,15 @@ class ApplicationController {
       // up the next time the app boots. Secret fields are only present when
       // the user typed a new key (see validateSettings).
       const envUpdates = {};
+      if (settings.codingLanguage) {
+        envUpdates.CODING_LANGUAGE = settings.codingLanguage;
+      }
+      if (settings.selectedIcon) {
+        envUpdates.APP_ICON = normalizeAppIconKey(settings.selectedIcon);
+      }
+      if (settings.windowGap !== undefined) {
+        envUpdates.WINDOW_GAP = String(settings.windowGap);
+      }
       if (settings.speechProvider === "azure" || settings.speechProvider === "whisper") {
         envUpdates.SPEECH_PROVIDER = settings.speechProvider;
       }
@@ -2381,6 +2566,16 @@ class ApplicationController {
             error: e.message
           });
         }
+      }
+
+      // persistEnvUpdates already applied the values to process.env; only
+      // writing the file failed, so they last until the app restarts.
+      if (Object.keys(envUpdates).length > 0 && persistedKeys.length === 0) {
+        return {
+          success: true,
+          persisted: false,
+          warning: "Changed for now, but Cuewell could not write its settings file, so the change is lost when it restarts.",
+        };
       }
 
       // Log setting names only: values include API keys (geminiKey,

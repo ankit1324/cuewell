@@ -123,17 +123,31 @@ const PAGES = {
   // Settings (settings.html, src/ui/settings-window.js)
   settings: () => ({
     electronAPI: {
+      // Keys come back masked as { set, last4 }; main never sends a key.
       getSettings: invoke('get-settings'),
+      // main.js validates every field (SETTINGS_FIELDS_BY_WINDOW.settings).
       saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+      // Version, platform, shortcuts and file locations (read-only).
+      getSettingsInfo: invoke('get-settings-info'),
+      // Remove one saved key by its settings field, e.g. 'openaiKey'.
+      removeSecret: (field) => ipcRenderer.invoke('remove-secret', field),
+      // { provider, apiKey, baseUrl, model } -> { ok, message }; saves nothing.
+      // An empty apiKey tests the saved key.
+      testProvider: (input) => ipcRenderer.invoke('test-provider', input),
+      getWhisperStatus: invoke('get-whisper-status'),
+      installWhisper: invoke('install-whisper'),
+      downloadWhisperModel: (modelName) => ipcRenderer.invoke('download-whisper-model', modelName),
+      onInstallProgress: listen('install-progress'),
       // Interview context (userData/profile.json); main validates on save.
       getProfile: invoke('get-profile'),
       saveProfile: (profile) => ipcRenderer.invoke('save-profile', profile),
+      closeSettings: () => ipcRenderer.send('close-settings'),
       quit,
       onCodingLanguageChanged: listen('coding-language-changed'),
       onSkillUpdated: listen('skill-updated'),
+      onSpeechAvailability: listen('speech-availability'),
       onSettingsWindowShown: listen('settings-window-shown')
-    },
-    api: channelApi(['close-settings', 'quit-app', 'update-skill'], ['load-settings'])
+    }
   }),
 
   // First-run wizard (onboarding.html, onboarding.js)

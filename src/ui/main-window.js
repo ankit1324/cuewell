@@ -325,6 +325,7 @@ class MainWindowUI {
         this.settingsIndicator = document.getElementById('settingsIndicator'); // Optional
         this.micButton = document.getElementById('micButton');
     this.infoButton = document.getElementById('infoButton');
+    this.settingsButton = document.getElementById('settingsButton');
     this.shortcutsPopover = document.getElementById('shortcutsPopover');
 
         // NEW: Screenshot button is the first .command-item without id
@@ -357,6 +358,11 @@ class MainWindowUI {
                 });
             }
         });
+
+        // Gear button: opens the Settings window (same as Cmd/Ctrl+,).
+        if (this.settingsButton) {
+            this.settingsButton.addEventListener('click', () => this.openSettings());
+        }
 
         // Check for required elements (settingsIndicator is optional)
         if (this.settingsIndicator) {
