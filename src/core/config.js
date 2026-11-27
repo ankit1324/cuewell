@@ -4,16 +4,16 @@ const os = require('os');
 class ConfigManager {
   constructor() {
     this.env = process.env.NODE_ENV || 'development';
-    this.appDataDir = path.join(os.homedir(), '.SuperInterview');
+    this.appDataDir = path.join(os.homedir(), '.Cuewell');
     this.loadConfiguration();
   }
 
   loadConfiguration() {
     this.config = {
       app: {
-        name: 'Super Interview',
+        name: 'Cuewell',
         version: '1.0.0',
-        processTitle: 'Super Interview',
+        processTitle: 'Cuewell',
         dataDir: this.appDataDir,
         isDevelopment: this.env === 'development',
         isProduction: this.env === 'production'

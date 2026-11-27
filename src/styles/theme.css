@@ -1,5 +1,5 @@
 /*
- * Super Interview theme: "Graphite & Lime"
+ * Cuewell theme: "Graphite & Lime"
  * Design by Ankit Chaudhary.
  *
  * Shared tokens and primitives for every window. Pages link this file after
@@ -199,7 +199,7 @@ body {
   color: var(--oc-text);
 }
 
-/* Brand mark: a lime keycap "S". Pure CSS, scales with --s. */
+/* Brand mark: a lime keycap "C". Pure CSS, scales with --s. */
 .oc-mark {
   --s: 16px;
   display: inline-flex;
@@ -214,7 +214,7 @@ body {
   box-shadow: inset 0 calc(-1 * max(1px, var(--s) * 0.08)) 0 rgba(0, 0, 0, 0.25);
 }
 .oc-mark::after {
-  content: 'S';
+  content: 'C';
   font: 800 calc(var(--s) * 0.62) / 1 var(--oc-mono);
   color: var(--oc-accent-ink);
 }

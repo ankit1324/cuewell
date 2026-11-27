@@ -6,7 +6,7 @@ const os = require('os');
 
 class Logger {
   constructor() {
-    this.logDir = path.join(os.homedir(), '.SuperInterview', 'logs');
+    this.logDir = path.join(os.homedir(), '.Cuewell', 'logs');
     this.ensurePrivateLogDir();
     this.setupLogger();
   }

@@ -1121,7 +1121,7 @@ class MainWindowUI {
             document.body.removeChild(menu);
         });
 
-        const quitOption = this.createMenuItem('Quit Super Interview', 'fa-power-off', () => {
+        const quitOption = this.createMenuItem('Quit Cuewell', 'fa-power-off', () => {
             if (window.electronAPI && window.electronAPI.quit) {
                 window.electronAPI.quit();
             }

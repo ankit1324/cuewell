@@ -1,5 +1,5 @@
 {
-  "name": "super-interview",
+  "name": "cuewell",
   "version": "1.0.0",
   "description": "AI interview copilot",
   "main": "main.js",
@@ -46,8 +46,8 @@
     "electron-builder": "^26.18.1"
   },
   "build": {
-    "appId": "com.ankitchaudhary.superinterview",
-    "productName": "Super Interview",
+    "appId": "com.ankitchaudhary.cuewell",
+    "productName": "Cuewell",
     "directories": {
       "output": "dist"
     },
@@ -102,9 +102,9 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Super Interview uses the microphone to transcribe your speech locally with Whisper.",
-        "NSCameraUsageDescription": "Super Interview does not record video; this entitlement is only present for media-capture compatibility.",
-        "NSScreenCaptureUsageDescription": "Super Interview captures the screen to read on-screen content for AI assistance."
+        "NSMicrophoneUsageDescription": "Cuewell uses the microphone to transcribe your speech locally with Whisper.",
+        "NSCameraUsageDescription": "Cuewell does not record video; this entitlement is only present for media-capture compatibility.",
+        "NSScreenCaptureUsageDescription": "Cuewell captures the screen to read on-screen content for AI assistance."
       }
     },
     "win": {
@@ -171,13 +171,13 @@
       "perMachine": false,
       "include": "scripts/post-install-nsis.nsh",
       "deleteAppDataOnUninstall": false,
-      "artifactName": "Super-Interview-Setup-${version}.${ext}"
+      "artifactName": "Cuewell-Setup-${version}.${ext}"
     },
     "appImage": {
-      "artifactName": "Super-Interview-${version}.${ext}"
+      "artifactName": "Cuewell-${version}.${ext}"
     },
     "dmg": {
-      "title": "Super Interview",
+      "title": "Cuewell",
       "backgroundColor": "#000000",
       "window": {
         "width": 600,

@@ -5,27 +5,41 @@ const fs = require("fs");
 const { URL, fileURLToPath } = require("url");
 const { app, BrowserWindow, Menu, globalShortcut, session, ipcMain, nativeTheme } = require("electron");
 
-// ── Carry data over from the folder used before the rename ──
-// Electron names the userData folder after package.json, so renaming the app
-// to Super Interview gave it a new, empty folder. Builds released under the
-// old name used <appData>/opencluely or <appData>/OpenCluely (one folder on a
-// case-insensitive disk). Before anything reads userData, bring over the .env,
+// ── Carry data over from the folders used before the renames ──
+// Electron names the userData folder after package.json, so each rename gave
+// the app a new, empty folder. Builds released as Super Interview used
+// <appData>/super-interview or <appData>/Super Interview, and builds released
+// as OpenCluely used <appData>/opencluely or <appData>/OpenCluely (source runs
+// use the package name, packaged builds the product name). Before anything
+// reads userData, bring over the .env, the interview context (profile.json),
 // the first-run marker and the downloaded Whisper models. Each step is skipped
-// when the new folder already has the item, so it acts once. The old folder is
-// only read, apart from moving the models out of it, and a failure is logged
-// (once the logger loads) instead of blocking startup.
-const FIRST_RUN_MARKER = ".superinterview-firstrun-completed";
-const LEGACY_FIRST_RUN_MARKER = ".opencluely-firstrun-completed";
+// when the new folder already has the item, so it acts once, and the newest
+// old folder that has the item wins. The old folders are only read, apart
+// from moving the models out of them, and a failure is logged (once the
+// logger loads) instead of blocking startup.
+const FIRST_RUN_MARKER = ".cuewell-firstrun-completed";
+// Markers written under the old names. Either one means onboarding finished.
+const LEGACY_FIRST_RUN_MARKERS = [".superinterview-firstrun-completed", ".opencluely-firstrun-completed"];
 
 function legacyUserDataDirs() {
   try {
     const appData = app.getPath("appData");
-    // Packaged builds used the product name, source runs the package name.
-    const names = app.isPackaged ? ["OpenCluely", "opencluely"] : ["opencluely", "OpenCluely"];
+    // Newest name first. Each pair is the package name (source runs) and the
+    // product name (packaged builds).
+    const names = ["super-interview", "Super Interview", "opencluely", "OpenCluely"];
     return names.map((name) => path.join(appData, name));
   } catch (_) {
     return [];
   }
+}
+
+// Every place an old first-run marker may be, newest folder first.
+function legacyFirstRunMarkerPaths() {
+  const paths = [];
+  for (const dir of legacyUserDataDirs()) {
+    for (const marker of LEGACY_FIRST_RUN_MARKERS) paths.push(path.join(dir, marker));
+  }
+  return paths;
 }
 
 // Copy a small private file (.env holds API keys). The copy is created 0600,
@@ -54,17 +68,21 @@ function migrateLegacyUserData() {
   }
   const oldDirs = legacyUserDataDirs();
   const steps = [
-    { item: ".env", from: ".env", to: ".env", isDir: false },
-    { item: "first-run marker", from: LEGACY_FIRST_RUN_MARKER, to: FIRST_RUN_MARKER, isDir: false },
+    { item: ".env", from: [".env"], to: ".env", isDir: false },
+    // Interview context; src/core/profile-store.js reads it from userData.
+    { item: "interview context", from: ["profile.json"], to: "profile.json", isDir: false },
+    { item: "first-run marker", from: LEGACY_FIRST_RUN_MARKERS, to: FIRST_RUN_MARKER, isDir: false },
     // The folder src/core/whisper-installer.js downloads weights into.
-    { item: "Whisper models", from: ".whisper-models", to: ".whisper-models", isDir: true },
+    { item: "Whisper models", from: [".whisper-models"], to: ".whisper-models", isDir: true },
   ];
   for (const step of steps) {
     try {
       const target = path.join(userData, step.to);
       if (fs.lstatSync(target, { throwIfNoEntry: false })) continue;
-      const source = oldDirs
-        .map((dir) => path.join(dir, step.from))
+      // A marker under an old name in userData itself also counts.
+      const searchDirs = step.to === FIRST_RUN_MARKER ? [userData, ...oldDirs] : oldDirs;
+      const source = searchDirs
+        .flatMap((dir) => step.from.map((name) => path.join(dir, name)))
         .find((candidate) => {
           const stat = fs.statSync(candidate, { throwIfNoEntry: false });
           return !!stat && (step.isDir ? stat.isDirectory() : stat.isFile());
@@ -76,9 +94,9 @@ function migrateLegacyUserData() {
       } else {
         copyPrivateFile(source, target);
       }
-      log.push({ level: "info", message: `Migrated ${step.item} from the previous data folder`, meta: { from: source, to: target } });
+      log.push({ level: "info", message: `Migrated ${step.item} from a previous data folder`, meta: { from: source, to: target } });
     } catch (err) {
-      log.push({ level: "warn", message: `Could not migrate ${step.item} from the previous data folder`, meta: { error: err.message } });
+      log.push({ level: "warn", message: `Could not migrate ${step.item} from a previous data folder`, meta: { error: err.message } });
     }
   }
   return log;
@@ -110,7 +128,7 @@ function resolveEnvPath() {
       return path.join(app.getPath("userData"), ".env");
     } catch (e2) {
       if (!app.isPackaged) return path.join(process.cwd(), ".env");
-      const dir = path.join(require("os").homedir(), ".SuperInterview");
+      const dir = path.join(require("os").homedir(), ".Cuewell");
       try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { /* best effort */ }
       return path.join(dir, ".env");
     }
@@ -152,7 +170,7 @@ function formatEnvValue(raw) {
 // exhaust the X11 client limit, producing "Maximum number of clients reached".
 //
 // Disabling hardware acceleration and the GPU subprocess forces Chromium to
-// render via the CPU (SwiftShader). Super Interview's UI is light enough that
+// render via the CPU (SwiftShader). Cuewell's UI is light enough that
 // this is imperceptible, and it eliminates the GPU crash entirely.
 if (process.platform === "linux") {
   app.disableHardwareAcceleration();
@@ -249,7 +267,12 @@ const MODEL_SETTING_FIELDS = [
 ];
 
 const CODING_LANGUAGES = ["cpp", "c", "python", "java", "javascript"];
-const APP_ICON_KEYS = ["superinterview", "terminal", "activity", "settings"];
+const APP_ICON_KEYS = ["cuewell", "terminal", "activity", "settings"];
+// Icon keys saved under an old app name, mapped to the current key.
+const LEGACY_APP_ICON_KEYS = { superinterview: "cuewell" };
+function normalizeAppIconKey(key) {
+  return Object.prototype.hasOwnProperty.call(LEGACY_APP_ICON_KEYS, key) ? LEGACY_APP_ICON_KEYS[key] : key;
+}
 
 // Which settings fields each window may save. Anything else in the payload
 // rejects the whole save. The toolbar only saves its language picker.
@@ -459,9 +482,9 @@ class ApplicationController {
       // and that persistEnvUpdates() writes to.
       envPath: ENV_PATH,
       sentinelPath: path.join(app.getPath("userData"), FIRST_RUN_MARKER),
-      // Onboarding finished under the old name also counts: the migration
+      // Onboarding finished under an old name also counts: the migration
       // above normally copies that marker, this covers a failed copy.
-      legacySentinelPaths: legacyUserDataDirs().map((dir) => path.join(dir, LEGACY_FIRST_RUN_MARKER)),
+      legacySentinelPaths: legacyFirstRunMarkerPaths(),
       // Packaged builds never read env.example from the launch folder.
       allowLaunchFolder: !app.isPackaged,
     });
@@ -472,7 +495,7 @@ class ApplicationController {
 
     // Window configurations for reference
     this.windowConfigs = {
-      main: { title: "Super Interview" },
+      main: { title: "Cuewell" },
       chat: { title: "Chat" },
       llmResponse: { title: "AI Response" },
       settings: { title: "Settings" },
@@ -740,7 +763,7 @@ class ApplicationController {
   }
 
   /**
-   * Shortcuts that only apply while a Super Interview window is focused.
+   * Shortcuts that only apply while a Cuewell window is focused.
    * They are registered on focus and released as soon as focus leaves the
    * app, so other apps keep these keys.
    */
@@ -1464,7 +1487,7 @@ class ApplicationController {
     // capture.service throws this when desktopCapturer returns no screens,
     // which on macOS means Screen Recording permission is missing.
     const message = process.platform === "darwin" && errorMessage === "No screen sources available for capture"
-      ? "Screen capture failed. Allow Screen Recording for the app that launched Super Interview (System Settings > Privacy & Security > Screen & System Audio Recording), then restart it."
+      ? "Screen capture failed. Allow Screen Recording for the app that launched Cuewell (System Settings > Privacy & Security > Screen & System Audio Recording), then restart it."
       : errorMessage || "Screenshot failed.";
     windowManager.showLLMResponse(message, {
       skill: this.activeSkill,
@@ -1961,8 +1984,8 @@ class ApplicationController {
       activeSkill: this.activeSkill || promptLoader.getDefaultMode(),
       modes: promptLoader.getModes(),
       answerLength: this.answerLength || "auto",
-      appIcon: this.appIcon || "superinterview",
-      selectedIcon: this.appIcon || "superinterview",
+      appIcon: this.appIcon || "cuewell",
+      selectedIcon: this.appIcon || "cuewell",
       windowGap: windowManager.windowGap,
 
       speechProvider: speechService.provider || "whisper",
@@ -2071,7 +2094,7 @@ class ApplicationController {
     });
     check(() => {
       if (has("selectedIcon")) {
-        const value = text("selectedIcon");
+        const value = normalizeAppIconKey(text("selectedIcon"));
         if (!APP_ICON_KEYS.includes(value)) {
           throw new SettingsValidationError("selectedIcon", "Unknown app icon.");
         }
@@ -2232,8 +2255,8 @@ class ApplicationController {
         llmService.setPromptContext({ answerLength: settings.answerLength });
       }
       if (settings.selectedIcon) {
-        this.appIcon = settings.selectedIcon;
-        this.updateAppIcon(settings.selectedIcon);
+        this.appIcon = normalizeAppIconKey(settings.selectedIcon);
+        this.updateAppIcon(this.appIcon);
       }
       if (settings.windowGap !== undefined) {
         const gap = Number(settings.windowGap);
@@ -2562,6 +2585,7 @@ class ApplicationController {
   }
 
   updateAppIcon(iconKey) {
+    iconKey = normalizeAppIconKey(iconKey);
     try {
       const { app } = require("electron");
       const path = require("path");
@@ -2569,7 +2593,7 @@ class ApplicationController {
 
       // Icon mapping for available icons in assests/icons folder
       const iconPaths = {
-        superinterview: "assests/icons/app-icon.png",
+        cuewell: "assests/icons/app-icon.png",
         terminal: "assests/icons/terminal.png",
         activity: "assests/icons/activity.png",
         settings: "assests/icons/settings.png",
@@ -2577,7 +2601,7 @@ class ApplicationController {
 
       // App name mapping for stealth mode
       const appNames = {
-        superinterview: "Super Interview",
+        cuewell: "Cuewell",
         terminal: "Terminal ",
         activity: "Activity Monitor ",
         settings: "System Settings ",
@@ -2662,7 +2686,7 @@ class ApplicationController {
           app.dock.setBadge("");
           // Force dock refresh
           setTimeout(() => {
-            // The icon file is not always named after its key (superinterview).
+            // The icon file is not always named after its key (cuewell).
             app.dock.setIcon(
               iconPath || require("path").resolve(__dirname, `assests/icons/${iconKey}.png`)
             );

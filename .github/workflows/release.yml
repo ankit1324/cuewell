@@ -50,7 +50,7 @@ jobs:
         run: npm ci
 
       # electron-builder reads `version` from package.json for artifact
-      # naming (e.g. Super-Interview-Setup-1.0.0.exe). When we build from a
+      # naming (e.g. Cuewell-Setup-1.0.0.exe). When we build from a
       # git tag (v1.0.7) the package.json still says 1.0.0 by default,
       # so artifact names drift from the release tag. Sync them here.
       # `npm pkg set` is cross-platform and doesn't touch git.
@@ -101,7 +101,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: super-interview-${{ matrix.os }}
+          name: cuewell-${{ matrix.os }}
           path: ${{ matrix.artifact_glob }}
           if-no-files-found: warn
 
@@ -171,7 +171,7 @@ jobs:
             if [ -n "$PREV_TAG" ]; then
               echo "This release includes **${COMMIT_COUNT} commits** since ${PREV_TAG}."
             else
-              echo "First release of Super Interview — **${COMMIT_COUNT} commits**."
+              echo "First release of Cuewell — **${COMMIT_COUNT} commits**."
             fi
             echo ""
             cat CHANGELOG_SECTION.md
@@ -185,19 +185,19 @@ jobs:
 
           | Platform | File | Notes |
           |---|---|---|
-          | **Windows** | `Super-Interview-Setup-*.exe` | NSIS installer — installs app + adds to Start Menu |
+          | **Windows** | `Cuewell-Setup-*.exe` | NSIS installer — installs app + adds to Start Menu |
           | **Linux** | `*.deb` | Debian/Ubuntu — auto-pulls system deps (Python, ffmpeg, GTK) |
           | **Linux** | `*.AppImage` | Universal — no install, just `chmod +x` and run |
 
-          > **macOS:** no pre-built build is shipped. The app is unsigned/un-notarized, so macOS Gatekeeper blocks it as "damaged". Run Super Interview from source instead:
+          > **macOS:** no pre-built build is shipped. The app is unsigned/un-notarized, so macOS Gatekeeper blocks it as "damaged". Run Cuewell from source instead:
           > ```bash
-          > git clone <your-repo-url> && cd super-interview && ./setup.sh
+          > git clone <your-repo-url> && cd cuewell && ./setup.sh
           > ```
           > Requires Node.js 22.12+. See the [README](<your-repo-url>#quick-start) for details.
 
           ## First Run
 
-          On first launch, Super Interview opens the **Settings** window automatically for your **Google Gemini API key**.
+          On first launch, Cuewell opens the **Settings** window automatically for your **Google Gemini API key**.
           Get a free key from [Google AI Studio](https://aistudio.google.com/). You can also edit `.env` directly.
 
           ## Optional: Local Whisper (offline speech)
@@ -240,9 +240,9 @@ jobs:
           #   - Source archives (GitHub auto-generates these from the tag)
           #
           # The order below is the order files appear in the release page.
-          find artifacts -type f -name 'Super-Interview-Setup-*.exe' \
+          find artifacts -type f -name 'Cuewell-Setup-*.exe' \
             -exec cp -v {} release/ \;
-          find artifacts -type f -name 'super-interview_*_amd64.deb' \
+          find artifacts -type f -name 'cuewell_*_amd64.deb' \
             -exec cp -v {} release/ \;
           find artifacts -type f -name '*.AppImage' \
             -exec cp -v {} release/ \;
@@ -259,7 +259,7 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Super Interview ${{ github.ref_name }}
+          name: Cuewell ${{ github.ref_name }}
           draft: false
           prerelease: false
           body_path: RELEASE_BODY.md

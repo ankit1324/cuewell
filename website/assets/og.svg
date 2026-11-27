@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
-  <title>Super Interview: calm, complete answers in every interview round.</title>
+  <title>Cuewell: calm, complete answers in every interview round.</title>
   <defs>
     <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
       <path d="M48 0H0V48" fill="none" stroke="#141511" stroke-opacity=".06" stroke-width="1"/>
@@ -19,8 +19,8 @@
     <rect x="72" y="72" width="56" height="56" fill="#c9f26b"/>
     <rect x="72" y="123.5" width="56" height="4.5" fill="#000" fill-opacity=".25"/>
   </g>
-  <path d="M108 89.8c-1.6-2.6-4.5-4.2-8-4.2-4.7 0-8.2 2.6-8.2 6.3 0 3.7 2.8 5.3 8.2 6.5 5.6 1.2 8.6 3 8.6 6.8 0 4-3.7 6.6-8.6 6.6-3.8 0-7-1.6-8.6-4.4" fill="none" stroke="#141a08" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="146" y="110" font-family="Manrope, 'Manrope Variable', -apple-system, 'Segoe UI', sans-serif" font-size="28" font-weight="750" letter-spacing="-0.4" fill="#141511">Super Interview</text>
+  <path d="M111.86 89.55A12.25 12.25 0 1 0 111.86 105.95" fill="none" stroke="#141a08" stroke-width="5.5"/>
+  <text x="146" y="110" font-family="Manrope, 'Manrope Variable', -apple-system, 'Segoe UI', sans-serif" font-size="28" font-weight="750" letter-spacing="-0.4" fill="#141511">Cuewell</text>
 
   <!-- Eyebrow -->
   <text x="72" y="216" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="17" font-weight="550" letter-spacing="1.6" fill="#5f6058">AI INTERVIEW COPILOT · FREE AND OPEN SOURCE</text>
@@ -45,7 +45,7 @@
   <!-- Toolbar pill -->
   <rect x="744" y="132" width="352" height="40" rx="20" fill="#0d0e11" stroke="#ffffff" stroke-opacity=".14"/>
   <rect x="756" y="144" width="16" height="16" rx="4.5" fill="#c9f26b"/>
-  <text x="764" y="156.5" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10" font-weight="800" fill="#141a08">S</text>
+  <text x="764" y="156.5" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10" font-weight="800" fill="#141a08">C</text>
   <rect x="786" y="143" width="58" height="18" rx="5" fill="#ffffff" fill-opacity=".07"/>
   <text x="815" y="156" text-anchor="middle" font-family="'JetBrains Mono', ui-monospace, Menlo, monospace" font-size="10.5" fill="#b5b7bd">⌘ ⇧ S</text>
   <rect x="852" y="138" width="92" height="28" rx="14" fill="#ff5f57" fill-opacity=".15"/>

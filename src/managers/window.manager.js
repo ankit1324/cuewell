@@ -75,7 +75,7 @@ class WindowManager {
         height: 35,
         useContentSize: true,
         file: 'index.html',
-        title: 'Super Interview'
+        title: 'Cuewell'
       },
       chat: {
         width: 500,
@@ -111,7 +111,7 @@ class WindowManager {
         width: 560,
         height: 680,
         file: 'onboarding.html',
-        title: 'Welcome to Super Interview',
+        title: 'Welcome to Cuewell',
         frame: false,
         titleBarStyle: 'hidden',
         transparent: true,

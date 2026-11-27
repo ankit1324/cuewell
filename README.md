@@ -1,8 +1,8 @@
-# Super Interview
+# Cuewell
 
 A desktop AI interview copilot for practice, mock interviews and conversations where AI help is allowed. Ask by screenshot, voice or typed chat, and read a structured answer as it streams in, starting with one line you can say first.
 
-Super Interview is free and open source (Apache-2.0), built on Electron, and maintained by Ankit Chaudhary. You bring your own AI provider and key. A landing page lives in [`website/`](website/index.html).
+Cuewell is free and open source (Apache-2.0), built on Electron, and maintained by Ankit Chaudhary. You bring your own AI provider and key. A landing page lives in [`website/`](website/index.html).
 
 ## Features
 
@@ -25,7 +25,7 @@ You need Node.js 22.12 or newer. For local voice you also need Python 3 (see [Re
 
 ```bash
 git clone <repo-url>   # TODO(owner): replace with the repository URL
-cd super-interview
+cd cuewell
 ./setup.sh
 ```
 
@@ -95,7 +95,7 @@ Global shortcuts work from any app. On macOS, `Alt` is the Option key.
 | `Cmd/Ctrl + Shift + C` | Open the chat window |
 | `Cmd/Ctrl + Shift + \` | Clear the conversation history |
 
-These work only while a Super Interview window has focus, so other apps keep them:
+These work only while a Cuewell window has focus, so other apps keep them:
 
 | Shortcut | Action |
 |---|---|
@@ -105,7 +105,7 @@ These work only while a Super Interview window has focus, so other apps keep the
 
 With click-through on, you cannot click a window to focus it, so moving the windows by keyboard only works while one still has focus, for example right after you turn click-through on.
 
-If another app already owns a global shortcut, Super Interview cannot register it and logs a warning.
+If another app already owns a global shortcut, Cuewell cannot register it and logs a warning.
 
 ## AI providers
 
@@ -173,7 +173,7 @@ If no speech provider is available, the mic buttons are hidden.
 
 ## Where your data goes
 
-Super Interview has no server and no account, and sends no telemetry or analytics. Your questions, screenshots and interview context go only to the AI provider you picked. Audio leaves your computer only if you choose Azure Speech, and then it goes to Microsoft.
+Cuewell has no server and no account, and sends no telemetry or analytics. Your questions, screenshots and interview context go only to the AI provider you picked. Audio leaves your computer only if you choose Azure Speech, and then it goes to Microsoft.
 
 | Data | Stored | Sent to |
 |---|---|---|
@@ -184,7 +184,7 @@ Super Interview has no server and no account, and sends no telemetry or analytic
 | Microphone audio, Azure Speech | Not saved by the app | Microsoft (Azure Speech) |
 | API keys | `.env` (owner-only on macOS and Linux) | Only the provider each key belongs to |
 | Conversation history | In memory only. Cleared on restart or with `Cmd/Ctrl + Shift + \`. The chat window's clear button clears only the messages it shows. | Recent part, as above |
-| App logs | `~/.SuperInterview/logs`: app events and errors, kept 14 days (error logs 30) | Nowhere |
+| App logs | `~/.Cuewell/logs`: app events and errors, kept 14 days (error logs 30) | Nowhere |
 
 With Ollama on `localhost`, AI requests stay on your machine. The built-in endpoints for the cloud providers use HTTPS.
 
@@ -192,7 +192,7 @@ Setting up local Whisper also downloads Python packages from PyPI and model weig
 
 ## Privacy mode
 
-On macOS and Windows, every Super Interview window is marked as excluded from screen capture (Electron `setContentProtection`). Most screen recording and screen sharing tools then do not show the overlay. Limits:
+On macOS and Windows, every Cuewell window is marked as excluded from screen capture (Electron `setContentProtection`). Most screen recording and screen sharing tools then do not show the overlay. Limits:
 
 - Some browser-based screen sharing, and older capture methods, can still capture the windows.
 - On Linux there is no such window flag, so the windows are always visible in screen shares and recordings.
@@ -202,7 +202,7 @@ Treat privacy mode as a convenience for keeping the overlay out of your own reco
 
 ## Use it responsibly
 
-Super Interview is made for practice, mock interviews and conversations where AI help is allowed. Many employers do not allow AI assistance in live interviews. Check the rules for each interview before you use it, and follow them. You are responsible for how you use it.
+Cuewell is made for practice, mock interviews and conversations where AI help is allowed. Many employers do not allow AI assistance in live interviews. Check the rules for each interview before you use it, and follow them. You are responsible for how you use it.
 
 ## Security model
 
@@ -221,7 +221,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 Allow Screen Recording under System Settings > Privacy & Security > Screen & System Audio Recording, then restart the app. When you run from source, the permission belongs to the app that launched it, such as your terminal or editor.
 
 **Voice does nothing on macOS.**
-Allow Microphone access under System Settings > Privacy & Security > Microphone for Super Interview, or for your terminal or editor when running from source.
+Allow Microphone access under System Settings > Privacy & Security > Microphone for Cuewell, or for your terminal or editor when running from source.
 
 **The screenshot answer describes a blank or black screen.**
 A locked screen, a sleeping display or a screen saver gives a blank capture. Unlock the screen and try again.
@@ -239,7 +239,7 @@ Groq and DeepSeek accept text only. Switch to Gemini, Claude, OpenAI, OpenRouter
 No speech provider is available. Run `./setup.sh` again, finish the Whisper step in onboarding, or enter Azure Speech credentials in Settings.
 
 **A shortcut does not work.**
-Another app may own it; check the log in `~/.SuperInterview/logs`. `Cmd/Ctrl + ,` and the arrow shortcuts only work while a Super Interview window has focus.
+Another app may own it; check the log in `~/.Cuewell/logs`. `Cmd/Ctrl + ,` and the arrow shortcuts only work while a Cuewell window has focus.
 
 **Blank window or GPU crash on Linux.**
 The app already disables GPU acceleration on Linux. Make sure an X11 or XWayland display is available, and try `npm run dev`.
@@ -287,4 +287,4 @@ Planned: export of conversation history to Markdown or PDF.
 
 Released under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Super Interview is maintained by Ankit Chaudhary. It is a modified version of [OpenCluely](https://github.com/TechyCSR/OpenCluely) by TechyCSR, licensed under the Apache License 2.0. Bundled fonts (Manrope, JetBrains Mono) are under the SIL Open Font License 1.1. UI and structure were inspired by [Vysper](https://github.com/varun-singhh/Vysper) by varun-singhh.
+Cuewell is maintained by Ankit Chaudhary. It is a modified version of [OpenCluely](https://github.com/TechyCSR/OpenCluely) by TechyCSR, licensed under the Apache License 2.0. Bundled fonts (Manrope, JetBrains Mono) are under the SIL Open Font License 1.1. UI and structure were inspired by [Vysper](https://github.com/varun-singhh/Vysper) by varun-singhh.

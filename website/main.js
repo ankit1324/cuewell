@@ -1,5 +1,5 @@
 /*
- * Super Interview website: scroll reveal, code copy, and the live demo stage.
+ * Cuewell website: scroll reveal, code copy, and the live demo stage.
  * No dependencies, no network. Everything still reads fine without this file.
  */
 (function () {

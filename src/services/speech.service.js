@@ -2037,7 +2037,7 @@ class SpeechService extends EventEmitter {
   }
 
   async _transcribeWhisperBuffer(audioBuffer) {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'superinterview-whisper-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuewell-whisper-'));
     const audioFilePath = path.join(tempDir, 'segment.wav');
 
     try {
@@ -2078,7 +2078,7 @@ class SpeechService extends EventEmitter {
       }
     }
 
-    const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'superinterview-whisper-out-'));
+    const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuewell-whisper-out-'));
     const args = [
       ...this.whisperCommand.baseArgs,
       audioFilePath,
