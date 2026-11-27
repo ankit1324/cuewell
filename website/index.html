@@ -107,13 +107,20 @@
             <h1 id="hero-title" class="hero-title">Calm, complete answers in <span class="hl">every interview round.</span></h1>
             <p class="hero-sub">A small desktop overlay for interview practice. Ask by voice, screenshot or chat, and read a structured answer as it streams in, starting with one line you can say right away.</p>
             <div class="hero-actions">
-              <div class="cta-stack">
-                <!-- TODO(owner): replace #download with the release download URL once a macOS build is published, and remove the "Coming soon" note. -->
-                <a class="btn btn--lime btn--lg" href="#download">
+              <div class="cta-stack" id="hero-download">
+                <!-- main.js labels this button for the visitor's OS and points it at
+                     the right file. Release links are set by RELEASES_URL in main.js. -->
+                <a class="btn btn--lime btn--lg" href="#download" data-dl-primary aria-describedby="hero-dl-note">
                   <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
-                  Download for macOS
+                  <span data-dl-label>Download Cuewell</span>
                 </a>
-                <span class="cta-note">Coming soon. Build from source today.</span>
+                <span class="cta-note" id="hero-dl-note" data-dl-note>Coming soon. Build from source today.</span>
+                <p class="cta-alt" data-dl-alt>
+                  <span class="cta-alt-label" data-dl-alt-label>Available for</span>
+                  <a href="#dl-mac" data-os="mac">macOS</a>
+                  <a href="#dl-win" data-os="win">Windows</a>
+                  <a href="#dl-linux" data-os="linux">Linux</a>
+                </p>
               </div>
               <!-- TODO(owner): replace #github with the repository URL. -->
               <a class="btn btn--outline btn--lg" href="#github">
@@ -123,7 +130,8 @@
             </div>
             <ul class="hero-meta" aria-label="Requirements">
               <li>macOS 13+</li>
-              <li>Windows 10+ (64-bit)</li>
+              <li>Windows 10+</li>
+              <li>Linux</li>
               <li>Apache-2.0</li>
               <li>Bring your own AI key</li>
             </ul>
@@ -327,7 +335,7 @@
             <p class="card-label">03 / Your context</p>
             <svg class="card-ic" aria-hidden="true"><use href="#i-card"/></svg>
             <h3 class="h3">Answers that fit the job</h3>
-            <p>Add the role, company, job description, your resume and notes. They're stored on your Mac and sent to your AI provider with each question, so answers match the job and your experience.</p>
+            <p>Add the role, company, job description, your resume and notes. They're stored on your computer and sent to your AI provider with each question, so answers match the job and your experience.</p>
             <ul class="ctx" aria-label="Context fields">
               <li>Role</li><li>Company</li><li>Job description</li><li>Resume</li><li>Notes</li>
             </ul>
@@ -337,7 +345,7 @@
             <p class="card-label">04 / Voice, locally transcribed</p>
             <svg class="card-ic" aria-hidden="true"><use href="#i-mic"/></svg>
             <h3 class="h3">Ask out loud</h3>
-            <p>Press <span class="kbd-group"><kbd class="sym">⌥</kbd><kbd>R</kbd></span> and speak. Whisper transcribes on your Mac, and only the text goes to your AI provider. Start and stop by hand, or let pause detection end the question.</p>
+            <p>Press <span class="kbd-group"><kbd class="sym">⌥</kbd><kbd>R</kbd></span> and speak. Whisper transcribes on your computer, and only the text goes to your AI provider. Start and stop by hand, or let pause detection end the question.</p>
           </article>
 
           <article class="card reveal">
@@ -391,7 +399,7 @@
             </div>
           </li>
         </ol>
-        <p class="footnote reveal">Shortcuts shown for macOS. On Windows, use Ctrl for ⌘ and Alt for ⌥.</p>
+        <p class="footnote reveal">Shortcuts shown for macOS. On Windows and Linux, use Ctrl for ⌘ and Alt for ⌥.</p>
       </div>
     </section>
 
@@ -403,7 +411,7 @@
             <p class="eyebrow">Bring your own AI</p>
             <h2 id="providers-title" class="h2">Your provider, your key, your bill.</h2>
           </div>
-          <p class="lede">Choose a provider in Settings. Keys stay on your Mac in an owner-only file and go only to the provider they belong to.</p>
+          <p class="lede">Choose a provider in Settings. Keys stay on your computer in a file only you can read and go only to the provider they belong to.</p>
         </div>
         <ul class="providers reveal" aria-label="Supported AI providers">
           <li class="provider"><span class="p-name">Gemini</span><span class="p-note">Default · text and screenshots</span></li>
@@ -415,7 +423,7 @@
           <li class="provider"><span class="p-name">Ollama</span><span class="p-note">Runs locally · no key</span></li>
           <li class="provider provider--key">
             <svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>
-            <span class="p-note">Keys live in an owner-only file on your Mac. There is no Cuewell server.</span>
+            <span class="p-note">Keys live in a file on your computer that only you can read. There is no Cuewell server.</span>
           </li>
         </ul>
       </div>
@@ -429,7 +437,7 @@
             <p class="eyebrow">Where your data goes</p>
             <h2 id="data-title" class="h2">One destination: the AI provider you picked.</h2>
           </div>
-          <p class="lede">No accounts, no telemetry, no Cuewell servers. Here is exactly what leaves your Mac.</p>
+          <p class="lede">No accounts, no telemetry, no Cuewell servers. Here is exactly what leaves your computer.</p>
         </div>
         <div class="table-wrap reveal">
           <table class="data-table" role="table">
@@ -450,17 +458,17 @@
               </tr>
               <tr role="row">
                 <th scope="row" role="rowheader">Interview context: role, company, job description, resume, notes</th>
-                <td role="cell" data-label="Where it lives">On your Mac</td>
+                <td role="cell" data-label="Where it lives">On your computer</td>
                 <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--sent">Sent</span> with each question, to tailor the answer</td>
               </tr>
               <tr role="row">
                 <th scope="row" role="rowheader">Microphone audio</th>
-                <td role="cell" data-label="Where it lives">Transcribed on your Mac by local Whisper</td>
+                <td role="cell" data-label="Where it lives">Transcribed on your computer by local Whisper</td>
                 <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--local">Stays</span> only the text transcript is sent. If you choose Azure Speech instead, audio goes to Azure.</td>
               </tr>
               <tr role="row">
                 <th scope="row" role="rowheader">API keys</th>
-                <td role="cell" data-label="Where it lives">Owner-only file on your Mac</td>
+                <td role="cell" data-label="Where it lives">Owner-only file on your computer</td>
                 <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--local">Stays</span> used only to sign requests to its own provider</td>
               </tr>
               <tr role="row">
@@ -508,7 +516,7 @@
           </details>
           <details>
             <summary>Which platforms does it support?</summary>
-            <p>macOS 13 (Ventura) or later and 64-bit Windows 10 or later. It's built on Electron. It also runs on Linux from source, but privacy mode does not work there.</p>
+            <p>macOS 13 (Ventura) or later on Apple silicon or Intel, 64-bit Windows 10 or 11, and 64-bit Linux (AppImage or .deb). On Linux, privacy mode does not work, so the overlay shows in screen shares. See <a href="#download">Download</a> for each file.</p>
           </details>
           <details>
             <summary>Can people on a screen share see the overlay?</summary>
@@ -520,7 +528,7 @@
           </details>
           <details>
             <summary>What does it send, and to whom?</summary>
-            <p>Only the AI provider you choose receives your question or transcript, screenshots you capture, recent history and your interview context. Audio is transcribed on your Mac. See <a href="#data">Where your data goes</a> for the full list.</p>
+            <p>Only the AI provider you choose receives your question or transcript, screenshots you capture, recent history and your interview context. With local Whisper, audio is transcribed on your computer. See <a href="#data">Where your data goes</a> for the full list.</p>
           </details>
           <details>
             <summary>Is it allowed in interviews?</summary>
@@ -528,7 +536,8 @@
           </details>
           <details>
             <summary>How do I install it?</summary>
-            <p>A packaged download is coming soon. Today you can build it from source: clone the repository and run <code>./setup.sh</code>, which installs dependencies, sets up local Whisper and launches the app. You need Node.js 22.12 or newer.</p>
+            <p data-dl-live hidden>Pick the file for your system under <a href="#download">Download</a> and open it. The builds are not code-signed yet, so the first launch shows a security warning; each download card says how to get past it. You can also build from source with <code>./setup.sh</code> (macOS, Linux) or <code>setup.ps1</code> (Windows).</p>
+            <p data-dl-soon>Packaged downloads for macOS, Windows and Linux are coming soon. Today you can build it from source: clone the repository and run <code>./setup.sh</code> on macOS or Linux, or <code>setup.ps1</code> in PowerShell on Windows. The script installs dependencies, sets up local Whisper and launches the app. You need Node.js 22.12 or newer.</p>
           </details>
           <details>
             <summary>How is it related to OpenCluely?</summary>
@@ -552,21 +561,83 @@
         </div>
         <h2 id="cta-title" class="cta-title">Walk into your next practice round prepared.</h2>
         <p class="cta-sub">Free, open source, and running on your own machine with the AI you already use.</p>
+        <p class="dl-soon" data-dl-soon role="note">
+          <svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>
+          <span>Downloads are coming soon. Until then, build from source with the commands below.</span>
+        </p>
+
+        <!-- File names follow package.json "build". When the version changes,
+             update the data-file values and file names here. Links are built
+             from RELEASES_URL in main.js. -->
+        <div class="dl-grid">
+          <article class="dl-card" id="dl-mac" aria-labelledby="dl-mac-title">
+            <p class="dl-label"><span>01 / macOS</span><span class="dl-tag" data-dl-soon>Coming soon</span></p>
+            <h3 class="dl-title" id="dl-mac-title">macOS</h3>
+            <p class="dl-req">macOS 13 Ventura or later. Apple silicon and Intel.</p>
+            <ul class="dl-files" aria-label="macOS downloads">
+              <li><a class="dl-file dl-file--main" data-file="Cuewell-1.0.0-mac-arm64.dmg" data-dl-id="mac-arm64">
+                <span class="dl-file-text"><span class="dl-file-name">Apple silicon (M1 and later)</span><span class="dl-file-meta">Cuewell-1.0.0-mac-arm64.dmg</span></span>
+              </a></li>
+              <li><a class="dl-file" data-file="Cuewell-1.0.0-mac-x64.dmg" data-dl-id="mac-x64">
+                <span class="dl-file-text"><span class="dl-file-name">Intel</span><span class="dl-file-meta">Cuewell-1.0.0-mac-x64.dmg</span></span>
+              </a></li>
+            </ul>
+            <p class="dl-more" data-dl-live hidden>Also as .zip:
+              <a class="dl-inline" data-file="Cuewell-1.0.0-mac-arm64.zip" aria-label="Apple silicon .zip">Apple silicon</a>,
+              <a class="dl-inline" data-file="Cuewell-1.0.0-mac-x64.zip" aria-label="Intel .zip">Intel</a>
+            </p>
+            <p class="dl-note">
+              <svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>
+              <span>Not code-signed yet, so macOS blocks the first launch. Open System Settings &gt; Privacy &amp; Security and choose <strong>Open Anyway</strong>.</span>
+            </p>
+          </article>
+
+          <article class="dl-card" id="dl-win" aria-labelledby="dl-win-title">
+            <p class="dl-label"><span>02 / Windows</span><span class="dl-tag" data-dl-soon>Coming soon</span></p>
+            <h3 class="dl-title" id="dl-win-title">Windows</h3>
+            <p class="dl-req">Windows 10 or 11, 64-bit. Installer or portable app.</p>
+            <ul class="dl-files" aria-label="Windows downloads">
+              <li><a class="dl-file dl-file--main" data-file="Cuewell-1.0.0-win-x64-setup.exe" data-dl-id="win-setup">
+                <span class="dl-file-text"><span class="dl-file-name">Installer (no admin needed)</span><span class="dl-file-meta">Cuewell-1.0.0-win-x64-setup.exe</span></span>
+              </a></li>
+              <li><a class="dl-file" data-file="Cuewell-1.0.0-win-x64-portable.exe" data-dl-id="win-portable">
+                <span class="dl-file-text"><span class="dl-file-name">Portable (no install)</span><span class="dl-file-meta">Cuewell-1.0.0-win-x64-portable.exe</span></span>
+              </a></li>
+            </ul>
+            <p class="dl-note">
+              <svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>
+              <span>Not code-signed yet, so SmartScreen may say “Windows protected your PC”. Choose <strong>More info</strong>, then <strong>Run anyway</strong>.</span>
+            </p>
+          </article>
+
+          <article class="dl-card" id="dl-linux" aria-labelledby="dl-linux-title">
+            <p class="dl-label"><span>03 / Linux</span><span class="dl-tag" data-dl-soon>Coming soon</span></p>
+            <h3 class="dl-title" id="dl-linux-title">Linux</h3>
+            <p class="dl-req">64-bit (x64), X11 or XWayland. Voice input needs alsa-utils or sox.</p>
+            <ul class="dl-files" aria-label="Linux downloads">
+              <li><a class="dl-file dl-file--main" data-file="Cuewell-1.0.0-linux-x86_64.AppImage" data-dl-id="linux-appimage">
+                <span class="dl-file-text"><span class="dl-file-name">AppImage (most distributions)</span><span class="dl-file-meta">Cuewell-1.0.0-linux-x86_64.AppImage</span></span>
+              </a></li>
+              <li><a class="dl-file" data-file="Cuewell-1.0.0-linux-amd64.deb" data-dl-id="linux-deb">
+                <span class="dl-file-text"><span class="dl-file-name">.deb (Ubuntu, Debian)</span><span class="dl-file-meta">Cuewell-1.0.0-linux-amd64.deb</span></span>
+              </a></li>
+            </ul>
+            <p class="dl-more">Make the AppImage executable before you run it: <code>chmod +x</code>. Some distributions also need libfuse2.</p>
+            <p class="dl-note">
+              <svg class="ic" aria-hidden="true"><use href="#i-alert"/></svg>
+              <span>No screen-capture protection: the overlay shows in screen shares and recordings. On Wayland, global shortcuts need a recent desktop. The toolbar buttons always work.</span>
+            </p>
+          </article>
+        </div>
+
         <div class="hero-actions hero-actions--center">
-          <div class="cta-stack">
-            <!-- TODO(owner): replace with the release download URL. -->
-            <a class="btn btn--lime btn--lg" href="#download" aria-describedby="cta-soon">
-              <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
-              Download for macOS
-            </a>
-            <span class="cta-note cta-note--dark" id="cta-soon">Coming soon</span>
-          </div>
           <!-- TODO(owner): replace #github with the repository URL. -->
           <a class="btn btn--dark-outline btn--lg" href="#github">View on GitHub <svg class="ic" aria-hidden="true"><use href="#i-ext"/></svg></a>
         </div>
-        <div class="terminal" role="group" aria-label="Build from source">
-          <span class="term-label">Build from source today</span>
-          <code><span class="term-prompt" aria-hidden="true">$</span> ./setup.sh</code>
+        <div class="terminal" role="group" aria-labelledby="term-label">
+          <span class="term-label" id="term-label">Or build from source</span>
+          <span class="term-row"><span class="term-os">macOS, Linux</span><code><span class="term-prompt" aria-hidden="true">$</span> ./setup.sh</code></span>
+          <span class="term-row"><span class="term-os">Windows</span><code><span class="term-prompt" aria-hidden="true">&gt;</span> powershell -ExecutionPolicy Bypass -File .\setup.ps1</code></span>
         </div>
       </div>
     </section>
@@ -594,7 +665,7 @@
           <p class="footer-h">Project</p>
           <!-- TODO(owner): replace these placeholders with repository links. -->
           <a href="#github">GitHub</a>
-          <a href="#releases">Releases</a>
+          <a href="#download" data-dl-releases>Releases</a>
           <a href="#license">License</a>
           <a href="#data">Privacy</a>
         </div>

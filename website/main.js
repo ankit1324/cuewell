@@ -568,7 +568,122 @@
     else if (reduceMQ.addListener) reduceMQ.addListener(onMotionChange);
   }
 
+  /* ---------- Downloads ---------- */
+
+  /* TODO(owner): set to https://github.com/<owner>/cuewell/releases/latest
+     once a release is published. While this is a "#..." placeholder, the page
+     shows "Coming soon" and every download link stays on this page.
+     A /releases/tag/vX.Y.Z URL also works. File names live in index.html
+     (data-file on each .dl-file link). */
+  var RELEASES_URL = '#download';
+  var VERSION = '1.0.0';
+
+  function releaseBase() {
+    var url = String(RELEASES_URL || '').trim().replace(/\/+$/, '');
+    if (!/^https:\/\/[^\s"'<>]+$/i.test(url)) return null;
+    return url;
+  }
+
+  // GitHub serves assets at .../releases/latest/download/<file> and
+  // .../releases/download/<tag>/<file>.
+  function fileUrl(base, file) {
+    var name = encodeURIComponent(file);
+    var tag = base.match(/^(.*\/releases)\/tag\/([^/?#]+)$/);
+    if (tag) return tag[1] + '/download/' + tag[2] + '/' + name;
+    if (/\/releases$/.test(base)) base += '/latest';
+    return base + '/download/' + name;
+  }
+
+  var OS_NAMES = { mac: 'macOS', win: 'Windows', linux: 'Linux' };
+
+  function detectOS() {
+    var nav = window.navigator || {};
+    var uad = nav.userAgentData;
+    var ua = nav.userAgent || '';
+    var platform = (uad && uad.platform) || nav.platform || '';
+    // iPadOS reports itself as a Mac; touch support gives it away.
+    var ipad = /Macintosh/.test(ua) && nav.maxTouchPoints > 1;
+    if ((uad && uad.mobile) || ipad || /Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return 'mobile';
+    if (/CrOS/.test(ua) || /Chrome OS/i.test(platform)) return 'other';
+    if (/mac/i.test(platform) || /Macintosh|Mac OS X/.test(ua)) return 'mac';
+    if (/win/i.test(platform) || /Windows/.test(ua)) return 'win';
+    if (/linux|x11|bsd/i.test(platform) || /Linux|X11/.test(ua)) return 'linux';
+    return 'other';
+  }
+
+  function initDownloads() {
+    var hero = $('#hero-download');
+    var base = releaseBase();
+    var live = !!base;
+    var os = detectOS();
+
+    // Release state: real links, or "Coming soon" with no dead links.
+    $$('[data-dl-soon]').forEach(function (n) { n.hidden = live; });
+    $$('[data-dl-live]').forEach(function (n) { n.hidden = !live; });
+    $$('[data-file]').forEach(function (a) {
+      if (live) {
+        a.href = fileUrl(base, a.getAttribute('data-file'));
+        a.classList.remove('is-soon');
+      } else {
+        // No href: not focusable and not a dead link. The card says "Coming soon".
+        a.removeAttribute('href');
+        a.classList.add('is-soon');
+      }
+    });
+    if (live) $$('[data-dl-releases]').forEach(function (a) { a.href = base; });
+
+    if (!hero) return;
+    var btn = $('[data-dl-primary]', hero);
+    var label = $('[data-dl-label]', hero);
+    var note = $('[data-dl-note]', hero);
+    var alt = $('[data-dl-alt]', hero);
+    var altLabel = $('[data-dl-alt-label]', hero);
+    if (!btn || !label) return;
+
+    function setPrimary(id, detail) {
+      var link = $('[data-dl-id="' + id + '"]');
+      btn.href = live && link ? link.href : '#dl-' + os;
+      if (note && live) note.textContent = 'Version ' + VERSION + ' · ' + detail;
+    }
+
+    if (OS_NAMES[os]) {
+      label.textContent = 'Download for ' + OS_NAMES[os];
+      if (altLabel) altLabel.textContent = 'Also for';
+      if (alt) $$('[data-os="' + os + '"]', alt).forEach(function (a) { a.remove(); });
+    } else {
+      // Phones, tablets, Chromebooks: Cuewell is a desktop app.
+      label.textContent = 'See desktop downloads';
+      btn.href = '#download';
+      if (note && live) note.textContent = 'Desktop app for macOS, Windows and Linux.';
+      return;
+    }
+
+    if (os === 'win') setPrimary('win-setup', 'Installer, no admin needed');
+    else if (os === 'linux') setPrimary('linux-appimage', 'AppImage, x64');
+    else {
+      setPrimary('mac-arm64', 'Apple silicon');
+      if (alt) {
+        var intel = doc.createElement('a');
+        intel.href = '#dl-mac';
+        intel.textContent = 'Intel Mac';
+        alt.insertBefore(intel, $('a', alt));
+      }
+      // Chromium can report the CPU. Safari and Firefox cannot, so Apple
+      // silicon stays the default there, as it fits most current Macs.
+      var uad = navigator.userAgentData;
+      if (uad && uad.getHighEntropyValues) {
+        uad.getHighEntropyValues(['architecture']).then(function (v) {
+          if (v && v.architecture === 'x86') {
+            setPrimary('mac-x64', 'Intel');
+            if (intel) intel.textContent = 'Apple silicon Mac';
+          }
+        }, function () { /* keep the Apple silicon default */ });
+      }
+    }
+  }
+
   function init() {
+    initDownloads();
     initReveal();
     initCopy();
     initAppIcons();
