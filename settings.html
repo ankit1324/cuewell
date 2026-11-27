@@ -798,6 +798,21 @@
             flex: none;
         }
 
+        .sw-row > .sw-confirm {
+            grid-column: 1 / -1;
+        }
+
+        .sw-field-help {
+            margin-top: 6px;
+        }
+
+        .sw-row-note {
+            margin: 0;
+            font-size: var(--oc-fs-sm);
+            line-height: 1.55;
+            color: var(--oc-text-2);
+        }
+
         /* ---------- Status blocks ---------- */
 
         .sw-state {
@@ -1224,6 +1239,7 @@
             <nav class="sw-nav" id="settingsNav" aria-label="Sections">
                 <button type="button" class="sw-nav-item" data-nav="general"><i class="fas fa-sliders" aria-hidden="true"></i><span class="sw-nav-label">General</span><span class="sw-nav-count"></span></button>
                 <button type="button" class="sw-nav-item" data-nav="ai"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i><span class="sw-nav-label">AI provider</span><span class="sw-nav-alert" id="aiNavAlert" title="The selected provider has no key" hidden></span><span class="sw-nav-count"></span></button>
+                <button type="button" class="sw-nav-item" data-nav="you"><i class="fas fa-user" aria-hidden="true"></i><span class="sw-nav-label">About you</span><span class="sw-nav-count"></span></button>
                 <button type="button" class="sw-nav-item" data-nav="context"><i class="fas fa-id-card" aria-hidden="true"></i><span class="sw-nav-label">Interview context</span><span class="sw-nav-count"></span></button>
                 <button type="button" class="sw-nav-item" data-nav="voice"><i class="fas fa-microphone" aria-hidden="true"></i><span class="sw-nav-label">Voice</span><span class="sw-nav-count"></span></button>
                 <button type="button" class="sw-nav-item" data-nav="shortcuts"><i class="fas fa-keyboard" aria-hidden="true"></i><span class="sw-nav-label">Shortcuts</span><span class="sw-nav-count"></span></button>
@@ -1372,14 +1388,175 @@
                     </div>
                 </section>
 
+                <!-- ============ About you ============ -->
+                <section class="sw-section" data-section="you" aria-labelledby="h-you" hidden>
+                    <h2 class="oc-label sw-section-title" id="h-you">About you</h2>
+                    <p class="sw-intro">Answers use these details instead of blanks like [X years] or [Current Company]. Every field is optional.</p>
+                    <div class="sw-banner" data-profile-load-error role="alert" hidden>
+                        <i class="fas fa-circle-exclamation" aria-hidden="true"></i>
+                        <div class="sw-banner-body">Your details could not be loaded, so editing is off to keep what is saved.</div>
+                        <button type="button" class="oc-btn" data-profile-retry>Try again</button>
+                    </div>
+                    <div class="sw-group" data-search="about you personal details profile background">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title">Your background</h3>
+                            <span class="sw-group-status" role="status" aria-live="polite" data-profile-status></span>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="full name preferred name nickname call me first name">
+                            <div class="sw-fields-2">
+                                <div>
+                                    <label class="sw-field-label" for="profileFullName">Full name</label>
+                                    <input type="text" class="oc-input" id="profileFullName" data-profile-field="fullName" maxlength="100" placeholder="Priya Sharma" spellcheck="false" autocomplete="off">
+                                </div>
+                                <div>
+                                    <label class="sw-field-label" for="profilePreferredName">Preferred name</label>
+                                    <input type="text" class="oc-input" id="profilePreferredName" data-profile-field="preferredName" maxlength="60" placeholder="Priya" spellcheck="false" autocomplete="off" aria-describedby="profilePreferredNameHelp">
+                                    <p class="sw-row-help sw-field-help" id="profilePreferredNameHelp">What to call you, for example when you introduce yourself.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="current title job position designation current company employer organisation organization">
+                            <div class="sw-fields-2">
+                                <div>
+                                    <label class="sw-field-label" for="profileCurrentTitle">Current title</label>
+                                    <input type="text" class="oc-input" id="profileCurrentTitle" data-profile-field="currentTitle" maxlength="150" placeholder="Software Engineer II" spellcheck="false" autocomplete="off">
+                                </div>
+                                <div>
+                                    <label class="sw-field-label" for="profileCurrentCompany">Current company</label>
+                                    <input type="text" class="oc-input" id="profileCurrentCompany" data-profile-field="currentCompany" maxlength="150" placeholder="Globex" spellcheck="false" autocomplete="off">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="total years of experience work experience seniority languages you speak spoken english hindi">
+                            <div class="sw-fields-2">
+                                <div>
+                                    <label class="sw-field-label" for="profileYearsExperience">Total years of experience</label>
+                                    <input type="text" class="oc-input" id="profileYearsExperience" data-profile-field="yearsExperience" inputmode="decimal" maxlength="4" placeholder="5" spellcheck="false" autocomplete="off" aria-describedby="profileYearsExperienceHelp">
+                                    <p class="sw-row-help sw-field-help" id="profileYearsExperienceHelp">A number from 0 to 60, such as 3 or 4.5.</p>
+                                </div>
+                                <div>
+                                    <label class="sw-field-label" for="profileLanguages">Languages you speak</label>
+                                    <input type="text" class="oc-input" id="profileLanguages" data-profile-field="languages" maxlength="200" placeholder="English, Hindi" spellcheck="false" autocomplete="off">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="key skills tech stack technologies tools frameworks">
+                            <div>
+                                <label class="sw-field-label" for="profileSkills"><span>Key skills</span><span class="sw-count" data-count-for="profileSkills" aria-hidden="true"></span></label>
+                                <input type="text" class="oc-input" id="profileSkills" data-profile-field="skills" maxlength="500" placeholder="Java, Spring Boot, PostgreSQL, AWS" spellcheck="false" autocomplete="off" aria-describedby="profileSkillsHelp">
+                                <p class="sw-row-help sw-field-help" id="profileSkillsHelp">Your tech stack, separated by commas.</p>
+                            </div>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="notable projects achievements accomplishments impact wins examples stories">
+                            <div>
+                                <label class="sw-field-label" for="profileAchievements"><span>Notable projects and achievements</span><span class="sw-count" data-count-for="profileAchievements" aria-hidden="true"></span></label>
+                                <textarea class="oc-input" id="profileAchievements" data-profile-field="achievements" maxlength="4000" rows="4" placeholder="- Cut checkout latency by 40% by adding a Redis cache&#10;- Led the move of 12 services to Kubernetes" aria-describedby="profileAchievementsHelp"></textarea>
+                                <p class="sw-row-help sw-field-help" id="profileAchievementsHelp">Short points, one per line. Behavioral answers build their stories from these.</p>
+                            </div>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="education degree college university school graduation year qualification">
+                            <div>
+                                <label class="sw-field-label" for="profileEducation"><span>Education</span><span class="sw-count" data-count-for="profileEducation" aria-hidden="true"></span></label>
+                                <textarea class="oc-input" id="profileEducation" data-profile-field="education" maxlength="500" rows="2" placeholder="B.Tech in Computer Science, NIT Trichy, 2019"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sw-group" data-search="job search offer">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title">Job search</h3>
+                            <span class="sw-group-status" role="status" aria-live="polite" data-profile-status></span>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="location city based relocation relocate move">
+                            <div class="sw-fields-2">
+                                <div>
+                                    <label class="sw-field-label" for="profileLocation">Location</label>
+                                    <input type="text" class="oc-input" id="profileLocation" data-profile-field="location" maxlength="150" placeholder="Bengaluru, India" spellcheck="false" autocomplete="off">
+                                </div>
+                                <div>
+                                    <label class="sw-field-label" for="profileRelocation">Open to relocation</label>
+                                    <select class="oc-input" id="profileRelocation" data-profile-field="relocation">
+                                        <option value="">Not set</option>
+                                        <option value="yes">Yes</option>
+                                        <option value="no">No</option>
+                                        <option value="maybe">Maybe</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="notice period joining start date availability expected salary compensation ctc pay package lpa">
+                            <div class="sw-fields-2">
+                                <div>
+                                    <label class="sw-field-label" for="profileNoticePeriod">Notice period</label>
+                                    <input type="text" class="oc-input" id="profileNoticePeriod" data-profile-field="noticePeriod" maxlength="100" placeholder="30 days" spellcheck="false" autocomplete="off">
+                                </div>
+                                <div>
+                                    <label class="sw-field-label" for="profileExpectedSalary">Expected salary</label>
+                                    <input type="text" class="oc-input" id="profileExpectedSalary" data-profile-field="expectedSalary" maxlength="100" placeholder="18-22 LPA" spellcheck="false" autocomplete="off" aria-describedby="profileExpectedSalaryHelp">
+                                    <p class="sw-row-help sw-field-help" id="profileExpectedSalaryHelp">Salary answers quote this.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sw-group" data-search="answer style">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title">Answer style</h3>
+                            <span class="sw-group-status" role="status" aria-live="polite" data-profile-status></span>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="tone confident friendly formal concise answer in language reply translate">
+                            <div class="sw-fields-2">
+                                <div>
+                                    <label class="sw-field-label" for="profileTone">Tone</label>
+                                    <select class="oc-input" id="profileTone" data-profile-field="tone" aria-describedby="profileToneHelp">
+                                        <option value="">Default</option>
+                                        <option value="confident">Confident</option>
+                                        <option value="friendly">Friendly</option>
+                                        <option value="formal">Formal</option>
+                                        <option value="concise">Concise</option>
+                                    </select>
+                                    <p class="sw-row-help sw-field-help" id="profileToneHelp">How answers sound.</p>
+                                </div>
+                                <div>
+                                    <label class="sw-field-label" for="profileAnswerLanguage">Answer in</label>
+                                    <input type="text" class="oc-input" id="profileAnswerLanguage" data-profile-field="answerLanguage" maxlength="40" placeholder="English" spellcheck="false" autocomplete="off" aria-describedby="profileAnswerLanguageHelp">
+                                    <p class="sw-row-help sw-field-help" id="profileAnswerLanguageHelp">Leave empty for English. Code and technical terms stay as they are.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sw-group" data-search="clear all delete remove erase reset personal details privacy stored sent provider">
+                        <div class="sw-row sw-row--auto">
+                            <p class="sw-row-note" id="youNote">Used to personalize answers. Stored only on this computer and sent to your AI provider with each question.</p>
+                            <div class="sw-row-control">
+                                <button type="button" class="oc-btn oc-btn--danger" id="youClear" aria-describedby="youNote youClearStatus"><i class="fas fa-trash-can" aria-hidden="true"></i>Clear all</button>
+                            </div>
+                            <div class="sw-confirm" id="youClearConfirm" role="group" aria-labelledby="youClearConfirmText" hidden>
+                                <p id="youClearConfirmText">Clear every field on this page? Your interview context is kept.</p>
+                                <div class="sw-inline">
+                                    <button type="button" class="oc-btn oc-btn--danger" id="youClearYes">Clear all</button>
+                                    <button type="button" class="oc-btn oc-btn--ghost" id="youClearNo">Cancel</button>
+                                </div>
+                            </div>
+                            <div class="sw-status" id="youClearStatus" role="status"></div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- ============ Interview context ============ -->
                 <section class="sw-section" data-section="context" aria-labelledby="h-context" hidden>
                     <h2 class="oc-label sw-section-title" id="h-context">Interview context</h2>
                     <p class="sw-intro">Sent to your AI provider with every question, so answers fit the job and your experience. Stored on this computer in <code>profile.json</code>, not in <code>.env</code>.</p>
+                    <div class="sw-banner" data-profile-load-error role="alert" hidden>
+                        <i class="fas fa-circle-exclamation" aria-hidden="true"></i>
+                        <div class="sw-banner-body">Your interview context could not be loaded, so editing is off to keep what is saved.</div>
+                        <button type="button" class="oc-btn" data-profile-retry>Try again</button>
+                    </div>
                     <div class="sw-group" data-search="interview context profile job role company description resume cv notes">
                         <div class="sw-group-head">
                             <h3 class="sw-group-title">Your interview</h3>
-                            <span class="sw-group-status" id="contextStatus" role="status" aria-live="polite"></span>
+                            <span class="sw-group-status" id="contextStatus" role="status" aria-live="polite" data-profile-status></span>
                         </div>
                         <div class="sw-row sw-row--stack" data-search="target role position title company employer">
                             <div class="sw-fields-2">
@@ -1676,7 +1853,7 @@
                         <dl class="sw-defs">
                             <dt>Settings file</dt>
                             <dd class="sw-mono" id="aboutEnvPath">Unknown</dd>
-                            <dt>Interview context</dt>
+                            <dt>About you and interview context</dt>
                             <dd class="sw-mono" id="aboutProfilePath">Unknown</dd>
                             <dt>Logs</dt>
                             <dd class="sw-mono" id="aboutLogsPath">Unknown</dd>

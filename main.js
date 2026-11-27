@@ -1850,7 +1850,13 @@ class ApplicationController {
     });
 
     this.handleIpc("get-profile", () => {
-      return { success: true, profile: { ...this.profile }, limits: profileStore.PROFILE_FIELD_LIMITS };
+      // limits: interview context fields; aboutLimits: About you text fields.
+      return {
+        success: true,
+        profile: { ...this.profile },
+        limits: profileStore.PROFILE_FIELD_LIMITS,
+        aboutLimits: profileStore.ABOUT_FIELD_LIMITS,
+      };
     });
 
     this.handleIpc("save-profile", (event, profile) => {
@@ -1862,7 +1868,7 @@ class ApplicationController {
           return { success: false, error: error.message, field: error.field };
         }
         logger.error("Failed to save interview context", { error: error.message });
-        return { success: false, error: "Could not save the interview context." };
+        return { success: false, error: "Could not save your details to this computer. Try again." };
       }
       llmService.setPromptContext({ profile: this.profile });
       // Field names only: the values are personal data.

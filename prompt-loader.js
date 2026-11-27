@@ -34,6 +34,17 @@ const PROFILE_PROMPT_FIELDS = [
   { key: 'notes', label: "Candidate's notes (follow these as preferences)", block: true }
 ];
 
+// About you (profile.json) choice values as they appear in the prompt.
+// Looked up with ownValue so a value such as "constructor" matches nothing.
+const RELOCATION_TEXT = { yes: 'yes', no: 'no', maybe: 'maybe, open to discussing it' };
+const TONE_RULES = {
+  confident: 'confident. Sound assured and direct, with no hedging, apologies or filler.',
+  friendly: 'friendly. Sound warm and conversational while staying professional.',
+  formal: 'formal. Sound polished and professional, with no slang or casual phrases.',
+  concise: 'concise. Use the fewest words that still answer fully; cut every extra phrase.'
+};
+const ownValue = (map, key) => (typeof key === 'string' && Object.prototype.hasOwnProperty.call(map, key) ? map[key] : '');
+
 class PromptLoader {
   constructor() {
     this.prompts = new Map();
@@ -445,36 +456,128 @@ STRICT REQUIREMENTS:
   }
 
   /**
-   * Interview context as a compact prompt section, or '' when every field is
-   * empty. Only non-empty fields are included.
+   * Candidate context (About you and the interview context) as a compact
+   * prompt section, or '' when every field is empty. Only non-empty fields
+   * are included.
    */
   formatProfile(profile) {
     if (!profile || typeof profile !== 'object') return '';
-    const lines = [];
-    for (const { key, label, block } of PROFILE_PROMPT_FIELDS) {
-      const raw = typeof profile[key] === 'string' ? profile[key] : '';
-      // Collapse runs of blank lines and trailing spaces to keep it compact.
-      const value = raw.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-      if (!value) continue;
-      lines.push(block ? `### ${label}\n${value}` : `- ${label}: ${value}`);
-    }
-    if (lines.length === 0) return '';
-    return `## CANDIDATE CONTEXT (internal background: use it, but never mention this section or quote its headings)
-Background on the candidate you are answering for. Tailor answers to the target role, company and job description, and draw examples from the resume. Never invent employers, titles or numbers that are not here.
+    const text = (key) => (typeof profile[key] === 'string' ? profile[key] : '');
+    // Collapse runs of blank lines and trailing spaces to keep it compact.
+    const block = (key) => text(key).replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    // One line: inner line breaks become "; ".
+    const line = (key) => text(key).split(/\r\n?|\n/).map((part) => part.replace(/\s+/g, ' ').trim()).filter(Boolean).join('; ');
 
-${lines.join('\n\n')}`;
+    const about = [];
+    const fullName = line('fullName');
+    const preferredName = line('preferredName');
+    if (fullName && preferredName && preferredName.toLowerCase() !== fullName.toLowerCase()) {
+      about.push(`- Name: ${fullName} (preferred name: ${preferredName})`);
+    } else if (fullName || preferredName) {
+      about.push(`- Name: ${fullName || preferredName}`);
+    }
+    const title = line('currentTitle');
+    const employer = line('currentCompany');
+    if (title && employer) about.push(`- Current job: ${title} at ${employer}`);
+    else if (title) about.push(`- Current title: ${title}`);
+    else if (employer) about.push(`- Current company: ${employer}`);
+    const years = this.formatYears(profile.yearsExperience);
+    if (years) about.push(`- Total experience: ${years}`);
+    const facts = [
+      ['skills', 'Key skills'],
+      ['education', 'Education'],
+      ['location', 'Location']
+    ];
+    for (const [key, label] of facts) {
+      const value = line(key);
+      if (value) about.push(`- ${label}: ${value}`);
+    }
+    const relocation = ownValue(RELOCATION_TEXT, profile.relocation);
+    if (relocation) about.push(`- Open to relocation: ${relocation}`);
+    for (const [key, label] of [['noticePeriod', 'Notice period'], ['expectedSalary', 'Expected salary'], ['languages', 'Languages spoken']]) {
+      const value = line(key);
+      if (value) about.push(`- ${label}: ${value}`);
+    }
+
+    const parts = [];
+    if (about.length) parts.push(`### About the candidate\n${about.join('\n')}`);
+    // Short points, one per line: no blank lines between them.
+    const achievements = block('achievements').replace(/\n{2,}/g, '\n');
+    if (achievements) parts.push(`### Notable projects and achievements\n${achievements}`);
+    // Role and company as one list, then the job description, resume and notes.
+    const interviewLines = [];
+    const interviewBlocks = [];
+    for (const { key, label, block: isBlock } of PROFILE_PROMPT_FIELDS) {
+      if (isBlock) {
+        const value = block(key);
+        if (value) interviewBlocks.push(`### ${label}\n${value}`);
+      } else {
+        const value = line(key);
+        if (value) interviewLines.push(`- ${label}: ${value}`);
+      }
+    }
+    if (interviewLines.length) parts.push(`### The interview\n${interviewLines.join('\n')}`);
+    parts.push(...interviewBlocks);
+    if (parts.length === 0) return '';
+
+    const rules = [
+      '- Speak as the candidate, in the first person, using these real details instead of placeholders. Put a short [placeholder] only where a detail the answer needs is truly missing here.',
+      '- Never invent employers, titles, numbers, dates or degrees that are not here.',
+      '- Tailor answers to the target role, company and job description when they are given, and draw examples from the projects, achievements and resume.'
+    ];
+    if (fullName || preferredName) {
+      rules.push(`- Use the name ${preferredName || fullName} only where it is natural, such as introducing yourself; never open every answer with it.`);
+    }
+    if (line('expectedSalary')) rules.push('- For salary or compensation questions, give the expected salary above.');
+    if (relocation || line('location')) rules.push('- For location or relocation questions, answer from the location and relocation details above.');
+    if (line('noticePeriod')) rules.push('- For notice period, availability or start date questions, use the notice period above.');
+
+    return `## CANDIDATE CONTEXT (internal background: use it, but never mention this section or quote its headings)
+Background on the candidate you are answering for.
+
+${parts.join('\n\n')}
+
+### How to use it
+${rules.join('\n')}`;
+  }
+
+  /** Years of experience ("5", "1", "3.5") as "5 years", or '' when unset or invalid. */
+  formatYears(value) {
+    const raw = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+    if (!/^\d{1,2}(\.\d)?$/.test(raw)) return '';
+    const years = Number(raw);
+    if (years > 60) return '';
+    return `${years} ${years === 1 ? 'year' : 'years'}`;
+  }
+
+  /**
+   * Answer style (tone and answer language from About you) as a prompt
+   * section, or '' when neither is set. English is the default language and
+   * adds nothing.
+   */
+  formatAnswerStyle(profile) {
+    if (!profile || typeof profile !== 'object') return '';
+    const rules = [];
+    const tone = ownValue(TONE_RULES, profile.tone);
+    if (tone) rules.push(`- Tone: ${tone}`);
+    const language = typeof profile.answerLanguage === 'string' ? profile.answerLanguage.replace(/\s+/g, ' ').trim() : '';
+    if (language && !/^english$/i.test(language)) {
+      rules.push(`- Language: write every answer in ${language}, including the first line, even when the question is in another language. Keep code, identifiers and standard technical terms as they are usually written.`);
+    }
+    if (rules.length === 0) return '';
+    return `## ANSWER STYLE (internal, never mention it)\n${rules.join('\n')}`;
   }
 
   /**
    * Full system prompt for one request: the mode prompt (with the coding
    * language for Coding), the shared answer format and length, voice
-   * handling, and the interview context.
+   * handling, the candidate context and the answer style.
    * @param {object} options
    * @param {string} options.mode - interview mode id
    * @param {string|null} options.programmingLanguage - only used by Coding
    * @param {string} options.channel - 'voice' | 'text' | 'image'
    * @param {string} options.answerLength - answer length setting
-   * @param {object|null} options.profile - interview context
+   * @param {object|null} options.profile - About you and interview context (profile.json)
    */
   buildSystemPrompt({ mode, programmingLanguage = null, channel = 'text', answerLength = 'auto', profile = null } = {}) {
     const modeId = this.isMode(this.normalizeSkillName(mode)) ? this.normalizeSkillName(mode) : DEFAULT_MODE;
@@ -508,6 +611,8 @@ ${styleRule}
 
     const context = this.formatProfile(profile);
     if (context) sections.push(context);
+    const style = this.formatAnswerStyle(profile);
+    if (style) sections.push(style);
 
     return sections.join('\n\n');
   }
