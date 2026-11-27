@@ -17,7 +17,9 @@ WHISPER_MODEL_DIR=".whisper-models"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OS_NAME="unknown"
 PLATFORM_BUILD_SCRIPT="build"
-PYTHON_BIN="python3"
+PYTHON_BIN=""
+# One optional argument for PYTHON_BIN, e.g. -3.12 for the Windows py launcher.
+PYTHON_ARG=""
 WHISPER_PIP_PATH=""
 WHISPER_COMMAND_PATH=""
 
@@ -44,7 +46,7 @@ Options:
   --no-run                Do not start the app after setup
   --run                   Start the app after setup (default)
   --ci                    Use 'npm ci' instead of 'npm install'
-  --install-system-deps   Attempt to install sox where possible
+  --install-system-deps   Install a microphone recorder on Linux (arecord or sox)
   --skip-whisper          Skip local Whisper environment setup
   -h, --help              Show this help
 
@@ -94,16 +96,44 @@ detect_os() {
 
   case "$OS_NAME" in
     windows)
-      PYTHON_BIN="python"
       WHISPER_PIP_PATH="${WHISPER_VENV_DIR}/Scripts/pip.exe"
       WHISPER_COMMAND_PATH="${WHISPER_VENV_DIR}/Scripts/whisper.exe"
       ;;
     *)
-      PYTHON_BIN="python3"
       WHISPER_PIP_PATH="${WHISPER_VENV_DIR}/bin/pip"
       WHISPER_COMMAND_PATH="${WHISPER_VENV_DIR}/bin/whisper"
       ;;
   esac
+}
+
+# Whether "$1" (plus optional argument "$2") runs Python 3.10 or newer.
+python_is_supported() {
+  "$1" ${2:+"$2"} -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
+}
+
+# Pick the Python for the Whisper venv: 3.12 first (best tested with PyTorch
+# and numba), then 3.11, 3.10, 3.13, then the default python3 / python.
+# On Windows (Git Bash), the py launcher is tried first. The Microsoft Store
+# "python" stub fails the version check, so it is never picked.
+find_python() {
+  local version
+  if [[ "$OS_NAME" == "windows" ]] && command -v py >/dev/null 2>&1; then
+    for version in 3.12 3.11 3.10 3.13 3; do
+      if python_is_supported py "-${version}"; then
+        PYTHON_BIN="py"
+        PYTHON_ARG="-${version}"
+        return 0
+      fi
+    done
+  fi
+  for version in python3.12 python3.11 python3.10 python3.13 python3 python; do
+    if command -v "$version" >/dev/null 2>&1 && python_is_supported "$version"; then
+      PYTHON_BIN="$version"
+      PYTHON_ARG=""
+      return 0
+    fi
+  done
+  return 1
 }
 
 require_command() {
@@ -234,8 +264,8 @@ install_system_deps() {
 
   echo "Attempting to install system audio dependencies"
 
-  if command -v sox >/dev/null 2>&1; then
-    echo "sox already installed"
+  if command -v arecord >/dev/null 2>&1 || command -v sox >/dev/null 2>&1; then
+    echo "A microphone recorder (arecord or sox) is already installed"
     return
   fi
 
@@ -247,18 +277,19 @@ install_system_deps() {
       echo "macOS uses built-in renderer audio capture; skipping sox install."
       ;;
     linux)
+      # arecord (alsa-utils) is what Cuewell tries first on Linux.
       if command -v apt-get >/dev/null 2>&1; then
-        sudo apt-get update -y && sudo apt-get install -y sox || echo "Could not install sox via apt-get"
+        sudo apt-get update -y && sudo apt-get install -y alsa-utils || echo "Could not install alsa-utils via apt-get"
       elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y sox || echo "Could not install sox via dnf"
+        sudo dnf install -y alsa-utils || echo "Could not install alsa-utils via dnf"
       elif command -v pacman >/dev/null 2>&1; then
-        sudo pacman -S --noconfirm sox || echo "Could not install sox via pacman"
+        sudo pacman -S --noconfirm alsa-utils || echo "Could not install alsa-utils via pacman"
       else
-        echo "Unknown package manager. Install sox manually."
+        echo "Unknown package manager. Install alsa-utils (arecord) or sox manually."
       fi
       ;;
     windows)
-      echo "Install sox manually on Windows, for example via Chocolatey: choco install sox"
+      echo "Windows uses the built-in microphone capture; nothing to install."
       ;;
     *)
       echo "Unknown OS. Install sox manually if you want microphone capture."
@@ -288,11 +319,21 @@ setup_whisper_env() {
     return
   fi
 
-  require_command "$PYTHON_BIN" "Python 3 is required for local Whisper setup."
-
   if [[ ! -d "$WHISPER_VENV_DIR" ]]; then
-    echo "Creating Whisper virtual environment at $WHISPER_VENV_DIR"
-    run_without_secrets "$PYTHON_BIN" -m venv "$WHISPER_VENV_DIR"
+    if ! find_python; then
+      echo "WARNING: Python 3.10 or newer was not found, so local Whisper was not set up."
+      echo "Install Python 3.12 (https://www.python.org/downloads/), then run ./setup.sh again,"
+      echo "or set up Whisper later from the Cuewell setup wizard."
+      return
+    fi
+    echo "Creating Whisper virtual environment at $WHISPER_VENV_DIR with $PYTHON_BIN ${PYTHON_ARG}"
+    if ! run_without_secrets "$PYTHON_BIN" ${PYTHON_ARG:+"$PYTHON_ARG"} -m venv "$WHISPER_VENV_DIR"; then
+      echo "WARNING: Could not create the Whisper virtual environment."
+      if [[ "$OS_NAME" == "linux" ]]; then
+        echo "On Debian and Ubuntu, install the venv module first: sudo apt install python3-venv"
+      fi
+      return
+    fi
   fi
 
   echo "Installing local Whisper into $WHISPER_VENV_DIR"
@@ -304,23 +345,23 @@ setup_whisper_env() {
 
   mkdir -p "$WHISPER_MODEL_DIR"
 
-  # Verify the Whisper CLI actually exists before claiming it's configured
+  # Verify Whisper loads before claiming it's configured. Prefer
+  # "<venv python> -m whisper": the app checks that form quickly at startup,
+  # while the whisper script has to import PyTorch first.
   local whisper_found=0
-  if [[ -f "$WHISPER_COMMAND_PATH" ]]; then
-    echo "Whisper CLI found at: $WHISPER_COMMAND_PATH"
+  local venv_python
+  if [[ "$OS_NAME" == "windows" ]]; then
+    venv_python="${WHISPER_VENV_DIR}/Scripts/python.exe"
+  else
+    venv_python="${WHISPER_VENV_DIR}/bin/python"
+  fi
+  if [[ -f "$venv_python" ]] && run_without_secrets "$venv_python" -c 'import whisper' >/dev/null 2>&1; then
+    WHISPER_COMMAND_PATH="${venv_python} -m whisper"
+    echo "Whisper is installed: $WHISPER_COMMAND_PATH"
     whisper_found=1
   else
-    # Fallback: try python -m whisper inside the venv
-    local venv_python
-    if [[ "$OS_NAME" == "windows" ]]; then
-      venv_python="${WHISPER_VENV_DIR}/Scripts/python.exe"
-    else
-      venv_python="${WHISPER_VENV_DIR}/bin/python"
-    fi
-    if [[ -f "$venv_python" ]] && run_without_secrets "$venv_python" -m whisper --help >/dev/null 2>&1; then
-      echo "Whisper CLI not found as standalone script, but 'python -m whisper' works."
-      echo "Adjusting WHISPER_COMMAND to use venv Python module."
-      WHISPER_COMMAND_PATH="$venv_python"
+    if [[ -f "$WHISPER_COMMAND_PATH" ]]; then
+      echo "Whisper CLI found at: $WHISPER_COMMAND_PATH"
       whisper_found=1
     else
       echo "WARNING: Whisper CLI not found at $WHISPER_COMMAND_PATH"
@@ -330,8 +371,13 @@ setup_whisper_env() {
   fi
 
   upsert_env "SPEECH_PROVIDER" "whisper"
-  upsert_env "AZURE_SPEECH_KEY" ""
-  upsert_env "AZURE_SPEECH_REGION" ""
+  # Clear the env.example placeholders, but never a real Azure key.
+  if grep -qx 'AZURE_SPEECH_KEY=your_azure_speech_key_here' .env 2>/dev/null; then
+    upsert_env "AZURE_SPEECH_KEY" ""
+  fi
+  if grep -qx 'AZURE_SPEECH_REGION=your_azure_region_here' .env 2>/dev/null; then
+    upsert_env "AZURE_SPEECH_REGION" ""
+  fi
   upsert_env "WHISPER_COMMAND" "${WHISPER_COMMAND_PATH}"
   upsert_env "WHISPER_MODEL_DIR" "${WHISPER_MODEL_DIR}"
   upsert_env "WHISPER_MODEL" "${WHISPER_MODEL}"
@@ -364,6 +410,9 @@ run_app() {
 
 detect_os
 echo "Detected OS: $OS_NAME"
+if [[ "$OS_NAME" == "windows" ]]; then
+  echo "Tip: on Windows you can also run .\\setup.ps1 from PowerShell."
+fi
 require_command node "Node.js 22.12+ is required."
 require_node_version
 require_command npm "npm is required."

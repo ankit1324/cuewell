@@ -714,7 +714,13 @@ class SpeechService extends EventEmitter {
         this.pushStream = sdk.AudioInputStream.createPushStream();
         this.audioConfig = sdk.AudioConfig.fromStreamInput(this.pushStream);
       });
-      this._startMicrophoneCapture();
+      // Same capture path as Whisper: the toolbar captures the microphone on
+      // Windows and macOS and sends PCM chunks to handleAudioChunkFromRenderer.
+      // Windows has no sox/arecord, so the native recorder would always fail.
+      this.useRendererCapture = this._usesRendererCapture();
+      if (!this.useRendererCapture) {
+        this._startMicrophoneCapture();
+      }
       this.recognizer = withAzureBrowserShims(
         () => new sdk.SpeechRecognizer(this.speechConfig, this.audioConfig)
       );
@@ -836,7 +842,7 @@ class SpeechService extends EventEmitter {
     // and a child-process mic that the system TCC prompt can't attribute. The
     // renderer path uses getUserMedia, which macOS prompts for cleanly via the
     // app's NSMicrophoneUsageDescription. Linux keeps the native recorder path.
-    this.useRendererCapture = process.platform === 'win32' || process.platform === 'darwin';
+    this.useRendererCapture = this._usesRendererCapture();
     if (this.useRendererCapture) {
       this.emit('status', 'Waiting for microphone audio…');
       // The renderer starts sending chunks once it receives the recording-started event.
@@ -912,14 +918,26 @@ class SpeechService extends EventEmitter {
    * the current Whisper segment buffer.
    */
   handleAudioChunkFromRenderer(chunk) {
-    if (!this.isRecording || this.provider !== 'whisper' || !this.useRendererCapture) {
+    if (!this.isRecording || !this.useRendererCapture) {
       return;
     }
     if (!chunk || !chunk.length) {
       return;
     }
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    this._ingestWhisperAudio(buffer);
+    // Whisper buffers the audio; Azure writes it to its push stream.
+    this._handleAudioChunk(buffer);
+  }
+
+  /**
+   * Whether the toolbar renderer captures the microphone (Web Audio) for
+   * this platform. Must match the platform check in src/ui/main-window.js
+   * handleRecordingStarted(). Windows has no sox/arecord, and on macOS the
+   * renderer gets the system microphone prompt. Linux uses the native
+   * recorder (arecord or sox) through node-record-lpcm16.
+   */
+  _usesRendererCapture() {
+    return process.platform === 'win32' || process.platform === 'darwin';
   }
 
   /**
@@ -1852,16 +1870,16 @@ class SpeechService extends EventEmitter {
 
     if (available.length === 0) {
       const hint = process.platform === 'darwin'
-        ? 'Install one with `brew install sox`.'
+        ? 'Install sox (brew install sox), then try again.'
         : process.platform === 'linux'
-          ? 'Install one with `sudo apt install alsa-utils` (arecord) or `sudo apt install sox`.'
+          ? 'Install alsa-utils (for example: sudo apt install alsa-utils) or sox, then try again.'
           : 'No supported microphone capture tool was found.';
       logger.warn('No audio capture program available', {
         tried: candidates.map((c) => c.bin),
         platform: process.platform,
       });
       this.isRecording = false;
-      this.emit('error', `Microphone capture needs sox or arecord, but none was found. ${hint}`);
+      this.emit('error', `Voice input needs arecord or sox, and neither is installed. ${hint}`);
       return;
     }
 
@@ -1871,7 +1889,7 @@ class SpeechService extends EventEmitter {
       const candidate = queue.shift();
       if (!candidate) {
         this.isRecording = false;
-        this.emit('error', 'Could not start microphone capture with any available audio program');
+        this.emit('error', 'Could not open the microphone. Check that one is connected and not in use by another app, then try again.');
         return;
       }
 
@@ -1916,7 +1934,8 @@ class SpeechService extends EventEmitter {
         }
 
         stream.on('error', (error) => {
-          logger.error('Audio recording stream error', { error: error.message, program });
+          // node-record-lpcm16 emits a plain string when the recorder exits with an error.
+          logger.error('Audio recording stream error', { error: (error && error.message) || String(error), program });
           if (this.recording) {
             try {
               this.recording.stop();

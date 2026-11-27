@@ -2,10 +2,12 @@
   "name": "cuewell",
   "version": "1.0.0",
   "description": "AI interview copilot",
+  "homepage": "https://cuewell.ai/",
+  "desktopName": "cuewell.desktop",
   "main": "main.js",
   "scripts": {
-    "start": "env -u ELECTRON_RUN_AS_NODE electron .",
-    "dev": "env -u ELECTRON_RUN_AS_NODE electron . --disable-gpu",
+    "start": "node scripts/start.js",
+    "dev": "node scripts/start.js --disable-gpu",
     "test-speech": "node scripts/test-speech.js",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
@@ -14,7 +16,7 @@
     "build:all": "electron-builder --mac --win --linux",
     "dist": "npm run build",
     "pack": "electron-builder --dir",
-    "clean": "rm -rf dist/",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "rebuild": "npm run clean && npm run build",
     "release": "npm run clean && npm run build:all",
     "postinstall": "electron-builder install-app-deps",
@@ -58,13 +60,23 @@
       "!website/**/*",
       "!*.md",
       "!.git/**/*",
+      "!.github/**/*",
       "!.env*",
       "!.venv-whisper/**/*",
       "!.whisper-models/**/*",
       "!bin/**/*",
+      "!setup.sh",
+      "!setup.ps1",
+      "!tailwind.config.js",
+      "!scripts/start.js",
+      "!scripts/test-speech.js",
+      "!scripts/*.nsh",
       "!scripts/__pycache__/**/*",
       "!**/*.pyc",
-      "!eng.traineddata"
+      "!eng.traineddata",
+      "!node_modules/**/*.map",
+      "!node_modules/**/*.{ts,mts,cts}",
+      "!node_modules/**/{README,CHANGELOG,HISTORY}*"
     ],
     "asarUnpack": [
       "assests/icons/**/*",
@@ -141,7 +153,21 @@
         }
       ],
       "icon": "assests/icons/icon-512.png",
-      "category": "Utility"
+      "category": "Utility",
+      "executableName": "cuewell",
+      "maintainer": "Ankit Chaudhary",
+      "vendor": "Ankit Chaudhary",
+      "synopsis": "AI interview copilot",
+      "description": "A desktop AI interview copilot for practice and mock interviews. Ask by screenshot, voice or typed chat, and read a structured answer as it streams in.",
+      "desktop": {
+        "entry": {
+          "Name": "Cuewell",
+          "GenericName": "AI interview copilot",
+          "Keywords": "interview;practice;ai;copilot;",
+          "Terminal": "false"
+        }
+      },
+      "syncDesktopName": true
     },
     "deb": {
       "depends": [
@@ -150,32 +176,41 @@
         "libnss3",
         "libxss1",
         "libxtst6",
-        "xauth",
-        "libasound2t64",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "libasound2t64 | libasound2",
         "libgbm1",
+        "alsa-utils | sox"
+      ],
+      "recommends": [
         "python3 (>= 3.10)",
         "python3-venv",
         "python3-pip"
       ],
-      "recommends": [
-        "ffmpeg"
-      ],
-      "fpm": [
-        "--after-install=scripts/post-install-deb.sh"
-      ]
+      "priority": "optional",
+      "artifactName": "Cuewell-${version}-linux-${arch}.${ext}",
+      "packageCategory": "utils"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "perMachine": false,
+      "shortcutName": "Cuewell",
+      "uninstallDisplayName": "Cuewell",
+      "runAfterFinish": true,
+      "installerIcon": "assests/icons/app-icon.ico",
+      "uninstallerIcon": "assests/icons/app-icon.ico",
       "include": "scripts/post-install-nsis.nsh",
       "deleteAppDataOnUninstall": false,
-      "artifactName": "Cuewell-Setup-${version}.${ext}"
+      "artifactName": "Cuewell-${version}-win-${arch}-setup.${ext}"
     },
     "appImage": {
-      "artifactName": "Cuewell-${version}.${ext}"
+      "artifactName": "Cuewell-${version}-linux-${arch}.${ext}"
     },
     "dmg": {
       "title": "Cuewell",
@@ -184,6 +219,10 @@
         "width": 600,
         "height": 400
       }
+    },
+    "artifactName": "Cuewell-${version}-${os}-${arch}.${ext}",
+    "portable": {
+      "artifactName": "Cuewell-${version}-win-${arch}-portable.${ext}"
     }
   }
 }
