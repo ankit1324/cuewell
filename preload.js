@@ -101,6 +101,10 @@ const PAGES = {
       saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
       showSettings: invoke('show-settings'),
       updateActiveSkill: (skill) => ipcRenderer.invoke('update-active-skill', skill),
+      // Native menu with About, Check for Updates, Settings, Report a
+      // Problem, View Logs Folder and Quit (the only way to reach them on
+      // Windows and Linux). x and y are optional, in window coordinates.
+      showAppMenu: (x, y) => ipcRenderer.invoke('show-app-menu', { x, y }),
       notifyMainWindowReady: () => {
         try {
           ipcRenderer.send('main-window-ready')

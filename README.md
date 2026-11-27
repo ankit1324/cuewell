@@ -122,6 +122,15 @@ Builds are **not code signed or notarized** today. That means:
 
 No pre-built downloads are linked from this README. The workflow in `.github/workflows/release.yml` builds macOS, Windows and Linux artifacts on each system's own GitHub runner, and publishes them as a GitHub release when a version tag (`v1.2.3`) is pushed.
 
+## Updates
+
+Cuewell does not update itself, because builds are not signed. It only tells you when a newer release exists:
+
+- About 15 seconds after launch, at most once a day, it asks GitHub for the latest release. If that release is newer, a notification says "Cuewell X.Y.Z is available". Click it to open the release page in your browser. Nothing is shown if you are up to date or offline.
+- **Check for Updates…** checks right away and tells you the result. On macOS it is in the **Cuewell** menu. On Windows and Linux it is in the app menu on the toolbar.
+
+The check is a single request to `api.github.com` that names only the app version. To turn off the automatic check, add `UPDATE_CHECKS=off` to `.env`. **Check for Updates…** still works when you choose it.
+
 ## Shortcuts
 
 Global shortcuts work from any app. On macOS, `Alt` is the Option key.
@@ -286,6 +295,13 @@ The app already disables GPU acceleration on Linux. Make sure an X11 or XWayland
 
 **setup.sh stops early.**
 Install Node.js 22.12 or newer and retry. Exit code 130 means Ctrl+C was pressed.
+
+## Reporting problems
+
+- **Help > Report a Problem…** opens a new GitHub issue with your Cuewell version and operating system already filled in. Nothing else is sent.
+- **Help > View Logs Folder** opens `~/.Cuewell/logs`. Log files are kept 14 days (error logs 30), each file is capped at 20 MB, and the oldest are deleted once all logs together pass 100 MB. Logs can contain parts of your session, so read a log and remove anything private before you attach it to an issue.
+
+On Windows and Linux, both items are in the app menu on the toolbar. For security issues, follow [SECURITY.md](SECURITY.md) instead of opening a public issue.
 
 ## Project structure
 

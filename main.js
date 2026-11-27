@@ -3,7 +3,7 @@ const fs = require("fs");
 // Node's URL on purpose: speech.service.js replaces globalThis.URL with a
 // stand-in that reports every URL as https:.
 const { URL, fileURLToPath } = require("url");
-const { app, BrowserWindow, Menu, globalShortcut, session, ipcMain, nativeTheme } = require("electron");
+const { app, BrowserWindow, Menu, globalShortcut, session, ipcMain, nativeTheme, dialog, shell, Notification, net, systemPreferences } = require("electron");
 
 // ── Carry data over from the folders used before the renames ──
 // Electron names the userData folder after package.json, so each rename gave
@@ -194,6 +194,22 @@ const logger = require("./src/core/logger").createServiceLogger("MAIN");
 for (const entry of userDataMigrationLog) logger[entry.level](entry.message, entry.meta);
 const config = require("./src/core/config");
 const FirstRunManager = require("./src/core/first-run");
+const {
+  UPDATE_REPO, UpdateChecker, isRepoConfigured, isUpdateCheckEnabled, isSafeReleaseUrl, releasesPageUrl,
+} = require("./src/core/update-checker");
+const {
+  friendlySpeechError, friendlyCaptureError, friendlyLlmError, microphoneBlockedMessage,
+  isMediaAccessBlocked, buildProblemReportUrl,
+} = require("./src/core/error-reporter");
+const { buildAppMenuTemplate, buildToolbarMenuTemplate } = require("./src/core/app-menu");
+
+// The launch update check waits until startup work has settled.
+const LAUNCH_UPDATE_CHECK_DELAY_MS = 15000;
+// The same speech error is shown in the answer window at most this often.
+const SPEECH_ERROR_REPEAT_MS = 5000;
+// A crashed window is reloaded at most this many times in a minute; after
+// that it is left alone and the user is told to restart.
+const MAX_RENDERER_RELOADS_PER_MINUTE = 3;
 
 // ── Global crash guard ──
 // The speech path spawns external processes (Whisper CLI, and on macOS/Linux
@@ -306,6 +322,8 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   "get-window-stats": ["main"],
   "show-settings": ["main"],
   "update-active-skill": ["main"],
+  // Pop-up app menu (About, updates, Settings, help, Quit)
+  "show-app-menu": ["main"],
   // Toolbar and chat mic buttons
   "get-speech-availability": ["main", "chat"],
   "start-speech-recognition": ["main", "chat"],
@@ -492,6 +510,26 @@ class ApplicationController {
     // the constructor without polluting main-process startup.
     this._whisperInstaller = null;
     this.isFirstRun = false;
+    this.isQuitting = false;
+
+    // Update notifier: reads the latest GitHub release, never installs.
+    // Automatic checks follow UPDATE_CHECKS in .env (read only, default on).
+    this.updateChecker = new UpdateChecker({
+      repo: UPDATE_REPO,
+      currentVersion: app.getVersion(),
+      cachePath: path.join(app.getPath("userData"), "update-check.json"),
+      // Electron's fetch uses the system proxy settings; it needs the app
+      // to be ready, which every check is.
+      fetch: (url, init) => net.fetch(url, init),
+      logger: require("./src/core/logger").createServiceLogger("UPDATES"),
+      enabled: isUpdateCheckEnabled(process.env),
+    });
+    // Held so the click handler is not garbage collected with it.
+    this.updateNotification = null;
+    // Last speech error shown in the answer window, to avoid repeats.
+    this._lastSpeechError = { message: "", at: 0 };
+    // webContents id -> reload times, for crashed-window recovery.
+    this._rendererReloads = new Map();
 
     // Window configurations for reference
     this.windowConfigs = {
@@ -530,7 +568,9 @@ class ApplicationController {
     app.on("window-all-closed", () => this.onWindowAllClosed());
     app.on("activate", () => this.onActivate());
     app.on("will-quit", () => this.onWillQuit());
+    app.on("before-quit", () => { this.isQuitting = true; });
 
+    this.setupCrashRecovery();
     this.setupIPCHandlers();
     this.setupServiceEventHandlers();
   }
@@ -540,6 +580,17 @@ class ApplicationController {
 
     const focusExistingWindows = () => {
       try {
+        // During first-run setup the wizard is the window to bring back
+        // (showOnboarding opens it again if it was closed).
+        if (this.isFirstRun) {
+          // Still starting: startup opens the wizard itself.
+          if (!this.isReady) return;
+          windowManager.showOnboarding().catch((e) => {
+            logger.warn("Could not show the onboarding window", { error: e.message });
+          });
+          return;
+        }
+
         const mainWindow = windowManager.getWindow("main");
         if (mainWindow) {
           if (mainWindow.isMinimized && mainWindow.isMinimized()) {
@@ -653,30 +704,325 @@ class ApplicationController {
       });
 
       sessionManager.addEvent("Application started");
+      this.scheduleLaunchUpdateCheck();
     } catch (error) {
       this.starting = false;
       logger.error("Application initialization failed", {
         error: error.message,
+        stack: error.stack,
       });
+      // Say why the app is closing instead of quitting without a word.
+      try {
+        dialog.showErrorBox(
+          "Cuewell could not start",
+          `Something went wrong while starting: ${error.message}\n\n` +
+          `Try opening Cuewell again. If this keeps happening, the log files in ${this.logsFolder()} have the details.`
+        );
+      } catch (_) { /* quitting anyway */ }
       app.quit();
     }
   }
 
   /**
-   * Packaged builds get a minimal menu: no View menu, so no Reload or
-   * Toggle Developer Tools. The Edit menu keeps copy/paste working in text
-   * fields on macOS. Running from source keeps Electron's default menu.
+   * Menu bar (see src/core/app-menu.js). Packaged builds have no Reload or
+   * Developer Tools; source runs get a Developer menu with them.
    */
   setupApplicationMenu() {
-    if (!app.isPackaged) return;
     try {
-      const template = [];
-      if (process.platform === "darwin") template.push({ role: "appMenu" });
-      template.push({ role: "editMenu" }, { role: "windowMenu" });
+      const template = buildAppMenuTemplate({
+        platform: process.platform,
+        isPackaged: app.isPackaged,
+        ...this.menuOptions(),
+      });
       Menu.setApplicationMenu(Menu.buildFromTemplate(template));
     } catch (e) {
       logger.warn("Failed to set the application menu", { error: e.message });
     }
+  }
+
+  /** What the menus need: which optional items exist, and what each item does. */
+  menuOptions() {
+    return {
+      updatesConfigured: this.updateChecker.isConfigured(),
+      reportConfigured: !!this.problemReportUrl(),
+      isShortcutRegistered: (accelerator) => {
+        try {
+          return globalShortcut.isRegistered(accelerator);
+        } catch (_) {
+          return false;
+        }
+      },
+      actions: {
+        about: () => this.showAbout(),
+        checkForUpdates: () => this.checkForUpdatesNow(),
+        settings: () => this.showSettings(),
+        quit: () => this.quitApp(),
+        reportProblem: () => this.reportProblem(),
+        openLogsFolder: () => this.openLogsFolder(),
+        toggleWindows: () => windowManager.toggleVisibility(),
+        toggleChat: () => windowManager.switchToWindow("chat"),
+      },
+    };
+  }
+
+  /** Open Settings and send it the current values. */
+  showSettings() {
+    windowManager.showSettings();
+    const settingsWindow = windowManager.getWindow("settings");
+    if (settingsWindow) {
+      const currentSettings = this.getSettings("settings");
+      setTimeout(() => {
+        if (!settingsWindow.isDestroyed()) {
+          settingsWindow.webContents.send("load-settings", currentSettings);
+        }
+      }, 100);
+    }
+  }
+
+  quitApp() {
+    logger.info("Quit requested");
+    this.isQuitting = true;
+    try {
+      windowManager.destroyAllWindows();
+      globalShortcut.unregisterAll();
+      app.quit();
+      setTimeout(() => process.exit(0), 1000);
+    } catch (error) {
+      logger.error("Error during quit:", error);
+      process.exit(1);
+    }
+  }
+
+  logsFolder() {
+    return require("./src/core/logger").logDir;
+  }
+
+  showAbout() {
+    const version = app.getVersion();
+    const author = "By Ankit Chaudhary";
+    const license = "Released under the Apache License 2.0.";
+    const credits = "Based on OpenCluely by TechyCSR.";
+    try {
+      if (process.platform === "win32") {
+        // Windows has no native about panel: use a message box.
+        dialog.showMessageBox({
+          type: "info",
+          title: "About Cuewell",
+          message: `Cuewell ${version}`,
+          detail: `${author}\n${license}\n${credits}`,
+          buttons: ["OK"],
+          noLink: true,
+        }).catch((e) => logger.warn("About box failed", { error: e.message }));
+        return;
+      }
+      const iconPath = path.join(__dirname, "assests", "icons", "app-icon.png");
+      app.setAboutPanelOptions({
+        // Set every time: the app icon setting changes the app's name.
+        applicationName: "Cuewell",
+        applicationVersion: version,
+        // macOS: no build number in parentheses.
+        version: "",
+        copyright: `${author}. ${license}`,
+        credits,
+        authors: ["Ankit Chaudhary"],
+        ...(isRepoConfigured(UPDATE_REPO) ? { website: `https://github.com/${UPDATE_REPO}` } : {}),
+        ...(fs.existsSync(iconPath) ? { iconPath } : {}),
+      });
+      app.showAboutPanel();
+    } catch (e) {
+      logger.warn("Could not show the About panel", { error: e.message });
+    }
+  }
+
+  /** Open a GitHub release page in the browser. Anything else opens the releases page. */
+  openReleasePage(url) {
+    const target = isSafeReleaseUrl(url, UPDATE_REPO) ? url : releasesPageUrl(UPDATE_REPO);
+    shell.openExternal(target).catch((e) => {
+      logger.warn("Could not open the release page", { error: e.message });
+    });
+  }
+
+  /**
+   * Launch check: at most once per 24 hours, silent unless an update exists.
+   * Skipped while UPDATE_REPO is the placeholder or UPDATE_CHECKS=off.
+   */
+  scheduleLaunchUpdateCheck() {
+    if (!this.updateChecker.isConfigured() || !isUpdateCheckEnabled(process.env)) {
+      logger.debug("Automatic update check skipped", {
+        configured: this.updateChecker.isConfigured(),
+        enabled: isUpdateCheckEnabled(process.env),
+      });
+      return;
+    }
+    setTimeout(async () => {
+      try {
+        const result = await this.updateChecker.checkIfDue();
+        if (result && result.status === "available") this.showUpdateNotification(result);
+      } catch (e) {
+        logger.debug("Automatic update check failed", { error: e.message });
+      }
+    }, LAUNCH_UPDATE_CHECK_DELAY_MS);
+  }
+
+  showUpdateNotification(result) {
+    // Notifications are not hidden from screen sharing like the windows are.
+    if (windowManager.isScreenBeingShared) {
+      logger.info("Update notification skipped while the screen is shared", { latestVersion: result.latestVersion });
+      return;
+    }
+    try {
+      if (!Notification.isSupported()) {
+        logger.info("Update available; notifications are not supported here", { latestVersion: result.latestVersion });
+        return;
+      }
+      const notification = new Notification({
+        title: `Cuewell ${result.latestVersion} is available`,
+        body: "Click to open the download page.",
+        silent: true,
+      });
+      notification.on("click", () => this.openReleasePage(result.releaseUrl));
+      notification.on("close", () => {
+        if (this.updateNotification === notification) this.updateNotification = null;
+      });
+      this.updateNotification = notification;
+      notification.show();
+    } catch (e) {
+      logger.warn("Could not show the update notification", { error: e.message });
+    }
+  }
+
+  /** Check for Updates…: always asks GitHub (UPDATE_CHECKS only turns off the automatic check) and says what it found. */
+  async checkForUpdatesNow() {
+    const result = await this.updateChecker.check();
+    const current = app.getVersion();
+    let options;
+    if (result.status === "available") {
+      options = {
+        type: "info",
+        message: "Update available",
+        detail: `Cuewell ${result.latestVersion} is available. You have ${current}.`,
+        buttons: ["Download", "Later"],
+        defaultId: 0,
+        cancelId: 1,
+      };
+    } else if (result.status === "up-to-date") {
+      options = {
+        type: "info",
+        message: "You're up to date",
+        detail: `Cuewell ${current} is the latest version.`,
+        buttons: ["OK"],
+      };
+    } else if (result.status === "not-configured") {
+      return;
+    } else {
+      logger.warn("Update check failed", { error: result.error });
+      options = {
+        type: "warning",
+        message: "Could not check for updates",
+        detail: "Check your internet connection and try again.",
+        buttons: ["OK"],
+      };
+    }
+    try {
+      const { response } = await dialog.showMessageBox({ title: "Check for Updates", noLink: true, ...options });
+      if (result.status === "available" && response === 0) this.openReleasePage(result.releaseUrl);
+    } catch (e) {
+      logger.warn("Could not show the update dialog", { error: e.message });
+    }
+  }
+
+  /** Prefilled new-issue page, or null while UPDATE_REPO is the placeholder. */
+  problemReportUrl() {
+    return buildProblemReportUrl(UPDATE_REPO, {
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      osVersion: typeof process.getSystemVersion === "function" ? process.getSystemVersion() : "",
+      arch: process.arch,
+      electronVersion: process.versions.electron,
+    });
+  }
+
+  reportProblem() {
+    const url = this.problemReportUrl();
+    if (!url) return;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" || parsed.hostname !== "github.com") return;
+    } catch (_) {
+      return;
+    }
+    shell.openExternal(url).catch((e) => {
+      logger.warn("Could not open the problem report page", { error: e.message });
+    });
+  }
+
+  async openLogsFolder() {
+    const dir = this.logsFolder();
+    let problem = "";
+    try {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      problem = await shell.openPath(dir);
+    } catch (e) {
+      problem = e.message;
+    }
+    if (!problem) return;
+    logger.warn("Could not open the logs folder", { error: problem });
+    try {
+      await dialog.showMessageBox({
+        type: "warning",
+        title: "View Logs Folder",
+        message: "Could not open the logs folder",
+        detail: `The logs are in ${dir}`,
+        buttons: ["OK"],
+        noLink: true,
+      });
+    } catch (_) { /* nothing else to show */ }
+  }
+
+  /**
+   * A crashed or killed window would stay blank: log it and reload the page
+   * (same file, same preload), at most a few times a minute so a page that
+   * crashes on load does not loop.
+   */
+  setupCrashRecovery() {
+    app.on("render-process-gone", (_event, webContents, details) => {
+      const reason = details && details.reason;
+      if (this.isQuitting || reason === "clean-exit") return;
+      const type = windowManager.getWindowTypeForWebContents(webContents) || "unknown";
+      logger.error("Window process stopped", { windowType: type, reason, exitCode: details && details.exitCode });
+      if (type === "unknown" || !webContents || webContents.isDestroyed()) return;
+      const now = Date.now();
+      const history = this._rendererReloads.get(webContents.id);
+      if (history === "gave-up") return;
+      const recent = (history || []).filter((t) => now - t < 60000);
+      if (recent.length >= MAX_RENDERER_RELOADS_PER_MINUTE) {
+        // Reloading again would only crash again; leave it for a restart.
+        this._rendererReloads.set(webContents.id, "gave-up");
+        logger.error("Window keeps stopping; not reloading it again", { windowType: type });
+        dialog.showMessageBox({
+          type: "warning",
+          title: "Cuewell",
+          message: "A Cuewell window stopped working",
+          detail: "Quit Cuewell and open it again.",
+          buttons: ["OK"],
+          noLink: true,
+        }).catch(() => { /* logged above */ });
+        return;
+      }
+      recent.push(now);
+      this._rendererReloads.set(webContents.id, recent);
+      setTimeout(() => {
+        try {
+          if (!webContents.isDestroyed()) webContents.reload();
+        } catch (e) {
+          logger.warn("Could not reload the window", { windowType: type, error: e.message });
+        }
+      }, 500);
+    });
+    app.on("child-process-gone", (_event, details) => {
+      if (this.isQuitting || !details || details.reason === "clean-exit") return;
+      logger.warn("Helper process stopped", { type: details.type, reason: details.reason, name: details.name });
+    });
   }
 
   setupPermissions() {
@@ -833,10 +1179,57 @@ class ApplicationController {
     speechService.on("error", (error) => {
       // In error, still compute availability
       this.speechAvailable = speechService.isAvailable ? speechService.isAvailable() : false;
-      BrowserWindow.getAllWindows().forEach((window) => {
-        window.webContents.send("speech-error", { error, available: this.speechAvailable });
-      });
+      this.reportSpeechError(friendlySpeechError(typeof error === "string" ? error : error && error.message));
     });
+  }
+
+  /**
+   * Show a speech problem. Chat lists speech-error events. When chat is
+   * hidden the message still has to be seen, so pressing the mic (or Alt+R)
+   * never fails without a word: it goes to the answer window when that is
+   * hidden, otherwise chat is shown without taking focus, so an answer on
+   * screen is never replaced by an error.
+   */
+  reportSpeechError(message) {
+    const available = this.speechAvailable;
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) window.webContents.send("speech-error", { error: message, available });
+    });
+    const chat = windowManager.getWindow("chat");
+    if (chat && !chat.isDestroyed() && chat.isVisible()) return;
+    if (windowManager.isScreenBeingShared) return;
+    const now = Date.now();
+    if (this._lastSpeechError.message === message && now - this._lastSpeechError.at < SPEECH_ERROR_REPEAT_MS) return;
+    this._lastSpeechError = { message, at: now };
+    const answer = windowManager.getWindow("llmResponse");
+    if (answer && !answer.isDestroyed() && answer.isVisible()) {
+      if (chat && !chat.isDestroyed()) windowManager.showOnCurrentDesktop(chat, { focus: false });
+      return;
+    }
+    windowManager.showLLMResponse(message, { skill: this.activeSkill, isError: true });
+  }
+
+  /** The reason voice input cannot use the microphone, or null when the OS allows it (or cannot tell). */
+  microphoneProblem() {
+    if (process.platform !== "darwin" && process.platform !== "win32") return null;
+    try {
+      const status = systemPreferences.getMediaAccessStatus("microphone");
+      return isMediaAccessBlocked(status) ? microphoneBlockedMessage(process.platform) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /** Start voice input unless the OS blocks the microphone; then say how to allow it. */
+  startSpeech() {
+    const problem = this.microphoneProblem();
+    if (problem) {
+      logger.warn("Voice input not started: microphone access is blocked");
+      this.reportSpeechError(problem);
+      return false;
+    }
+    speechService.startRecording();
+    return true;
   }
 
   /**
@@ -914,7 +1307,7 @@ class ApplicationController {
     });
 
     this.handleIpc("start-speech-recognition", () => {
-      speechService.startRecording();
+      this.startSpeech();
       return speechService.getStatus();
     });
 
@@ -1018,6 +1411,9 @@ class ApplicationController {
             error: error.message,
             textLength: text.length
           });
+          // processWithLLM reports its own errors; this is a failure before
+          // it ran, so chat would otherwise wait forever.
+          this.broadcastLLMError(friendlyLlmError(""), null);
         }
       })();
 
@@ -1030,20 +1426,26 @@ class ApplicationController {
 
     // Settings handlers
     this.handleIpc("show-settings", () => {
-      windowManager.showSettings();
-
-      // Send current settings to the settings window
-      const settingsWindow = windowManager.getWindow("settings");
-      if (settingsWindow) {
-        const currentSettings = this.getSettings("settings");
-        setTimeout(() => {
-          if (!settingsWindow.isDestroyed()) {
-            settingsWindow.webContents.send("load-settings", currentSettings);
-          }
-        }, 100);
-      }
-
+      this.showSettings();
       return { success: true };
+    });
+
+    // The toolbar's pop-up app menu: the menu bar's commands, which Windows
+    // and Linux cannot reach otherwise. Optional { x, y } in window pixels.
+    this.handleIpc("show-app-menu", (event, position) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win || win.isDestroyed()) return { success: false };
+      const coord = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 10000 ? Math.round(v) : undefined);
+      const x = coord(position && position.x);
+      const y = coord(position && position.y);
+      try {
+        const menu = Menu.buildFromTemplate(buildToolbarMenuTemplate(this.menuOptions()));
+        menu.popup({ window: win, ...(x !== undefined && y !== undefined ? { x, y } : {}) });
+        return { success: true };
+      } catch (e) {
+        logger.warn("Could not show the app menu", { error: e.message });
+        return { success: false };
+      }
     });
 
     this.handleIpc("get-settings", (event) => {
@@ -1219,15 +1621,7 @@ class ApplicationController {
 
     this.onIpc("quit-app", () => {
       logger.info("Quit app requested via IPC");
-      try {
-        windowManager.destroyAllWindows();
-        globalShortcut.unregisterAll();
-        app.quit();
-        setTimeout(() => process.exit(0), 1000);
-      } catch (error) {
-        logger.error("Error during quit:", error);
-        process.exit(1);
-      }
+      this.quitApp();
     });
   }
 
@@ -1236,9 +1630,12 @@ class ApplicationController {
     if (!isAvailable) {
       logger.warn("Speech recognition unavailable; toggle ignored");
       try {
-        windowManager.broadcastToAllWindows("speech-status", { status: 'Speech recognition unavailable', available: false });
         windowManager.broadcastToAllWindows("speech-availability", { available: false });
-      } catch (e) {}
+        // Alt+R works even when the mic buttons are hidden: say why nothing happens.
+        this.reportSpeechError(friendlySpeechError(`Speech provider "${speechService.provider || "none"}" is not available`));
+      } catch (e) {
+        logger.warn("Could not report that voice input is unavailable", { error: e.message });
+      }
       return;
     }
     const currentStatus = speechService.getStatus();
@@ -1248,14 +1645,18 @@ class ApplicationController {
         logger.info("Speech recognition stopped via global shortcut");
       } catch (error) {
         logger.error("Error stopping speech recognition:", error);
+        this.reportSpeechError(friendlySpeechError(""));
       }
     } else {
       try {
-        speechService.startRecording();
+        // Chat first, so a start error lands in the window the user sees.
         windowManager.showChatWindow();
-        logger.info("Speech recognition started via global shortcut");
+        if (this.startSpeech()) {
+          logger.info("Speech recognition started via global shortcut");
+        }
       } catch (error) {
         logger.error("Error starting speech recognition:", error);
+        this.reportSpeechError(friendlySpeechError(`Speech recognition failed to start: ${error.message}`));
       }
     }
   }
@@ -1385,12 +1786,16 @@ class ApplicationController {
     try {
       // Capture first: on Linux windows can't be hidden from capture, so a
       // loading window shown before it would be in the screenshot.
-      const capture = await captureService.captureAndProcess();
-
-      if (!capture.imageBuffer || !capture.imageBuffer.length) {
-        this.showScreenshotError("Failed to capture screenshot image");
-        this.broadcastOCRError("Failed to capture screenshot image");
-        return;
+      let capture;
+      try {
+        capture = await captureService.captureAndProcess();
+        if (!capture || !capture.imageBuffer || !capture.imageBuffer.length) {
+          throw new Error("Failed to capture screenshot image");
+        }
+      } catch (error) {
+        const captureError = error instanceof Error ? error : new Error(String(error));
+        captureError.isCaptureError = true;
+        throw captureError;
       }
 
       // Use image directly with LLM and active skill; do not send chat messages here
@@ -1452,19 +1857,27 @@ class ApplicationController {
     } catch (error) {
       logger.error("Screenshot OCR process failed", {
         error: error.message,
+        capture: !!error.isCaptureError,
         duration: Date.now() - startTime,
       });
+
+      const message = error.isCaptureError
+        ? friendlyCaptureError(error.message, {
+          platform: process.platform,
+          screenAccess: this.screenAccessStatus(),
+        })
+        : friendlyLlmError(error.message);
 
       // A capture that is already running will update the response window
       // itself, so a second press must not cover it with an error.
       if (error.message !== "Capture already in progress") {
-        this.showScreenshotError(error.message, messageId);
+        this.showScreenshotError(message, messageId);
       }
-      this.broadcastOCRError(error.message);
+      this.broadcastOCRError(message);
       // The answer was already announced (and may be half streamed): end
       // its chat bubble with the error instead of leaving it open.
       if (messageId) {
-        this.broadcastLLMError(error.message, messageId);
+        this.broadcastLLMError(message, messageId);
       }
       
       sessionManager.addConversationEvent({
@@ -1481,20 +1894,25 @@ class ApplicationController {
   /**
    * Replace the response window's "Analyzing" state with a short error. That
    * window only listens for display-llm-response, so the message is sent as
-   * a regular response.
+   * a regular response. `message` is already user-facing.
    */
-  showScreenshotError(errorMessage, messageId = null) {
-    // capture.service throws this when desktopCapturer returns no screens,
-    // which on macOS means Screen Recording permission is missing.
-    const message = process.platform === "darwin" && errorMessage === "No screen sources available for capture"
-      ? "Screen capture failed. Allow Screen Recording for the app that launched Cuewell (System Settings > Privacy & Security > Screen & System Audio Recording), then restart it."
-      : errorMessage || "Screenshot failed.";
-    windowManager.showLLMResponse(message, {
+  showScreenshotError(message, messageId = null) {
+    windowManager.showLLMResponse(message || "Screenshot failed.", {
       skill: this.activeSkill,
       isImageAnalysis: true,
       isError: true,
       messageId,
     });
+  }
+
+  /** macOS Screen Recording status ('granted', 'denied', ...), or undefined elsewhere. */
+  screenAccessStatus() {
+    if (process.platform !== "darwin") return undefined;
+    try {
+      return systemPreferences.getMediaAccessStatus("screen");
+    } catch (_) {
+      return undefined;
+    }
   }
 
   async processWithLLM(text, sessionHistory) {
@@ -1566,7 +1984,8 @@ class ApplicationController {
       });
 
       // Show why there is no answer, in the answer window and in chat.
-      windowManager.showLLMResponse(error.message, {
+      const message = friendlyLlmError(error.message);
+      windowManager.showLLMResponse(message, {
         skill: this.activeSkill,
         isError: true,
         messageId,
@@ -1581,7 +2000,7 @@ class ApplicationController {
         }
       });
 
-      this.broadcastLLMError(error.message, messageId);
+      this.broadcastLLMError(message, messageId);
     }
   }
 
@@ -1650,6 +2069,13 @@ class ApplicationController {
       logger.error("Failed to process transcription with LLM", {
         error: error.message,
         textLength: combined.length
+      });
+      // processTranscriptionWithLLM reports its own errors; this one came
+      // before it ran.
+      this.sendToVoiceResponseWindows("llm-error", {
+        error: friendlyLlmError(""),
+        messageId: null,
+        timestamp: new Date().toISOString(),
       });
     } finally {
       this._utteranceDispatchInFlight = false;
@@ -1764,13 +2190,14 @@ class ApplicationController {
 
       // Show why there is no answer where voice answers go. Nothing is
       // stored as a model reply, so the next question's history stays clean.
+      const message = friendlyLlmError(error.message);
       this.sendToVoiceResponseWindows("llm-error", {
-        error: error.message,
+        error: message,
         messageId,
         timestamp: new Date().toISOString(),
       }, voiceTarget);
       if (this.shouldShowVoiceOverlay(voiceTarget)) {
-        windowManager.showLLMResponse(error.message, {
+        windowManager.showLLMResponse(message, {
           skill: this.activeSkill,
           isTranscriptionResponse: true,
           isError: true,
@@ -2327,6 +2754,9 @@ class ApplicationController {
       );
 
       const persistedKeys = this.persistEnvUpdates(envUpdates);
+      // persistEnvUpdates logs and returns [] when .env cannot be written.
+      // The values apply now but would be lost on restart: say so.
+      const notSavedToDisk = Object.keys(envUpdates).length > 0 && persistedKeys.length === 0;
 
       // Reinitialize the LLM service when the Gemini key was saved (as
       // before) or any other AI-provider setting changed, so the new client
@@ -2395,6 +2825,14 @@ class ApplicationController {
           error: rejected[0].message,
           field: rejected[0].field,
           errors: rejected.map((e) => ({ field: e.field, error: e.message })),
+          persistedEnvKeys: persistedKeys
+        };
+      }
+      if (notSavedToDisk) {
+        return {
+          success: false,
+          error: "Your changes work for now but could not be saved, so they will be lost when Cuewell restarts. " +
+            "Check that your user account can write to the app data folder.",
           persistedEnvKeys: persistedKeys
         };
       }
