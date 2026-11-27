@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Super Interview · Calm, complete answers in every interview round</title>
+  <meta name="description" content="Super Interview is a free, open-source desktop copilot for interview practice. Ask by voice, screenshot or chat and get a streamed answer for coding, technical, system design, behavioral and HR questions, using your own AI provider.">
+  <meta name="author" content="Ankit Chaudhry">
+  <meta name="theme-color" content="#f7f6f2">
+  <meta name="color-scheme" content="light">
+  <!-- TODO(owner): set the real domain, then uncomment. -->
+  <!-- <link rel="canonical" href="https://YOUR-DOMAIN/"> -->
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+
+  <!-- Open Graph / Twitter.
+       TODO(owner): og:image and og:url must be absolute URLs on your domain.
+       Most social sites do not render SVG previews: export assets/og.svg to a
+       1200x630 PNG (assets/og.png) and point both image tags at it. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Super Interview">
+  <meta property="og:title" content="Super Interview · Calm, complete answers in every interview round">
+  <meta property="og:description" content="A free, open-source desktop copilot for interview practice. Voice, screenshot or chat in; a streamed answer out, starting with one line you can say first.">
+  <meta property="og:image" content="assets/og.svg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Super Interview: calm, complete answers in every interview round.">
+  <!-- <meta property="og:url" content="https://YOUR-DOMAIN/"> -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Super Interview · Calm, complete answers in every interview round">
+  <meta name="twitter:description" content="A free, open-source desktop copilot for interview practice. Bring your own AI provider.">
+  <meta name="twitter:image" content="assets/og.svg">
+
+  <link rel="stylesheet" href="styles.css">
+  <script src="main.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <span class="sr-only" id="copy-status" aria-live="polite"></span>
+
+  <!-- Thin-line icon set, one stroke weight. -->
+  <svg width="0" height="0" class="sprite" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8.5h3.2L8.8 6h6.4l1.6 2.5H20V19H4z"/><circle cx="12" cy="13.5" r="3.3"/></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3.5l8.5 4.5L12 12.5 3.5 8z"/><path d="M3.5 12L12 16.5l8.5-4.5M3.5 16L12 20.5l8.5-4.5"/></symbol>
+      <symbol id="i-code" viewBox="0 0 24 24"><path d="M8.5 7l-5 5 5 5M15.5 7l5 5-5 5M13.5 4.5l-3 15"/></symbol>
+      <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.6v.4"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-stream" viewBox="0 0 24 24"><path d="M4 6h16M4 10h12M4 14h14M4 18h6"/><path d="M13.5 18h.5"/></symbol>
+      <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2.2"/><path d="M5.8 16.2c.6-1.5 1.8-2.3 3.2-2.3s2.6.8 3.2 2.3M14.5 10h4M14.5 13.5h3"/></symbol>
+      <symbol id="i-crop" viewBox="0 0 24 24"><path d="M4 8.5V5a1 1 0 0 1 1-1h3.5M15.5 4H19a1 1 0 0 1 1 1v3.5M20 15.5V19a1 1 0 0 1-1 1h-3.5M8.5 20H5a1 1 0 0 1-1-1v-3.5"/><path d="M8.5 12h7M12 8.5v7"/></symbol>
+      <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3.5 3.5l17 17"/><path d="M10.5 5.6c.5-.1 1-.1 1.5-.1 4.9 0 8.2 4.2 9.2 6.5-.4 1-1.2 2.2-2.2 3.4M6.6 7.1C4.7 8.4 3.4 10.4 2.8 12c1 2.3 4.3 6.5 9.2 6.5 1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5v-3a4 4 0 0 1 8 0v3M12 14.5v2"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 4.5 5-4.5M5 20h14"/></symbol>
+      <symbol id="i-ext" viewBox="0 0 24 24"><path d="M7.5 16.5l9-9M9.5 7.5h7v7"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4.5 12h15M13.5 6l6 6-6 6"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5.5v13M15 5.5v13"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.5M12 16.1v.4"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9.5L5 19.5V16H4z"/><path d="M8 9.5h8M8 12.5h5"/></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+      <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/><path d="M9.5 3.5v3M14.5 3.5v3M9.5 17.5v3M14.5 17.5v3M3.5 9.5h3M3.5 14.5h3M17.5 9.5h3M17.5 14.5h3"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="#top" aria-label="Super Interview, home">
+        <span class="mark" aria-hidden="true"></span>
+        <span class="brand-name">Super Interview</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#providers">AI providers</a>
+        <a href="#data">Privacy</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <div class="header-cta">
+        <!-- TODO(owner): replace #github with the repository URL. -->
+        <a class="btn btn--ghost btn--sm hide-sm" href="#github">GitHub <svg class="ic" aria-hidden="true"><use href="#i-ext"/></svg></a>
+        <a class="btn btn--ink btn--sm" href="#download">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ============ HERO ============ -->
+    <section class="hero gridbg" id="top" aria-labelledby="hero-title">
+      <div class="wrap">
+        <div class="hero-copy">
+          <p class="eyebrow hero-eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>AI interview copilot<span class="hide-xs"> · Free and open source</span></p>
+          <h1 id="hero-title" class="hero-title">Calm, complete answers in <span class="hl">every interview round.</span></h1>
+          <p class="hero-sub">A small desktop overlay for interview practice. Ask by voice, screenshot or chat, and read a structured answer as it streams in, starting with one line you can say right away.</p>
+          <div class="hero-actions">
+            <div class="cta-stack">
+              <!-- TODO(owner): replace #download with the release download URL once a macOS build is published, and remove the "Coming soon" note. -->
+              <a class="btn btn--lime btn--lg" href="#download">
+                <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
+                Download for macOS
+              </a>
+              <span class="cta-note">Coming soon. Build from source today.</span>
+            </div>
+            <!-- TODO(owner): replace #github with the repository URL. -->
+            <a class="btn btn--outline btn--lg" href="#github">
+              View on GitHub
+              <svg class="ic" aria-hidden="true"><use href="#i-ext"/></svg>
+            </a>
+          </div>
+          <ul class="hero-meta" aria-label="Requirements">
+            <li>macOS 13+</li>
+            <li>Windows 10+ (64-bit)</li>
+            <li>Apache-2.0</li>
+            <li>Bring your own AI key</li>
+          </ul>
+        </div>
+
+        <!-- ============ LIVE DEMO STAGE ============ -->
+        <figure class="demo" aria-labelledby="demo-caption">
+          <div class="stage" id="demo-stage" role="tabpanel" aria-labelledby="demo-tab-0" aria-describedby="demo-caption" tabindex="0">
+            <span class="corner corner--tl" aria-hidden="true"></span>
+            <span class="corner corner--tr" aria-hidden="true"></span>
+            <span class="corner corner--bl" aria-hidden="true"></span>
+            <span class="corner corner--br" aria-hidden="true"></span>
+            <div class="stage-top" aria-hidden="true">
+              <span class="stage-label"><span class="stage-live"></span>Live demo</span>
+              <span class="stage-label" id="demo-counter">Scenario 01 / 05</span>
+            </div>
+
+            <!-- A faint "your screen" behind the overlay -->
+            <div class="screen" aria-hidden="true">
+              <div class="screen-bar"><i></i><i></i><i></i><span></span></div>
+              <div class="screen-body">
+                <div class="screen-side"><b></b><b></b><b></b><b></b><b></b></div>
+                <div class="screen-main">
+                  <div class="screen-tile"></div>
+                  <div class="screen-tile"></div>
+                  <div class="screen-lines"><b style="width:62%"></b><b style="width:48%"></b><b style="width:71%"></b></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="overlay">
+              <!-- Toolbar pill (recreation of the app's command bar) -->
+              <div class="bar" role="group" aria-label="Super Interview toolbar">
+                <span class="oc-mark bar-mark" aria-hidden="true"></span>
+                <span class="bar-item bar-shot" title="Screenshot and ask">
+                  <svg class="ic" aria-hidden="true"><use href="#i-camera"/></svg>
+                  <span class="kbd-group" role="img" aria-label="Command Shift S"><span class="k sym">⌘</span><span class="k sym">⇧</span><span class="k">S</span></span>
+                </span>
+                <span class="bar-item bar-mic" id="demo-mic">
+                  <svg class="ic mic-ic" aria-hidden="true"><use href="#i-mic"/></svg>
+                  <span class="live-dot" aria-hidden="true"></span>
+                  <span class="mic-text">Listen</span>
+                </span>
+                <span class="bar-sep" aria-hidden="true"></span>
+                <span class="bar-item bar-mode" id="demo-mode">
+                  <svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg>
+                  <span class="mode-text">Technical</span>
+                </span>
+                <span class="bar-item bar-lang">
+                  <svg class="ic" aria-hidden="true"><use href="#i-code"/></svg>
+                  <span class="lang-text" id="demo-lang">JavaScript</span>
+                  <svg class="chev" viewBox="0 0 8 5" aria-hidden="true"><path d="M1 1l3 3 3-3"/></svg>
+                </span>
+                <span class="bar-sep bar-sep--2" aria-hidden="true"></span>
+                <span class="bar-item bar-info" aria-hidden="true"><svg class="ic"><use href="#i-info"/></svg></span>
+                <span class="bar-status" aria-hidden="true"></span>
+              </div>
+
+              <!-- Heard transcript -->
+              <p class="heard" id="demo-heard">
+                <span class="heard-dot" aria-hidden="true"></span>
+                <span class="heard-label">Heard</span>
+                <span class="heard-text" id="demo-question">What is the difference between JavaScript and TypeScript?</span><span class="caret" aria-hidden="true"></span>
+              </p>
+
+              <!-- Answer panel (recreation) -->
+              <div class="panel">
+                <div class="panel-bar">
+                  <span class="oc-mark" aria-hidden="true"></span>
+                  <span class="panel-title">Answer</span>
+                  <span class="panel-status" id="demo-status"><span class="st-dot" aria-hidden="true"></span><span class="st-text">Done</span></span>
+                  <span class="panel-close" aria-hidden="true"><svg class="ic"><use href="#i-close"/></svg></span>
+                </div>
+                <div class="panel-progress" aria-hidden="true"></div>
+                <div class="panel-body" id="demo-answer">
+                  <div class="say">
+                    <span class="say-label">Say this first</span>
+                    <p>TypeScript is JavaScript plus a static type system. It compiles to plain JavaScript and catches type errors before the code runs.</p>
+                  </div>
+                  <ul>
+                    <li><strong>Type checking:</strong> JavaScript finds type mistakes at runtime. TypeScript finds them at compile time.</li>
+                    <li><strong>Tooling:</strong> types power accurate autocomplete, safe renames and self-documenting APIs.</li>
+                    <li><strong>Runtime:</strong> browsers and Node run JavaScript. TypeScript is compiled or stripped first, so it adds no runtime cost.</li>
+                    <li><strong>Adoption:</strong> any valid JavaScript is valid TypeScript, so a codebase can migrate file by file.</li>
+                  </ul>
+                  <p><strong>When to pick which:</strong> TypeScript for larger codebases and teams. Plain JavaScript is fine for small scripts and prototypes.</p>
+                </div>
+              </div>
+            </div>
+            <noscript><p class="stage-noscript">The live demo needs JavaScript. Above is one example answer.</p></noscript>
+          </div>
+
+          <div class="demo-controls">
+            <button type="button" class="demo-play" id="demo-play" data-paused="false" hidden>
+              <svg class="ic ic-pause" aria-hidden="true"><use href="#i-pause"/></svg>
+              <svg class="ic ic-play" aria-hidden="true"><use href="#i-play"/></svg>
+              <span class="sr-only" id="demo-play-label">Pause demo</span>
+            </button>
+            <div class="demo-tabs" role="tablist" aria-label="Demo scenarios" id="demo-tabs">
+              <button type="button" role="tab" class="demo-tab" id="demo-tab-0" aria-selected="true" aria-controls="demo-stage" data-i="0"><span class="tab-n">01</span><span class="tab-l">Technical</span><span class="tab-bar" aria-hidden="true"><i></i></span></button>
+              <button type="button" role="tab" class="demo-tab" id="demo-tab-1" aria-selected="false" aria-controls="demo-stage" tabindex="-1" data-i="1"><span class="tab-n">02</span><span class="tab-l">HR</span><span class="tab-bar" aria-hidden="true"><i></i></span></button>
+              <button type="button" role="tab" class="demo-tab" id="demo-tab-2" aria-selected="false" aria-controls="demo-stage" tabindex="-1" data-i="2"><span class="tab-n">03</span><span class="tab-l">Coding</span><span class="tab-bar" aria-hidden="true"><i></i></span></button>
+              <button type="button" role="tab" class="demo-tab" id="demo-tab-3" aria-selected="false" aria-controls="demo-stage" tabindex="-1" data-i="3"><span class="tab-n">04</span><span class="tab-l">System design</span><span class="tab-bar" aria-hidden="true"><i></i></span></button>
+              <button type="button" role="tab" class="demo-tab" id="demo-tab-4" aria-selected="false" aria-controls="demo-stage" tabindex="-1" data-i="4"><span class="tab-n">05</span><span class="tab-l">Behavioral</span><span class="tab-bar" aria-hidden="true"><i></i></span></button>
+            </div>
+          </div>
+          <figcaption class="demo-caption" id="demo-caption">The app's overlay, recreated in HTML. Example answers written for this page; real answers come from the AI provider you choose.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- Demo scenarios. Each template is one answer; main.js streams it in. -->
+    <template id="sc-0" data-mode="Technical" data-lang="JavaScript" data-q="What is the difference between JavaScript and TypeScript?">
+      <div class="say"><span class="say-label">Say this first</span><p>TypeScript is JavaScript plus a static type system. It compiles to plain JavaScript and catches type errors before the code runs.</p></div>
+      <ul>
+        <li><strong>Type checking:</strong> JavaScript finds type mistakes at runtime. TypeScript finds them at compile time.</li>
+        <li><strong>Tooling:</strong> types power accurate autocomplete, safe renames and self-documenting APIs.</li>
+        <li><strong>Runtime:</strong> browsers and Node run JavaScript. TypeScript is compiled or stripped first, so it adds no runtime cost.</li>
+        <li><strong>Adoption:</strong> any valid JavaScript is valid TypeScript, so a codebase can migrate file by file.</li>
+      </ul>
+      <p><strong>When to pick which:</strong> TypeScript for larger codebases and teams. Plain JavaScript is fine for small scripts and prototypes.</p>
+    </template>
+
+    <template id="sc-1" data-mode="HR" data-lang="Python" data-q="Tell me about yourself.">
+      <p class="ctx-note" data-instant><svg class="ic" aria-hidden="true"><use href="#i-card"/></svg>Using your context: Backend Engineer role, resume</p>
+      <div class="say"><span class="say-label">Say this first</span><p>I'm a backend engineer with five years of experience building payment APIs, and I'm looking for a role where I can own systems end to end.</p></div>
+      <p><strong>Shape it as present, past, future:</strong></p>
+      <ul>
+        <li><strong>Present:</strong> I own our checkout API, from design reviews to the on-call rotation.</li>
+        <li><strong>Past:</strong> I started in QA automation and moved to backend after building our internal test platform.</li>
+        <li><strong>Future:</strong> I want to work on larger distributed systems, which is why this role stood out to me.</li>
+      </ul>
+      <p><strong>Tip:</strong> keep it under 90 seconds and end on why this role, not on your first job.</p>
+    </template>
+
+    <template id="sc-2" data-mode="Coding" data-lang="Python" data-q="Reverse a linked list.">
+      <div class="say"><span class="say-label">Say this first</span><p>I'll reverse it in place in one pass with three pointers. That's O(n) time and O(1) extra space.</p></div>
+      <p><strong>Approach:</strong> walk the list and point each node's <code>next</code> back at the previous node.</p>
+      <div class="code"><div class="code-bar"><span class="code-lang">python</span><button type="button" class="code-copy"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></div><pre><code><span class="t-k">def</span> <span class="t-f">reverse_list</span><span class="t-p">(</span>head<span class="t-p">):</span>
+    prev <span class="t-o">=</span> <span class="t-c">None</span>
+    curr <span class="t-o">=</span> head
+    <span class="t-k">while</span> curr<span class="t-p">:</span>
+        nxt <span class="t-o">=</span> curr<span class="t-p">.</span>next
+        curr<span class="t-p">.</span>next <span class="t-o">=</span> prev
+        prev <span class="t-o">=</span> curr
+        curr <span class="t-o">=</span> nxt
+    <span class="t-k">return</span> prev</code></pre></div>
+      <p><strong>Complexity:</strong> O(n) time, O(1) space. <strong>Edge cases:</strong> an empty list and a single node both return correctly.</p>
+    </template>
+
+    <template id="sc-3" data-mode="System design" data-lang="Python" data-q="Design a URL shortener.">
+      <div class="say"><span class="say-label">Say this first</span><p>I'd give each URL a short ID, store the mapping in a key-value store, and serve redirects from a cache, because reads far outnumber writes.</p></div>
+      <ul>
+        <li><strong>Requirements:</strong> shorten, redirect fast, custom aliases, optional expiry.</li>
+        <li><strong>API:</strong> <code>POST /urls</code> returns a code. <code>GET /{code}</code> returns a 301 or 302 redirect.</li>
+        <li><strong>IDs:</strong> base62 of a unique counter, or 7 random characters (62<sup>7</sup> is about 3.5 trillion).</li>
+        <li><strong>Storage:</strong> a key-value store keyed by code, with hot codes cached in memory.</li>
+        <li><strong>Scale:</strong> stateless app servers behind a load balancer. Log clicks asynchronously so redirects stay fast.</li>
+      </ul>
+    </template>
+
+    <template id="sc-4" data-mode="Behavioral" data-lang="Python" data-q="Tell me about a conflict with a teammate.">
+      <div class="say"><span class="say-label">Say this first</span><p>On a recent project a teammate and I disagreed on an API design, and we settled it with data instead of opinions.</p></div>
+      <ul>
+        <li><strong>Situation:</strong> two weeks before a launch, we disagreed on REST or GraphQL for a new service.</li>
+        <li><strong>Task:</strong> I needed us aligned without moving the date.</li>
+        <li><strong>Action:</strong> I proposed a one-day spike. Each of us built the hardest endpoint our way, then we compared client code and latency together.</li>
+        <li><strong>Result:</strong> we picked REST, shipped on time, and reused the GraphQL prototype for the dashboard. We now settle design disputes with short spikes.</li>
+      </ul>
+    </template>
+
+    <!-- ============ FEATURES ============ -->
+    <section class="section" id="features" aria-labelledby="features-title">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <p class="eyebrow">Features</p>
+          <h2 id="features-title" class="h2">Built for the whole loop, from the first call to the final round.</h2>
+        </div>
+
+        <div class="cards">
+          <article class="card reveal">
+            <p class="card-label">01 / Every round</p>
+            <svg class="card-ic" aria-hidden="true"><use href="#i-layers"/></svg>
+            <h3 class="h3">Every round, one overlay</h3>
+            <p>Auto mode detects the question type and answers in the right shape. Or pin a mode: Coding, Technical, System design, Behavioral or HR.</p>
+            <ul class="chips" aria-label="Question types Auto mode detects">
+              <li>Coding and DSA</li><li>Technical theory</li><li>System design</li><li>Behavioral (STAR)</li><li>HR</li><li>Puzzles and estimation</li>
+            </ul>
+          </article>
+
+          <article class="card reveal">
+            <p class="card-label">02 / Answers as they stream</p>
+            <svg class="card-ic" aria-hidden="true"><use href="#i-stream"/></svg>
+            <h3 class="h3">Read while it writes</h3>
+            <p>Every answer opens with a one-line reply you can say first, then streams the rest live. Code arrives syntax highlighted, with a copy button.</p>
+            <div class="mini-say" aria-hidden="true"><span>Say this first</span>I'll solve it in one pass with a hash map.</div>
+          </article>
+
+          <article class="card reveal">
+            <p class="card-label">03 / Your context</p>
+            <svg class="card-ic" aria-hidden="true"><use href="#i-card"/></svg>
+            <h3 class="h3">Answers that fit the job</h3>
+            <p>Add the role, company, job description, your resume and notes. They're stored on your Mac and sent to your AI provider with each question, so answers match the job and your experience.</p>
+            <ul class="ctx" aria-label="Context fields">
+              <li>Role</li><li>Company</li><li>Job description</li><li>Resume</li><li>Notes</li>
+            </ul>
+          </article>
+
+          <article class="card reveal">
+            <p class="card-label">04 / Voice, locally transcribed</p>
+            <svg class="card-ic" aria-hidden="true"><use href="#i-mic"/></svg>
+            <h3 class="h3">Ask out loud</h3>
+            <p>Press <span class="kbd-group"><kbd class="sym">⌥</kbd><kbd>R</kbd></span> and speak. Whisper transcribes on your Mac, and only the text goes to your AI provider. Start and stop by hand, or let pause detection end the question.</p>
+          </article>
+
+          <article class="card reveal">
+            <p class="card-label">05 / Screenshot to answer</p>
+            <svg class="card-ic" aria-hidden="true"><use href="#i-crop"/></svg>
+            <h3 class="h3">Point at the problem</h3>
+            <p>Press <span class="kbd-group"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>S</kbd></span> on a coding prompt or diagram. The image goes straight to the model for visual reasoning, with no OCR step in between.</p>
+          </article>
+
+          <article class="card reveal">
+            <p class="card-label">06 / Privacy mode</p>
+            <svg class="card-ic" aria-hidden="true"><use href="#i-eye-off"/></svg>
+            <h3 class="h3">Stays off your shared screen</h3>
+            <p>On macOS and Windows, the windows are hidden from most screen capture and screen sharing. Some older browser-based sharing can still see them, and Linux has no protection.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ HOW IT WORKS ============ -->
+    <section class="section section--tint gridbg gridbg--soft" id="how" aria-labelledby="how-title">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <p class="eyebrow">How it works</p>
+          <h2 id="how-title" class="h2">Three steps. Your hands stay on the keyboard.</h2>
+        </div>
+        <ol class="steps">
+          <li class="step reveal">
+            <span class="step-n" aria-hidden="true">01</span>
+            <h3 class="h3">Set it up once</h3>
+            <p>Pick an AI provider and paste its key, or point it at Ollama. Add your role, company, job description and resume.</p>
+            <div class="step-keys"><span class="key-row"><span class="kbd-group"><kbd class="sym">⌘</kbd><kbd>,</kbd></span><span>Settings</span></span></div>
+          </li>
+          <li class="step reveal">
+            <span class="step-n" aria-hidden="true">02</span>
+            <h3 class="h3">Ask your way</h3>
+            <p>Speak the question, capture the screen, or type it into chat.</p>
+            <div class="step-keys">
+              <span class="key-row"><span class="kbd-group"><kbd class="sym">⌥</kbd><kbd>R</kbd></span><span>Voice</span></span>
+              <span class="key-row"><span class="kbd-group"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>S</kbd></span><span>Screenshot</span></span>
+              <span class="key-row"><span class="kbd-group"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>C</kbd></span><span>Chat</span></span>
+            </div>
+          </li>
+          <li class="step reveal">
+            <span class="step-n" aria-hidden="true">03</span>
+            <h3 class="h3">Read, then say it</h3>
+            <p>Start with the one-line reply while the details stream in. Hide everything or let clicks pass through in one keystroke.</p>
+            <div class="step-keys">
+              <span class="key-row"><span class="kbd-group"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>V</kbd></span><span>Show or hide all</span></span>
+              <span class="key-row"><span class="kbd-group"><kbd class="sym">⌥</kbd><kbd>A</kbd></span><span>Click-through</span></span>
+            </div>
+          </li>
+        </ol>
+        <p class="footnote reveal">Shortcuts shown for macOS. On Windows, use Ctrl for ⌘ and Alt for ⌥.</p>
+      </div>
+    </section>
+
+    <!-- ============ PROVIDERS ============ -->
+    <section class="section" id="providers" aria-labelledby="providers-title">
+      <div class="wrap">
+        <div class="section-head section-head--split reveal">
+          <div>
+            <p class="eyebrow">Bring your own AI</p>
+            <h2 id="providers-title" class="h2">Your provider, your key, your bill.</h2>
+          </div>
+          <p class="lede">Choose a provider in Settings. Keys stay on your Mac in an owner-only file and go only to the provider they belong to.</p>
+        </div>
+        <ul class="providers reveal" aria-label="Supported AI providers">
+          <li class="provider"><span class="p-name">Gemini</span><span class="p-note">Default · text and screenshots</span></li>
+          <li class="provider"><span class="p-name">Claude</span><span class="p-note">Text and screenshots</span></li>
+          <li class="provider"><span class="p-name">OpenAI</span><span class="p-note">Text and screenshots</span></li>
+          <li class="provider"><span class="p-name">OpenRouter</span><span class="p-note">Text and screenshots</span></li>
+          <li class="provider"><span class="p-name">Groq</span><span class="p-note">Text only</span></li>
+          <li class="provider"><span class="p-name">DeepSeek</span><span class="p-note">Text only</span></li>
+          <li class="provider"><span class="p-name">Ollama</span><span class="p-note">Runs locally · no key</span></li>
+          <li class="provider provider--key">
+            <svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>
+            <span class="p-note">Keys live in an owner-only file on your Mac. There is no Super Interview server.</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============ DATA ============ -->
+    <section class="section section--tint" id="data" aria-labelledby="data-title">
+      <div class="wrap">
+        <div class="section-head section-head--split reveal">
+          <div>
+            <p class="eyebrow">Where your data goes</p>
+            <h2 id="data-title" class="h2">One destination: the AI provider you picked.</h2>
+          </div>
+          <p class="lede">No accounts, no telemetry, no Super Interview servers. Here is exactly what leaves your Mac.</p>
+        </div>
+        <div class="table-wrap reveal">
+          <table class="data-table" role="table">
+            <caption class="sr-only">What Super Interview stores and what it sends to your AI provider</caption>
+            <thead role="rowgroup">
+              <tr role="row"><th scope="col" role="columnheader">What</th><th scope="col" role="columnheader">Where it lives</th><th scope="col" role="columnheader">Sent to your AI provider</th></tr>
+            </thead>
+            <tbody role="rowgroup">
+              <tr role="row">
+                <th scope="row" role="rowheader">Typed questions and voice transcripts</th>
+                <td role="cell" data-label="Where it lives">In memory for the session</td>
+                <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--sent">Sent</span> with the last 15 events of conversation history</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Screenshots you capture</th>
+                <td role="cell" data-label="Where it lives">In memory while the request runs</td>
+                <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--sent">Sent</span> the image itself, without chat history</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Interview context: role, company, job description, resume, notes</th>
+                <td role="cell" data-label="Where it lives">On your Mac</td>
+                <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--sent">Sent</span> with each question, to tailor the answer</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Microphone audio</th>
+                <td role="cell" data-label="Where it lives">Transcribed on your Mac by local Whisper</td>
+                <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--local">Stays</span> only the text transcript is sent. If you choose Azure Speech instead, audio goes to Azure.</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">API keys</th>
+                <td role="cell" data-label="Where it lives">Owner-only file on your Mac</td>
+                <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--local">Stays</span> used only to sign requests to its own provider</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Conversation history</th>
+                <td role="cell" data-label="Where it lives">In memory. Cleared on restart or with <span class="kbd-group"><kbd class="sym">⌘</kbd><kbd class="sym">⇧</kbd><kbd>\</kbd></span></td>
+                <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--sent">Sent</span> the recent part, with typed and voice questions</td>
+              </tr>
+              <tr role="row">
+                <th scope="row" role="rowheader">Usage analytics</th>
+                <td role="cell" data-label="Where it lives">None collected</td>
+                <td role="cell" data-label="Sent to your AI provider"><span class="tag tag--local">Never</span> no telemetry of any kind</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="footnote reveal">With Ollama, requests go to a model on your own machine, so nothing leaves it.</p>
+      </div>
+    </section>
+
+    <!-- ============ RESPONSIBLE USE ============ -->
+    <section class="section section--tight" id="responsible" aria-labelledby="responsible-title">
+      <div class="wrap">
+        <div class="notice reveal">
+          <svg class="notice-ic" aria-hidden="true"><use href="#i-alert"/></svg>
+          <div>
+            <p class="eyebrow">Use it responsibly</p>
+            <h2 id="responsible-title" class="h3 notice-title">Made for practice, mock interviews and conversations where AI help is allowed.</h2>
+            <p>Many employers do not allow AI assistance in live interviews. Check the rules for each interview before you use it, and follow them.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FAQ ============ -->
+    <section class="section" id="faq" aria-labelledby="faq-title">
+      <div class="wrap faq-grid">
+        <div class="section-head reveal">
+          <p class="eyebrow">FAQ</p>
+          <h2 id="faq-title" class="h2">Questions, answered plainly.</h2>
+        </div>
+        <div class="faq reveal">
+          <details>
+            <summary>Is it really free?</summary>
+            <p>Yes. Super Interview is free and open source under the Apache-2.0 license. You pay your AI provider for what you use, if anything: Gemini offers a free key through Google AI Studio, and Ollama runs models on your own machine.</p>
+          </details>
+          <details>
+            <summary>Which platforms does it support?</summary>
+            <p>macOS 13 (Ventura) or later and 64-bit Windows 10 or later. It's built on Electron. It also runs on Linux from source, but privacy mode does not work there.</p>
+          </details>
+          <details>
+            <summary>Can people on a screen share see the overlay?</summary>
+            <p>On macOS and Windows, the windows are excluded from most screen capture and screen sharing, which use the operating system's capture APIs. Some older browser-based sharing can still capture them, and on Linux they are always visible. Treat privacy mode as a convenience, not a guarantee.</p>
+          </details>
+          <details>
+            <summary>Do I need an API key?</summary>
+            <p>For Gemini, Claude, OpenAI, OpenRouter, Groq and DeepSeek, yes: paste it in Settings. Ollama runs locally and needs no key. Groq and DeepSeek accept text only, so screenshots need one of the others.</p>
+          </details>
+          <details>
+            <summary>What does it send, and to whom?</summary>
+            <p>Only the AI provider you choose receives your question or transcript, screenshots you capture, recent history and your interview context. Audio is transcribed on your Mac. See <a href="#data">Where your data goes</a> for the full list.</p>
+          </details>
+          <details>
+            <summary>Is it allowed in interviews?</summary>
+            <p>It depends on the interview. Many employers do not allow AI help in live interviews. It's built for practice, mock interviews and settings where AI assistance is permitted. Check the rules first.</p>
+          </details>
+          <details>
+            <summary>How do I install it?</summary>
+            <p>A packaged download is coming soon. Today you can build it from source: clone the repository and run <code>./setup.sh</code>, which installs dependencies, sets up local Whisper and launches the app. You need Node.js 22.12 or newer.</p>
+          </details>
+          <details>
+            <summary>How is it related to OpenCluely?</summary>
+            <p>Super Interview is a modified version of <a href="https://github.com/TechyCSR/OpenCluely" rel="noopener">OpenCluely</a> by TechyCSR, also licensed under Apache-2.0.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FINAL CTA ============ -->
+    <section class="cta-band gridbg gridbg--dark" id="download" aria-labelledby="cta-title">
+      <div class="wrap cta-inner reveal">
+        <span class="mark mark--lg" aria-hidden="true"></span>
+        <h2 id="cta-title" class="cta-title">Walk into your next practice round prepared.</h2>
+        <p class="cta-sub">Free, open source, and running on your own machine with the AI you already use.</p>
+        <div class="hero-actions hero-actions--center">
+          <div class="cta-stack">
+            <!-- TODO(owner): replace with the release download URL. -->
+            <a class="btn btn--lime btn--lg" href="#download" aria-describedby="cta-soon">
+              <svg class="ic" aria-hidden="true"><use href="#i-download"/></svg>
+              Download for macOS
+            </a>
+            <span class="cta-note cta-note--dark" id="cta-soon">Coming soon</span>
+          </div>
+          <!-- TODO(owner): replace #github with the repository URL. -->
+          <a class="btn btn--dark-outline btn--lg" href="#github">View on GitHub <svg class="ic" aria-hidden="true"><use href="#i-ext"/></svg></a>
+        </div>
+        <div class="terminal" role="group" aria-label="Build from source">
+          <span class="term-label">Build from source today</span>
+          <code><span class="term-prompt" aria-hidden="true">$</span> ./setup.sh</code>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <a class="brand" href="#top" aria-label="Super Interview, back to top">
+          <span class="mark" aria-hidden="true"></span>
+          <span class="brand-name">Super Interview</span>
+        </a>
+        <p>Built by Ankit Chaudhry.</p>
+        <p class="footer-fine">Released under the Apache-2.0 license. A modified version of <a href="https://github.com/TechyCSR/OpenCluely" rel="noopener">OpenCluely</a> by TechyCSR.</p>
+      </div>
+      <nav class="footer-nav" aria-label="Footer">
+        <div>
+          <p class="footer-h">Product</p>
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#providers">AI providers</a>
+          <a href="#faq">FAQ</a>
+        </div>
+        <div>
+          <p class="footer-h">Project</p>
+          <!-- TODO(owner): replace these placeholders with repository links. -->
+          <a href="#github">GitHub</a>
+          <a href="#releases">Releases</a>
+          <a href="#license">License</a>
+          <a href="#data">Privacy</a>
+        </div>
+      </nav>
+    </div>
+    <div class="wrap footer-base">
+      <span>© 2026 Ankit Chaudhry</span>
+      <span>Fonts: <a href="assets/fonts/LICENSE-Manrope.txt">Manrope</a> and <a href="assets/fonts/LICENSE-JetBrainsMono.txt">JetBrains Mono</a>, SIL OFL 1.1</span>
+    </div>
+  </footer>
+</body>
+</html>
