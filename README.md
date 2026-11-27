@@ -65,6 +65,8 @@ If you would rather build from source, three steps are all it takes.
 
 - On Windows, use Git Bash (included with Git for Windows) or WSL to run `setup.sh`.
 - On macOS and Linux, your normal terminal works.
+- You need Node.js 22.12 or newer. `setup.sh` checks this and stops with a message if your Node is older.
+- The app runs on Electron 45, which supports macOS 13 (Ventura) or later and 64-bit Windows 10 or later. 32-bit Windows is no longer supported.
 - **macOS users must build from source** (steps above) — there is no pre-built `.dmg`. Because the app is unsigned, a downloaded build would be blocked by Gatekeeper as "damaged"; running from source avoids that entirely.
 - No manual `npm` commands are needed. The script handles everything.
 
@@ -172,7 +174,7 @@ Super Interview is under active development. The core is stable and improvements
 
 - **setup.sh will not run.** Make sure you are in the project folder (`cd super-interview`) and that the script is executable (`chmod +x setup.sh`). On Windows, use Git Bash.
 - **Setup stops with exit code 130.** That means Ctrl+C was pressed. Run `./setup.sh` again.
-- **Node or npm not found.** Install Node.js 18 or newer from [nodejs.org](https://nodejs.org/), restart the terminal, and retry.
+- **Node or npm not found, or Node is too old.** Install Node.js 22.12 or newer from [nodejs.org](https://nodejs.org/), restart the terminal, and retry.
 
 </details>
 

@@ -276,8 +276,11 @@ class WindowManager {
     const window = await this.createWindow('llmResponse');
     this.windows.set('llmResponse', window);
     
-    // Add console message listener to see renderer logs in main process
-    window.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    // Forward the answer page's own debug lines to the main log. Electron 35+
+    // passes the details on the event object; the positional
+    // (level, message, line, sourceId) arguments are deprecated.
+    window.webContents.on('console-message', (details) => {
+      const message = details && typeof details.message === 'string' ? details.message : '';
       if (message.includes('LLM-RESPONSE')) {
         logger.info(`[RENDERER] ${message}`);
       }
@@ -390,7 +393,7 @@ class WindowManager {
       };
   } else if (type === 'onboarding') {
       // First-run onboarding wizard — same frameless/panel style as
-      // settings, but closable (X button) and slightly larger.
+      // settings, but closable from its own UI and slightly larger.
       browserWindowOptions = {
         ...baseOptions,
         frame: false,
@@ -405,6 +408,10 @@ class WindowManager {
         level: process.platform === 'darwin' ? 'floating' : undefined,
         ...(process.platform === 'darwin' && {
           type: 'panel',
+          // 'hidden' still draws the macOS traffic lights; park them
+          // off-screen like the toolbar, chat and answer windows do.
+          titleBarStyle: 'hiddenInset',
+          trafficLightPosition: { x: -100, y: -100 },
           acceptFirstMouse: true,
           disableAutoHideCursor: true
         })
@@ -531,6 +538,13 @@ class WindowManager {
     browserWindowOptions.simpleFullscreen = false;
 
   const window = new BrowserWindow(browserWindowOptions);
+
+    // Belt and braces for the onboarding panel: hide the macOS window
+    // buttons outright in case the off-screen position is not honoured.
+    if (type === 'onboarding' && process.platform === 'darwin' &&
+        typeof window.setWindowButtonVisibility === 'function') {
+      window.setWindowButtonVisibility(false);
+    }
 
     const webContentsId = window.webContents.id;
     this.webContentsTypes.set(webContentsId, type);

@@ -115,6 +115,23 @@ require_command() {
   fi
 }
 
+# Electron 45 (and its npm package) needs Node.js 22.12 or newer.
+MIN_NODE_MAJOR=22
+MIN_NODE_MINOR=12
+
+require_node_version() {
+  if ! node -e '
+    const [major, minor] = process.versions.node.split(".").map(Number);
+    const needMajor = Number(process.argv[1]);
+    const needMinor = Number(process.argv[2]);
+    process.exit(major > needMajor || (major === needMajor && minor >= needMinor) ? 0 : 1);
+  ' "$MIN_NODE_MAJOR" "$MIN_NODE_MINOR"; then
+    echo "Error: Node.js ${MIN_NODE_MAJOR}.${MIN_NODE_MINOR}+ is required (found $(node -v))."
+    echo "Install a newer Node.js from https://nodejs.org/ and retry."
+    exit 1
+  fi
+}
+
 ensure_env_file() {
   if [[ ! -f .env ]]; then
     if [[ -f env.example ]]; then
@@ -347,7 +364,8 @@ run_app() {
 
 detect_os
 echo "Detected OS: $OS_NAME"
-require_command node "Node.js 18+ is required."
+require_command node "Node.js 22.12+ is required."
+require_node_version
 require_command npm "npm is required."
 echo "Node: $(node -v)"
 echo "npm:  $(npm -v)"

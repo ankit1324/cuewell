@@ -7,7 +7,8 @@
 // navigator (URL checks elsewhere would otherwise see every URL as
 // https://localhost/). The SDK only checks these globals synchronously while
 // those objects are built; at connect time it uses the `ws` package with
-// Node's URL, so nothing breaks once they are removed.
+// Node's URL (forced below, because Node 22+ has a global WebSocket that the
+// SDK would otherwise pick), so nothing breaks once they are removed.
 const AZURE_SHIM_GLOBALS = [
   'window', 'document', 'navigator', 'AudioContext', 'webkitAudioContext',
   'URL', 'Blob', 'File', 'performance', 'crypto'
@@ -394,17 +395,41 @@ function createAzureBrowserShims() {
   };
 }
 
-function setGlobal(name, descriptor) {
+// Node 22+ (Electron 45 runs Node 24) defines several of these globals
+// itself, and some are accessors: `navigator` and `crypto` are getters with
+// no setter, `performance` is a getter/setter pair. Plain assignment to a
+// getter-only global is silently ignored, so the stand-ins are installed with
+// Object.defineProperty and the exact original descriptor (getter, setter,
+// flags) is put back afterwards. Globals that cannot be redefined are left
+// alone and never "restored".
+
+/** True when two property descriptors (or two `undefined`s) are identical. */
+function sameDescriptor(a, b) {
+  if (!a || !b) return a === b;
+  return ['value', 'get', 'set', 'writable', 'enumerable', 'configurable']
+    .every((key) => Object.is(a[key], b[key]));
+}
+
+/** Logs a shim problem; the logger may not exist yet while the SDK loads. */
+function reportShimProblem(message, meta) {
+  try { logger.warn(message, meta); } catch (_) { /* logger not ready */ }
+}
+
+/**
+ * Make `globalThis[name]` match `descriptor` exactly, or remove it when
+ * `descriptor` is undefined. Returns false when the global cannot be changed.
+ */
+function defineGlobal(name, descriptor) {
   try {
     if (descriptor) {
       Object.defineProperty(globalThis, name, descriptor);
-    } else {
-      delete globalThis[name];
+    } else if (!delete globalThis[name]) {
+      return false;
     }
   } catch (_) {
-    // Non-configurable global: fall back to plain assignment.
-    try { globalThis[name] = descriptor ? descriptor.value : undefined; } catch (__) { /* ignore */ }
+    return false;
   }
+  return sameDescriptor(Object.getOwnPropertyDescriptor(globalThis, name), descriptor);
 }
 
 /**
@@ -418,17 +443,29 @@ function withAzureBrowserShims(fn) {
   }
   if (!azureBrowserShims) azureBrowserShims = createAzureBrowserShims();
 
+  // name -> descriptor before install (undefined when the global was absent).
+  // Only globals that were actually replaced are recorded.
   const saved = new Map();
   for (const name of AZURE_SHIM_GLOBALS) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
-    if (AZURE_SHIM_IF_MISSING.has(name) && globalThis[name]) continue;
-    saved.set(name, previous);
-    setGlobal(name, {
+    // `in` instead of reading the value, so lazy getters are not triggered.
+    if (AZURE_SHIM_IF_MISSING.has(name) && (previous || name in globalThis)) continue;
+    if (previous && !previous.configurable) {
+      reportShimProblem('Azure shim: global cannot be replaced, leaving it as is', { name });
+      continue;
+    }
+    const installed = defineGlobal(name, {
       value: azureBrowserShims[name],
       writable: true,
       configurable: true,
       enumerable: previous ? previous.enumerable : true
     });
+    if (installed) {
+      saved.set(name, previous);
+    } else if (!sameDescriptor(Object.getOwnPropertyDescriptor(globalThis, name), previous)) {
+      // A failed define changed the global anyway: still restore it.
+      saved.set(name, previous);
+    }
   }
 
   azureShimDepth += 1;
@@ -437,7 +474,9 @@ function withAzureBrowserShims(fn) {
   } finally {
     azureShimDepth -= 1;
     for (const [name, previous] of saved) {
-      setGlobal(name, previous);
+      if (!defineGlobal(name, previous)) {
+        reportShimProblem('Azure shim: could not restore global', { name });
+      }
     }
   }
 }
@@ -457,6 +496,21 @@ try {
   sdk = withAzureBrowserShims(() => require('microsoft-cognitiveservices-speech-sdk'));
 } catch (error) {
   logger.warn('Azure Speech SDK unavailable', { error: error.message });
+}
+
+// The SDK opens its socket with the global WebSocket whenever one exists.
+// Node 22+ (Electron 35+) has one, which would replace the `ws` client the
+// app used under Electron 29 (Node 20): `ws` also sends the auth headers and
+// runs the SDK's OCSP certificate checks. Keep `ws`.
+if (sdk) {
+  try {
+    const { WebsocketMessageAdapter } = require(
+      'microsoft-cognitiveservices-speech-sdk/distrib/lib/src/common.browser/WebsocketMessageAdapter.js'
+    );
+    WebsocketMessageAdapter.forceNpmWebSocket = true;
+  } catch (error) {
+    logger.warn('Could not pin the Azure Speech SDK to the ws client', { error: error.message });
+  }
 }
 
 let recorder = null;

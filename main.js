@@ -850,11 +850,12 @@ class ApplicationController {
   setupIPCHandlers() {
     this.handleIpc("take-screenshot", () => this.triggerScreenshotOCR());
 
-    // Provide reliable clipboard write via main process
-    this.handleIpc("copy-to-clipboard", (event, text) => {
+    // Provide reliable clipboard write via main process. clipboard.writeText
+    // returns a Promise since Electron 44, so failures arrive as rejections.
+    this.handleIpc("copy-to-clipboard", async (event, text) => {
       try {
         const { clipboard } = require("electron");
-        clipboard.writeText(String(text ?? ""));
+        await clipboard.writeText(String(text ?? ""));
         return true;
       } catch (e) {
         logger.error("Failed to write to clipboard", { error: e.message });

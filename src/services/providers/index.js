@@ -108,11 +108,15 @@ function getBaseURL(id, env = process.env) {
  * client options that go with it.
  *
  * speech.service.js installs browser stand-ins for the Azure Speech SDK:
- * window, document, navigator and a URL class that cannot parse URLs. The
- * SDKs (and Node's fetch) build request URLs with the global URL, so the real
- * one is put back. The stand-ins also trip the SDKs' "browser environment"
- * guard; API keys never leave the main process, so under Node that guard is a
- * false positive and is waived. Gemini-only sessions never call this.
+ * window, document, navigator and a URL class that cannot parse URLs. They
+ * only exist while that SDK is set up and are removed again before any
+ * provider client is built, so both checks below are fallbacks. The SDKs (and
+ * Node's fetch) build request URLs with the global URL, so the real one is put
+ * back. The stand-ins would also trip the SDKs' "browser environment" guard
+ * (window + window.document + navigator); API keys never leave the main
+ * process, so under Node that guard is a false positive and is waived. Node
+ * 22+ has a real global navigator but no window, so the guard does not trip
+ * on Node's own globals. Gemini-only sessions never call this.
  */
 function nodeRuntimeClientOptions() {
   if (globalThis.URL !== NodeURL) {

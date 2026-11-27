@@ -23,6 +23,9 @@
     "name": "Ankit Chaudhry"
   },
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.12"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.14.0",
     "@fortawesome/fontawesome-free": "^7.2.0",
@@ -31,7 +34,7 @@
     "dotenv": "^16.3.1",
     "markdown": "^0.5.0",
     "marked": "^15.0.12",
-    "microsoft-cognitiveservices-speech-sdk": "^1.40.0",
+    "microsoft-cognitiveservices-speech-sdk": "^1.53.0",
     "node-record-lpcm16": "^1.0.1",
     "openai": "^6.49.0",
     "prismjs": "^1.30.0",
@@ -39,8 +42,8 @@
     "winston-daily-rotate-file": "^4.7.1"
   },
   "devDependencies": {
-    "electron": "^29.1.0",
-    "electron-builder": "^24.13.3"
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.1"
   },
   "build": {
     "appId": "com.ankitchaudhry.superinterview",
@@ -66,6 +69,15 @@
       "prompts/**/*",
       "scripts/whisper_worker.py"
     ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "enableCookieEncryption": true,
+      "resetAdHocDarwinSignature": true
+    },
     "mac": {
       "category": "public.app-category.utilities",
       "target": [
@@ -98,15 +110,13 @@
         {
           "target": "nsis",
           "arch": [
-            "x64",
-            "ia32"
+            "x64"
           ]
         },
         {
           "target": "portable",
           "arch": [
-            "x64",
-            "ia32"
+            "x64"
           ]
         }
       ],
