@@ -301,6 +301,8 @@
         renderVoice();
         renderIcons();
         renderPrivacy();
+        // A provider change from elsewhere can show or hide gated settings.
+        if (state.query) runSearch();
     }
 
     // ---------- AI provider ----------
@@ -1204,10 +1206,18 @@
         const chip = $('protectionChip');
         chip.className = `oc-chip ${supported ? 'oc-chip--accent' : 'oc-chip--live'}`;
         chip.textContent = supported ? 'On' : 'Not available';
-        const where = p === 'darwin' ? 'on this Mac' : 'on this PC';
-        $('protectionText').textContent = supported
-            ? `Cuewell windows are hidden from most screen sharing and recording tools ${where}. Some browser-based sharing and older capture methods can still show them, and anyone who can see your screen sees them. Treat it as a convenience, not a guarantee.`
-            : 'Linux has no way to hide a window from screen capture, so Cuewell windows always show in screen shares and recordings.';
+        let text;
+        if (supported) {
+            text = `${p === 'darwin' ? 'On this Mac' : 'On this PC'}, Cuewell windows are hidden from most screen sharing and recording tools. ` +
+                'Some browser-based sharing and older capture methods can still show them, and anyone looking at your screen, or a camera pointed at it, still sees them. ' +
+                (p === 'win32' ? 'Windows older than Windows 10 version 2004 shows a black box in their place. ' : '') +
+                'Treat it as a convenience, not a guarantee.';
+        } else if (p === 'linux') {
+            text = 'Not available on Linux. Linux has no way to hide a window from screen capture, so Cuewell windows always show in screen shares and recordings. Hide them with Ctrl+Shift+V before you share your screen.';
+        } else {
+            text = `Not available on this computer, so Cuewell windows show in screen shares and recordings. Hide them with ${isMac() ? '⌘⇧V' : 'Ctrl+Shift+V'} before you share your screen.`;
+        }
+        $('protectionText').textContent = text;
         document.querySelectorAll('[data-platform-row]').forEach((row) => {
             const first = row.firstElementChild;
             const existing = first.querySelector('.sw-here');
@@ -1298,6 +1308,8 @@
             return;
         }
         document.querySelectorAll('.sw-filtered').forEach((n) => n.classList.remove('sw-filtered'));
+        Object.keys(gateErrors).forEach((gate) => { delete gateErrors[gate]; });
+        document.querySelectorAll('[data-gate]').forEach((container) => setGateRevealed(container, false));
         navItems.forEach((item) => {
             item.classList.remove('is-empty');
             item.querySelector('.sw-nav-count').textContent = '';
@@ -1306,12 +1318,130 @@
         $('searchEmpty').hidden = true;
     }
 
-    /** True when `node` is hidden by its own state (not by the search filter) inside its section. */
-    function stateHidden(node, section) {
+    /**
+     * What hides `node` inside its section, apart from the search filter:
+     * null when nothing does, the [data-gate] container when only a provider
+     * choice does (search still lists those), or false for any other state.
+     */
+    function hiddenBy(node, section) {
+        let gate = null;
         for (let n = node; n && n !== section; n = n.parentElement) {
-            if (n.hidden) return true;
+            if (!n.hidden) continue;
+            if (n.dataset.gate && !gate) gate = n;
+            else return false;
         }
-        return false;
+        return gate;
+    }
+
+    // ---------- Search: settings hidden by a provider choice ----------
+
+    // A failed switch from a search note, by gate, until the search changes.
+    const gateErrors = {};
+
+    /** The note for a hidden [data-gate] container, or null to leave it out of search. */
+    function gateNote(gate) {
+        const current = currentProvider();
+        const currentName = current ? current.label : 'another provider';
+        switch (gate) {
+            case 'speech:whisper':
+                return {
+                    text: 'Used only with Local Whisper. Voice input now uses Azure Speech.',
+                    button: 'Use Local Whisper',
+                    run: () => switchFromNote(gate, () => saveSpeechProvider('whisper'), () => speechProvider() === 'whisper', 'Now using Local Whisper')
+                };
+            case 'speech:azure':
+                return {
+                    text: 'Used only with Azure Speech. Voice input now uses Local Whisper.',
+                    button: 'Use Azure Speech',
+                    run: () => switchFromNote(gate, () => saveSpeechProvider('azure'), () => speechProvider() === 'azure', 'Now using Azure Speech')
+                };
+            case 'llm:ollama':
+                if (!providers().some((p) => p.id === 'ollama')) return null;
+                return {
+                    text: `Used only with Ollama. Your AI provider is ${currentName}.`,
+                    button: 'Use Ollama',
+                    run: () => switchFromNote(gate, () => selectProvider('ollama'), () => currentProviderId() === 'ollama', 'Now using Ollama')
+                };
+            case 'llm:key':
+                return {
+                    text: `${currentName} needs no API key. To add a key for another provider, choose it under AI provider.`,
+                    button: 'Choose a provider',
+                    noteOnly: true,
+                    run: () => {
+                        showSection('ai');
+                        const card = providerGrid.querySelector('.sw-provider[tabindex="0"]');
+                        if (card) card.focus();
+                    }
+                };
+            default:
+                return null;
+        }
+    }
+
+    /** Switch provider from a search note, then show the now-active settings in place. */
+    async function switchFromNote(gate, action, succeeded, doneText) {
+        delete gateErrors[gate];
+        const pending = action();
+        applyView();
+        const container = document.querySelector(`[data-gate="${gate}"]`);
+        if (container && !container.hidden) {
+            const field = container.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea, button:not([disabled])');
+            if (field) field.focus({ preventScroll: true });
+            container.scrollIntoView({ block: 'nearest' });
+        }
+        try {
+            await pending;
+        } catch (_) { /* reported below */ }
+        if (!succeeded()) gateErrors[gate] = 'Could not switch. Try again.';
+        if (state.query) applyView();
+        if (!succeeded() && container) {
+            const retry = container.querySelector(':scope > .sw-gate-hint button');
+            if (retry) retry.focus({ preventScroll: true });
+        }
+        $('srAnnounce').textContent = succeeded() ? doneText : 'Could not switch. Try again.';
+    }
+
+    /** Show or hide a gated container in search results, with its note on top. */
+    function setGateRevealed(container, on) {
+        const existing = container.querySelector(':scope > .sw-gate-hint');
+        if (!on) {
+            if (existing) existing.remove();
+            container.classList.remove('sw-gate-revealed', 'sw-gate-revealed--note-only');
+            Array.from(container.children).forEach((child) => {
+                if (child.dataset.gateInert) {
+                    child.inert = false;
+                    delete child.dataset.gateInert;
+                }
+            });
+            return;
+        }
+        const note = gateNote(container.dataset.gate);
+        if (!note) return;
+        const text = gateErrors[container.dataset.gate] ? `${note.text} ${gateErrors[container.dataset.gate]}` : note.text;
+        let hint = existing;
+        if (!hint) {
+            hint = el('div', { class: 'sw-gate-hint' },
+                icon('circle-info'),
+                el('span', { class: 'sw-gate-hint-text' }),
+                el('button', { type: 'button', class: 'oc-btn' }));
+            hint.querySelector('button').addEventListener('click', () => {
+                const current = gateNote(container.dataset.gate);
+                if (current) current.run();
+            });
+            const head = container.querySelector(':scope > .sw-group-head');
+            if (head) head.after(hint);
+            else container.prepend(hint);
+        }
+        // Update in place so a focused button keeps focus across re-renders.
+        hint.querySelector('.sw-gate-hint-text').textContent = text;
+        hint.querySelector('button').textContent = note.button;
+        container.classList.add('sw-gate-revealed');
+        container.classList.toggle('sw-gate-revealed--note-only', !!note.noteOnly);
+        Array.from(container.children).forEach((child) => {
+            if (child === hint) return;
+            child.inert = true;
+            child.dataset.gateInert = '1';
+        });
     }
 
     const searchText = (node) => `${node.dataset.search || ''} ${node.textContent || ''}`.toLowerCase();
@@ -1325,6 +1455,7 @@
         };
         let total = 0;
         firstMatch = null;
+        const revealed = new Set();
         sections.forEach((section) => {
             let count = 0;
             const units = Array.from(section.querySelectorAll('[data-search]'));
@@ -1332,8 +1463,12 @@
             const containers = units.filter((u) => u.querySelector('[data-search]'));
             units.forEach((u) => u.classList.remove('sw-filtered'));
             const visibleLeaves = new Set();
+            const gateOf = new Map();
             leaves.forEach((leaf) => {
-                if (stateHidden(leaf, section)) return;
+                const gate = hiddenBy(leaf, section);
+                if (gate === false) return;
+                if (gate && !gateNote(gate.dataset.gate)) return;
+                if (gate) gateOf.set(leaf, gate);
                 const parent = containers.find((c) => c.contains(leaf));
                 const parentHead = parent ? parent.querySelector('.sw-group-head') : null;
                 const parentMatches = parent && parentHead && (() => {
@@ -1347,7 +1482,13 @@
                 leaf.classList.toggle('sw-filtered', !show);
                 if (show) {
                     count += 1;
-                    if (!firstMatch) firstMatch = { section: section.dataset.section, node: leaf };
+                    const gate = gateOf.get(leaf) || null;
+                    if (gate) revealed.add(gate);
+                    // Enter goes to the first result; one in a hidden
+                    // provider's settings is reached through its note.
+                    if (!firstMatch || (firstMatch.gate && !gate)) {
+                        firstMatch = { section: section.dataset.section, node: gate || leaf, gate };
+                    }
                 }
             });
             // A group that holds result rows hides when none of them match.
@@ -1363,6 +1504,7 @@
                 item.querySelector('.sw-nav-count').textContent = count ? String(count) : '';
             }
         });
+        document.querySelectorAll('[data-gate]').forEach((container) => setGateRevealed(container, revealed.has(container)));
         $('searchEmptyQuery').textContent = `“${state.query}”`;
         $('searchEmpty').hidden = total > 0;
         $('srAnnounce').textContent = total ? `${total} setting${total === 1 ? '' : 's'} found` : 'No settings found';
@@ -1386,6 +1528,13 @@
             e.stopPropagation();
             clearSearch();
             applyView();
+        } else if (e.key === 'Enter' && state.query && firstMatch && firstMatch.gate) {
+            // The first result belongs to a provider that is not selected:
+            // stay in the results and move to its note's button.
+            e.preventDefault();
+            const button = firstMatch.gate.querySelector(':scope > .sw-gate-hint button');
+            firstMatch.gate.scrollIntoView({ block: 'nearest' });
+            if (button) button.focus();
         } else if (e.key === 'Enter' && state.query && firstMatch) {
             // Jump to the first result in its section.
             e.preventDefault();

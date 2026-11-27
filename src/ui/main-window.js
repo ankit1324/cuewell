@@ -6,6 +6,43 @@ const logger = {
     warn: (...args) => console.warn('[MainWindowUI WARN]', ...args)
 };
 
+// html[data-platform] is set by preload.js; navigator is the fallback.
+function currentPlatform() {
+    const fromPreload = document.documentElement && document.documentElement.dataset.platform;
+    if (fromPreload) return fromPreload;
+    const raw = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '').toLowerCase();
+    if (raw.includes('mac')) return 'darwin';
+    if (raw.includes('win')) return 'win32';
+    return 'linux';
+}
+
+/** What to tell the user when getUserMedia fails, by error name and platform. */
+function microphoneErrorMessage(error, platform) {
+    const name = (error && error.name) || '';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+        if (platform === 'darwin') {
+            return 'Microphone blocked. Allow Cuewell (or your terminal, if you run it from source) in System Settings > Privacy & Security > Microphone, then try again.';
+        }
+        if (platform === 'win32') {
+            return 'Microphone blocked. Turn on Microphone access and "Let desktop apps access your microphone" in Settings > Privacy & security > Microphone, then try again.';
+        }
+        return 'Microphone blocked. Allow microphone access for Cuewell in your system settings, then try again.';
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') {
+        if (platform === 'darwin') {
+            return 'No microphone found. Connect one, or pick an input in System Settings > Sound > Input, then try again.';
+        }
+        if (platform === 'win32') {
+            return 'No microphone found. Connect one, or pick an input in Settings > System > Sound > Input, then try again.';
+        }
+        return 'No microphone found. Connect one, or pick an input in your sound settings, then try again.';
+    }
+    if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
+        return 'The microphone is in use by another app or not responding. Close apps that use it, then try again.';
+    }
+    return 'Could not start the microphone. Try again. If it keeps failing, open More (⋯) > View Logs Folder.';
+}
+
 class MainWindowUI {
     constructor() {
         this.isInteractive = false;
@@ -271,6 +308,11 @@ class MainWindowUI {
                     // popover is positioned below the bar (top:46px = 40px bar + 6px gap), add that plus its height and a small margin
                     height = Math.max(height, Math.ceil(46 + popRect.height + 8));
                 }
+                // Same for the notice under the bar (same 46px offset).
+                if (this.isNoticeOpen()) {
+                    const noticeRect = this.notice.getBoundingClientRect();
+                    height = Math.max(height, Math.ceil(46 + noticeRect.height + 8));
+                }
                 
                 logger.debug('Resizing window to content', {
                     width,
@@ -326,7 +368,11 @@ class MainWindowUI {
         this.micButton = document.getElementById('micButton');
     this.infoButton = document.getElementById('infoButton');
     this.settingsButton = document.getElementById('settingsButton');
+    this.moreButton = document.getElementById('moreButton');
     this.shortcutsPopover = document.getElementById('shortcutsPopover');
+    this.notice = document.getElementById('toolbarNotice');
+    this.noticeText = document.getElementById('toolbarNoticeText');
+    this.noticeClose = document.getElementById('toolbarNoticeClose');
 
         // NEW: Screenshot button is the first .command-item without id
         const commandItems = document.querySelectorAll('.command-item');
@@ -364,6 +410,19 @@ class MainWindowUI {
             this.settingsButton.addEventListener('click', () => this.openSettings());
         }
 
+        // More button: the native app menu (About, Check for Updates, Report
+        // a Problem, View Logs Folder, Quit), opened just under the button.
+        if (this.moreButton) {
+            this.moreButton.addEventListener('click', () => this.openAppMenu());
+        }
+
+        if (this.noticeClose) {
+            this.noticeClose.addEventListener('click', () => this.hideNotice());
+        }
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.isNoticeOpen()) this.hideNotice();
+        });
+
         // Check for required elements (settingsIndicator is optional)
         if (this.settingsIndicator) {
             this.settingsIndicator.addEventListener('click', () => {
@@ -383,12 +442,7 @@ class MainWindowUI {
                         await window.electronAPI.startSpeechRecognition();
                     }
                 } catch (error) {
-                    logger.error('Speech recognition toggle failed', {
-                        component: 'MainWindowUI',
-                        error: error.message
-                    });
-                    this.isRecording = false;
-                    this.updateMicButtonState();
+                    this.handleSpeechToggleError(error);
                 }
             } else if (this.isInteractive && !this.speechAvailable) {
                 logger.warn('Mic clicked but speech recognition is not available', {
@@ -536,11 +590,10 @@ class MainWindowUI {
                 if (e.altKey && e.key === 'r' && this.isInteractive) {
                     e.preventDefault();
                     if (!this.speechAvailable) return; // guard when unavailable
-                    if (this.isRecording) {
-                        window.electronAPI.stopSpeechRecognition();
-                    } else {
-                        window.electronAPI.startSpeechRecognition();
-                    }
+                    const toggle = this.isRecording
+                        ? window.electronAPI.stopSpeechRecognition()
+                        : window.electronAPI.startSpeechRecognition();
+                    Promise.resolve(toggle).catch((error) => this.handleSpeechToggleError(error));
                 }
             });
         }
@@ -740,6 +793,11 @@ class MainWindowUI {
         try {
             this._stopRendererAudioCapture();
 
+            if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+                const unsupported = new Error('Audio capture is not available in this window');
+                unsupported.name = 'NotSupportedError';
+                throw unsupported;
+            }
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     echoCancellation: true,
@@ -748,6 +806,12 @@ class MainWindowUI {
                     sampleRate: { ideal: 16000 }
                 }
             });
+            // Listening was stopped while the permission check ran: let go of
+            // the microphone instead of holding it open.
+            if (!this.isRecording) {
+                stream.getTracks().forEach((track) => track.stop());
+                return;
+            }
             this._mediaStream = stream;
 
             const audioContext = new (window.AudioContext || window.webkitAudioContext)({
@@ -777,15 +841,89 @@ class MainWindowUI {
             scriptNode.connect(audioContext.destination);
 
             logger.info('Renderer audio capture started', { component: 'MainWindowUI' });
+            if (this._noticeKind === 'microphone') this.hideNotice();
         } catch (error) {
             logger.error('Failed to start renderer audio capture', {
                 component: 'MainWindowUI',
-                error: error.message
+                name: error && error.name,
+                error: error && error.message
             });
+            this._stopRendererAudioCapture();
+            // Reset the Listen button now; main confirms with recording-stopped.
+            this.handleRecordingStopped();
+            this.showNotice(microphoneErrorMessage(error, currentPlatform()), { kind: 'microphone' });
             // Notify main process so it can stop the recording state
             try {
                 await window.electronAPI.stopSpeechRecognition();
             } catch (_) { /* ignore */ }
+        }
+    }
+
+    // startSpeechRecognition / stopSpeechRecognition rejected (IPC failure).
+    // Problems inside speech recognition itself arrive as speech-error and
+    // are shown in chat or the answer window by the main process.
+    handleSpeechToggleError(error) {
+        logger.error('Speech recognition toggle failed', {
+            component: 'MainWindowUI',
+            error: error && error.message
+        });
+        this._stopRendererAudioCapture();
+        this.handleRecordingStopped();
+        this.showNotice('Could not start or stop listening. Try again. If it keeps failing, open More (⋯) > View Logs Folder.', { kind: 'speech', icon: 'fa-circle-exclamation' });
+    }
+
+    isNoticeOpen() {
+        return !!(this.notice && this.notice.classList.contains('is-open'));
+    }
+
+    /**
+     * Show a message under the bar. It stays until dismissed (close button
+     * or Escape), replaced, or after `timeoutMs`, so it also goes away in
+     * click-through mode where it cannot be clicked.
+     */
+    showNotice(message, { kind = 'general', icon = 'fa-microphone-slash', timeoutMs = 15000 } = {}) {
+        if (!this.notice || !this.noticeText) {
+            logger.warn('Notice element missing', { component: 'MainWindowUI', message });
+            return;
+        }
+        if (this._noticeTimer) clearTimeout(this._noticeTimer);
+        this.hideShortcutsPopover();
+        const iconEl = this.notice.querySelector('.toolbar-notice-icon');
+        if (iconEl) iconEl.className = `fas ${icon} toolbar-notice-icon`;
+        this._noticeKind = kind;
+        this.notice.classList.add('is-open');
+        // Set the text after the notice is shown so role="alert" announces it.
+        this.noticeText.textContent = message;
+        this._noticeTimer = setTimeout(() => this.hideNotice(), timeoutMs);
+        this.resizeWindowToContent();
+    }
+
+    hideNotice() {
+        if (this._noticeTimer) {
+            clearTimeout(this._noticeTimer);
+            this._noticeTimer = null;
+        }
+        this._noticeKind = null;
+        if (!this.isNoticeOpen()) return;
+        this.notice.classList.remove('is-open');
+        this.noticeText.textContent = '';
+        this.resizeWindowToContent();
+    }
+
+    async openAppMenu() {
+        if (!this.isInteractive || !this.moreButton) return;
+        if (!window.electronAPI || !window.electronAPI.showAppMenu) {
+            this.showNotice('The menu is not available right now. Restart Cuewell and try again.', { kind: 'menu', icon: 'fa-circle-exclamation' });
+            return;
+        }
+        this.hideShortcutsPopover();
+        const rect = this.moreButton.getBoundingClientRect();
+        try {
+            const result = await window.electronAPI.showAppMenu(Math.round(rect.left), Math.round(rect.bottom + 4));
+            if (result && result.success === false) throw new Error('show-app-menu returned success: false');
+        } catch (error) {
+            logger.error('Failed to open the app menu', { component: 'MainWindowUI', error: error.message });
+            this.showNotice('Could not open the menu. Try again.', { kind: 'menu', icon: 'fa-circle-exclamation' });
         }
     }
 
@@ -1042,28 +1180,8 @@ class MainWindowUI {
         }
     }
 
-    showNotification(message, type = 'info') {
-        const notification = document.createElement('div');
-        notification.className = `fixed top-4 right-4 p-4 rounded-lg text-white z-50 ${
-            type === 'error' ? 'bg-red-600' : 
-            type === 'success' ? 'bg-green-600' :
-            'bg-blue-600'
-        }`;
-        notification.textContent = message;
-        
-        document.body.appendChild(notification);
-        
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 5000);
-        
-        logger.debug('Notification shown', {
-            component: 'MainWindowUI',
-            message,
-            type
-        });
+    showNotification(message) {
+        this.showNotice(message, { kind: 'general', icon: 'fa-circle-exclamation' });
     }
 
     setupSettingsShortcut() {
@@ -1102,7 +1220,7 @@ class MainWindowUI {
                 component: 'MainWindowUI',
                 error: error.message
             });
-            this.showNotification('Failed to open settings', 'error');
+            this.showNotification('Could not open Settings. Try again.');
         }
     }
 

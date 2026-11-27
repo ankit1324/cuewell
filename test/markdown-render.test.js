@@ -145,6 +145,10 @@ describe('renderMarkdown', () => {
       ['10,000 "#*a"', '#*a'.repeat(10000)],
       ['50,000 "~"', '~'.repeat(50000)],
       ['50,000 backticks', '`'.repeat(50000)],
+      ['20,000 word-internal "_" ("a_a_a_...")', 'a_'.repeat(20000)],
+      ['10,000 "a_" after a fake fence ("```x`")', '```x`\n' + 'a_'.repeat(10000)],
+      ['10,000 "a_" after an indented fence', '- a\n  ```\n  b\nc ' + 'a_'.repeat(10000)],
+      ['10,000 "a_" after a fence closed by "```~"', '```\nx\n```~\n' + 'a_'.repeat(10000)],
     ];
     for (const [name, input] of cases) {
       it(name, async () => {
@@ -153,16 +157,28 @@ describe('renderMarkdown', () => {
         assert.ok(length > 0);
       });
     }
+  });
 
-    // Known slow case: an unbroken run of word-internal underscores is not
-    // counted by the emphasis budget (DELIMITER skips "_" after a letter or
-    // digit), but marked still rescans for each one, so the cost grows with
-    // the square of the run (10,000 "a_" take about 250 ms, 20,000 about
-    // 1 s). Marked todo so it is reported without failing the suite.
-    it('10,000 word-internal "_" ("a_a_a_...")', { todo: 'emphasisCost does not count intraword underscores' }, async () => {
-      const { ms } = await renderInWorker('a_'.repeat(10000), 1);
-      assert.ok(ms < 100, `took ${ms.toFixed(1)} ms`);
-    });
+  it('keeps word-internal underscores as text and still renders _emphasis_', () => {
+    assert.equal(render('Call snake_case_name and __init__ here.'),
+      '<p>Call snake_case_name and <strong>init</strong> here.</p>\n');
+    assert.equal(render('Use `__init__` or _em_ and __strong__.'),
+      '<p>Use <code>__init__</code> or <em>em</em> and <strong>strong</strong>.</p>\n');
+  });
+
+  it('keeps formatting for long code blocks full of underscores', () => {
+    const code = Array.from({ length: 400 }, (_, i) => `my_var_${i} = some_func(arg_one, arg_two)`).join('\n');
+    const html = render('**Answer**\n\n```python\n' + code + '\n```\n\nDone *now*.');
+    assert.match(html, /<strong>Answer<\/strong>/);
+    assert.match(html, /<pre><code class="language-python">my_var_0 = /);
+    assert.match(html, /<em>now<\/em>/);
+  });
+
+  it('falls back to plain text for a long run of word-internal underscores', () => {
+    const before = messages.length;
+    const html = render('a_'.repeat(5000));
+    assert.equal(html, 'a_'.repeat(5000));
+    assert.ok(messages.slice(before).some((m) => m.level === 'warn' && /too costly/.test(m.text)));
   });
 
   it('falls back to escaped plain text past the emphasis budget, with a warning', () => {

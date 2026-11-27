@@ -1108,6 +1108,62 @@
             display: none !important;
         }
 
+        /* Search also lists settings hidden by the current provider choice
+           (data-gate). They show dimmed and inactive under a note that says
+           which provider they belong to, with a button to switch. */
+        .sw-group.sw-gate-revealed[hidden] {
+            display: block !important;
+        }
+
+        .sw-row.sw-gate-revealed[hidden] {
+            display: grid !important;
+        }
+
+        .sw-gate-revealed > [inert] {
+            opacity: 0.5;
+        }
+
+        .sw-gate-revealed.sw-gate-revealed--note-only > [inert] {
+            display: none !important;
+        }
+
+        .sw-gate-hint {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 10px;
+            margin: 12px 16px 0;
+            padding: 9px 12px;
+            font-size: var(--oc-fs-sm);
+            line-height: 1.5;
+            color: var(--oc-text);
+            background: var(--oc-raised-2);
+            border: 1px solid var(--oc-line-2);
+            border-radius: var(--oc-r-md);
+        }
+
+        .sw-row > .sw-gate-hint {
+            grid-column: 1 / -1;
+            margin: 0;
+        }
+
+        .sw-gate-hint > i {
+            color: var(--oc-info);
+            font-size: 12px;
+        }
+
+        .sw-gate-hint-text {
+            flex: 1;
+            min-width: 180px;
+        }
+
+        .sw-gate-hint .oc-btn {
+            flex: none;
+            height: 26px;
+            padding: 0 10px;
+            font-size: var(--oc-fs-xs);
+        }
+
         .sw-state-sub.is-ok {
             color: var(--oc-accent);
         }
@@ -1274,7 +1330,7 @@
                         <div class="sw-group-head">
                             <h3 class="sw-group-title" id="providerDetailTitle">Provider settings</h3>
                         </div>
-                        <div class="sw-row sw-row--stack" id="providerKeyRow" data-search="api key secret token remove clear replace">
+                        <div class="sw-row sw-row--stack" id="providerKeyRow" data-gate="llm:key" data-search="api key secret token remove clear replace">
                             <div>
                                 <span class="sw-row-label" id="providerKeyLabel">API key</span>
                                 <p class="sw-row-help" id="providerKeyHelp"></p>
@@ -1291,7 +1347,7 @@
                                 <div class="sw-status" id="providerModelStatus" role="status"></div>
                             </div>
                         </div>
-                        <div class="sw-row" id="providerUrlRow" data-search="server url base url endpoint localhost ollama">
+                        <div class="sw-row" id="providerUrlRow" data-gate="llm:ollama" data-search="server url base url endpoint localhost ollama">
                             <div>
                                 <label class="sw-row-label" for="ollamaBaseUrl">Server URL</label>
                                 <p class="sw-row-help" id="ollamaBaseUrlHelp">The OpenAI-compatible address of your Ollama server. Leave empty for <code>http://localhost:11434/v1</code>.</p>
@@ -1383,7 +1439,7 @@
                     </div>
 
                     <!-- Whisper -->
-                    <div class="sw-group" id="whisperGroup" data-search="whisper local install model download">
+                    <div class="sw-group" id="whisperGroup" data-gate="speech:whisper" data-search="whisper local install model download">
                         <div class="sw-group-head">
                             <h3 class="sw-group-title">Local Whisper</h3>
                             <button type="button" class="oc-btn oc-btn--ghost" id="whisperRecheck"><i class="fas fa-rotate-right" aria-hidden="true"></i>Check again</button>
@@ -1494,7 +1550,7 @@
                     </div>
 
                     <!-- Azure -->
-                    <div class="sw-group" id="azureGroup" data-search="azure microsoft speech cloud key region">
+                    <div class="sw-group" id="azureGroup" data-gate="speech:azure" data-search="azure microsoft speech cloud key region">
                         <div class="sw-group-head">
                             <h3 class="sw-group-title">Azure Speech</h3>
                         </div>
