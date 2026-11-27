@@ -363,7 +363,7 @@ describe('speech service engine choice', () => {
       return calls;
     }
 
-    it('Hinglish is Hindi plus a Roman-script prompt for the built-in engine', async () => {
+    it('Hinglish is English decoding plus a Roman-script prompt for the built-in engine', async () => {
       downloadModel();
       init({ engine: 'whispercpp', language: 'hinglish' });
       const calls = engineSpy();
@@ -372,7 +372,7 @@ describe('speech service engine choice', () => {
       assert.equal(calls.length, 1);
       const { input, options } = calls[0];
       assert.ok(Buffer.isBuffer(input) && input.subarray(0, 4).toString() === 'RIFF', 'sent as a WAV buffer, no temp file');
-      assert.equal(options.language, 'hi');
+      assert.equal(options.language, 'en', 'decoded as English so Hindi words stay in Latin letters');
       assert.ok(options.prompt.length > 0);
       assert.match(options.prompt, /^[\x20-\x7E]+$/, 'the prompt is plain Latin script');
       assert.doesNotMatch(options.prompt, /[\u0900-\u097F]/, 'no Devanagari');
@@ -391,7 +391,7 @@ describe('speech service engine choice', () => {
       assert.deepEqual(service._getWhisperCppDecodeOptions(), { language: 'auto', prompt: '' }, 'unset is auto');
     });
 
-    it('Hinglish sends language hi and the same prompt to the Python worker', async () => {
+    it('Hinglish sends language en and the same prompt to the Python worker', async () => {
       init({ engine: 'python', pythonCommand: PY(), pythonWorks: true, language: 'hinglish' });
       assert.equal(service.whisperEngine, 'python');
       const worker = service.whisperWorker;
@@ -409,7 +409,8 @@ describe('speech service engine choice', () => {
         assert.equal(requests.length, 1);
         const [request] = requests;
         assert.equal(request.action, 'transcribe');
-        assert.equal(request.language, 'hi');
+        assert.equal(request.language, 'en');
+        assert.ok(request.initial_prompt.length > 0);
         assert.equal(request.initial_prompt, service._getWhisperCppDecodeOptions().prompt, 'the whisper.cpp prompt');
         assert.match(request.initial_prompt, /^[\x20-\x7E]+$/);
 
@@ -423,11 +424,17 @@ describe('speech service engine choice', () => {
       }
     });
 
-    it('Hinglish gives the Python CLI the same language and prompt (--language hi --initial_prompt)', () => {
+    it('Hinglish gives the Python CLI the same language and prompt (--language en --initial_prompt)', () => {
       process.env.WHISPER_LANGUAGE = 'Hinglish';
       const decode = service._getWhisperDecodeOptions();
-      assert.equal(decode.language, 'hi');
+      assert.equal(decode.language, 'en');
+      assert.ok(decode.prompt.length > 0);
       assert.match(decode.prompt, /^[\x20-\x7E]+$/);
+      assert.doesNotMatch(decode.prompt, /[\u0900-\u097F]/, 'no Devanagari');
+
+      // Plain Hindi is unchanged: language hi, no prompt.
+      process.env.WHISPER_LANGUAGE = 'hi';
+      assert.deepEqual(service._getWhisperDecodeOptions(), { language: 'hi', prompt: '' });
     });
   });
 

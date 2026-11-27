@@ -497,8 +497,10 @@ const { childProcessEnv } = require('../core/whisper-installer');
 // Local Whisper engines: the bundled whisper.cpp server (default) or the
 // Python openai-whisper install (kept for existing setups).
 const WHISPER_ENGINES = ['whispercpp', 'python'];
-// WHISPER_LANGUAGE=hinglish: Hindi with a Roman-script initial prompt, so
-// Hindi-English speech comes out in Latin script.
+// WHISPER_LANGUAGE=hinglish: English decoding with a Roman-script initial
+// prompt. Decoding as English keeps Hindi words in Latin letters and handles
+// plain English sentences without temperature fallback; decoding as Hindi
+// (even with this prompt) can return Devanagari, loop, and take seconds.
 const HINGLISH_PROMPT = 'Haan, main is approach ko explain karta hoon. Time complexity O(n log n) hai.';
 // Why the built-in engine is not in use, as shown to the user.
 const WHISPER_CPP_PROBLEMS = {
@@ -1735,14 +1737,15 @@ class SpeechService extends EventEmitter {
   }
 
   /**
-   * Language and initial prompt for the engines. 'hinglish' is Hindi with a
-   * Roman-script prompt; 'detect' is 'auto'; other values pass through.
+   * Language and initial prompt for the engines (whisper.cpp and Python share
+   * it). 'hinglish' is English decoding with the Roman-script prompt, so Hindi
+   * words stay in Latin letters; 'detect' is 'auto'; other values pass through.
    */
   _getWhisperDecodeOptions() {
     const value = String(this._getWhisperLanguage() || 'auto').trim();
     const lower = value.toLowerCase();
     if (lower === 'hinglish') {
-      return { language: 'hi', prompt: HINGLISH_PROMPT };
+      return { language: 'en', prompt: HINGLISH_PROMPT };
     }
     if (!value || lower === 'auto' || lower === 'detect') {
       return { language: 'auto', prompt: '' };
