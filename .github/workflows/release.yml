@@ -24,21 +24,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # whisper_platform: the vendor/whisper/<platform>-<arch> folders
+          # scripts/fetch-whisper-cpp.js fills for this runner's targets.
           - name: macOS
             os: macos-latest
             script: mac
+            whisper_platform: darwin
             artifact_glob: |
               dist/Cuewell-*-mac-*.dmg
               dist/Cuewell-*-mac-*.zip
           - name: Windows
             os: windows-latest
             script: win
+            whisper_platform: win32
             artifact_glob: |
               dist/Cuewell-*-win-*-setup.exe
               dist/Cuewell-*-win-*-portable.exe
           - name: Linux
-            os: ubuntu-latest
+            # 22.04, not ubuntu-latest: the libgomp.so.1 bundled with
+            # whisper-server is copied from the runner. 24.04's needs glibc
+            # 2.38, which would stop voice working on Ubuntu 22.04 and Debian
+            # 12; 22.04's needs no more than whisper.cpp itself (2.34). The
+            # fetch script refuses a libgomp that raises the glibc floor.
+            os: ubuntu-22.04
             script: linux
+            whisper_platform: linux
             artifact_glob: |
               dist/Cuewell-*-linux-*.AppImage
               dist/Cuewell-*-linux-*.deb
@@ -77,6 +87,37 @@ jobs:
             npm pkg set "version=$VERSION"
           fi
 
+      # macOS builds whisper-server from source for arm64 and x64 (x64 is
+      # cross-compiled on the arm64 runner), which takes a few minutes, so the
+      # result is cached per whisper.cpp tag, OS and arch. Windows and Linux
+      # download the official assets each run and check them against the
+      # SHA-256 pinned in the script, so nothing unverified is restored there.
+      # A restored mac build is checked for its architecture and for linking
+      # only system libraries; only this repository's workflows can write the
+      # cache, and a tag run reads only its own and the default branch's.
+      - name: whisper.cpp cache key
+        if: matrix.whisper_platform == 'darwin'
+        id: whisper-key
+        shell: bash
+        run: |
+          TAG=$(node -p "require('./scripts/fetch-whisper-cpp.js').TAG")
+          echo "key=whisper-cpp-${TAG}-${{ runner.os }}-darwin-arm64-x64-${{ hashFiles('scripts/fetch-whisper-cpp.js') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore whisper.cpp build
+        if: matrix.whisper_platform == 'darwin'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            vendor/whisper/darwin-arm64
+            vendor/whisper/darwin-x64
+          key: ${{ steps.whisper-key.outputs.key }}
+
+      # --require-runtime: fail instead of shipping a Windows build without the
+      # Visual C++ runtime DLLs or a Linux build without libgomp.
+      - name: Fetch whisper.cpp
+        shell: bash
+        run: node scripts/fetch-whisper-cpp.js --platform ${{ matrix.whisper_platform }} --all-arches --require-runtime
+
       - name: Build
         shell: bash
         env:
@@ -92,6 +133,81 @@ jobs:
       - name: List build output
         shell: bash
         run: ls -la dist
+
+      # The packaged app must contain whisper-server under resources/whisper
+      # and it must start. Output goes to a file: piping --help into head
+      # would end the step with SIGPIPE under pipefail.
+      - name: Verify bundled whisper-server (macOS)
+        if: matrix.whisper_platform == 'darwin'
+        shell: bash
+        run: |
+          for arch in arm64 x86_64; do
+            bin=""
+            while IFS= read -r candidate; do
+              if [ "$(lipo -archs "$candidate")" = "$arch" ]; then bin="$candidate"; break; fi
+            done < <(find dist -path '*/Cuewell.app/Contents/Resources/whisper/whisper-server' -type f)
+            if [ -z "$bin" ] || [ ! -x "$bin" ]; then
+              echo "::error::No executable $arch whisper-server in a packaged Cuewell.app"
+              exit 1
+            fi
+            echo "$arch: $bin"
+            otool -L "$bin"
+            if [ "$arch" = "x86_64" ]; then
+              if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+                echo "::warning::Rosetta is not available; checked the x64 binary's architecture only"
+                continue
+              fi
+              arch -x86_64 "$bin" --help > whisper-help.txt 2>&1
+            else
+              "$bin" --help > whisper-help.txt 2>&1
+            fi
+            grep -qi 'usage' whisper-help.txt || { cat whisper-help.txt; echo "::error::$bin --help failed"; exit 1; }
+          done
+          for zip in dist/Cuewell-*-mac-*.zip; do
+            unzip -Z1 "$zip" > zip-list.txt
+            grep -qx 'Cuewell.app/Contents/Resources/whisper/whisper-server' zip-list.txt \
+              || { echo "::error::$zip has no whisper-server"; exit 1; }
+          done
+          rm -f whisper-help.txt zip-list.txt
+
+      - name: Verify bundled whisper-server (Windows)
+        if: matrix.whisper_platform == 'win32'
+        shell: bash
+        run: |
+          dir=dist/win-unpacked/resources/whisper
+          for file in whisper-server.exe whisper.dll ggml.dll ggml-base.dll ggml-cpu-x64.dll \
+                      msvcp140.dll vcruntime140.dll vcruntime140_1.dll vcomp140.dll LICENSE; do
+            [ -f "$dir/$file" ] || { echo "::error::Missing $dir/$file"; exit 1; }
+          done
+          "$dir/whisper-server.exe" --help > whisper-help.txt 2>&1 || true
+          grep -qi 'usage' whisper-help.txt || { cat whisper-help.txt; echo "::error::whisper-server.exe --help failed"; exit 1; }
+          rm -f whisper-help.txt
+
+      - name: Verify bundled whisper-server (Linux)
+        if: matrix.whisper_platform == 'linux'
+        shell: bash
+        run: |
+          dir="$PWD/dist/linux-unpacked/resources/whisper"
+          [ -x "$dir/whisper-server" ] || { echo "::error::Missing $dir/whisper-server"; exit 1; }
+          [ -f "$dir/libgomp.so.1" ] || { echo "::error::Missing $dir/libgomp.so.1"; exit 1; }
+          LD_LIBRARY_PATH="$dir" "$dir/whisper-server" --help > whisper-help.txt 2>&1
+          grep -qi 'usage' whisper-help.txt || { cat whisper-help.txt; echo "::error::whisper-server --help failed"; exit 1; }
+          # The CPU backend must load the bundled libgomp, not the runner's.
+          gomp=$(ldd "$dir/libggml-cpu-x64.so" | grep libgomp || true)
+          echo "$gomp"
+          case "$gomp" in
+            *"=> $dir/libgomp.so.1 "*) ;;
+            *) echo "::error::libggml-cpu does not load the bundled libgomp"; exit 1 ;;
+          esac
+          # A clean Ubuntu 22.04 (no libgomp1, no build tools) must run it too.
+          docker run --rm -v "$dir":/w:ro ubuntu:22.04 \
+            sh -c 'LD_LIBRARY_PATH=/w /w/whisper-server --help' > whisper-help.txt 2>&1
+          grep -qi 'usage' whisper-help.txt || { cat whisper-help.txt; echo "::error::whisper-server does not run on a clean Ubuntu 22.04"; exit 1; }
+          for deb in dist/Cuewell-*-linux-*.deb; do
+            dpkg-deb -c "$deb" | grep -E '^-rwx.*/resources/whisper/whisper-server$' \
+              || { echo "::error::$deb has no executable whisper-server"; exit 1; }
+          done
+          rm -f whisper-help.txt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -200,9 +316,9 @@ jobs:
 
           Cuewell opens a setup wizard on first launch. Choose an AI provider (Gemini, Claude, OpenAI, OpenRouter, Groq, DeepSeek or a local Ollama model), enter its key, and optionally set up voice input.
 
-          ## Optional: local Whisper (offline voice)
+          ## Local voice (offline)
 
-          The setup wizard can install Whisper for you. It needs **Python 3.10 or newer** (3.12 recommended) and 3 to 5 GB of disk space. On Linux, voice input also needs `arecord` (alsa-utils) or `sox`; the .deb installs it.
+          Cuewell includes whisper.cpp, so local voice needs no Python. The setup wizard downloads a speech model once (about 190 MB, or 60 MB for the smaller one). On Linux, local voice needs glibc 2.34 or newer (Ubuntu 22.04, Debian 12, Fedora 35 or later), and voice input needs `arecord` (alsa-utils) or `sox`; the .deb installs it.
 
           See the [README](__REPO_URL__#readme) for details.
 
