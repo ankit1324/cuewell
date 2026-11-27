@@ -245,6 +245,7 @@ process.on("unhandledRejection", (reason) => {
 // Screen capture (image-based)
 const captureService = require("./src/services/capture.service");
 const speechService = require("./src/services/speech.service");
+const whisperModels = require("./src/core/whisper-models");
 // A relative WHISPER_MODEL_DIR (setup.sh writes `.whisper-models`) is
 // resolved against the folder of the .env loaded above.
 speechService.setEnvPath(ENV_PATH);
@@ -316,6 +317,10 @@ const WHISPER_CAPTURE_MODES = ["vad", "manual"];
 const WHISPER_RESPONSE_TARGETS = ["both", "chat", "overlay"];
 // Whisper model aliases and the weights file each downloads (<name>.pt).
 const WHISPER_MODEL_FILES = { large: "large-v3", turbo: "large-v3-turbo" };
+// Local voice engines: the bundled whisper.cpp server or Python openai-whisper.
+const WHISPER_ENGINES = ["whispercpp", "python"];
+// voice-model-progress events go to the window at most this often.
+const VOICE_PROGRESS_INTERVAL_MS = 150;
 
 // What each shortcut does, for the Settings shortcuts table. Keys are the
 // accelerators registered in setupGlobalShortcuts / setupFocusShortcuts.
@@ -342,6 +347,7 @@ const SETTINGS_FIELDS_BY_WINDOW = {
     "speechProvider", "azureKey", "azureRegion",
     "whisperCommand", "whisperModel", "whisperLanguage", "whisperDevice",
     "whisperCaptureMode", "whisperResponseTarget", "whisperSegmentMs",
+    "whisperEngine", "whisperCppModel",
     "geminiKey", "llmProvider", ...Object.keys(LLM_SETTING_ENV_KEYS),
     "windowGap", "codingLanguage", "activeSkill", "answerLength", "selectedIcon",
   ],
@@ -350,6 +356,7 @@ const SETTINGS_FIELDS_BY_WINDOW = {
     "geminiKey", "llmProvider", ...Object.keys(LLM_SETTING_ENV_KEYS),
     "speechProvider", "azureKey", "azureRegion",
     "whisperCommand", "whisperModelDownload",
+    "whisperEngine", "whisperCppModel", "whisperLanguage",
   ],
 };
 
@@ -403,6 +410,12 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   "detect-whisper": ["onboarding"],
   "install-whisper": ["onboarding", "settings"],
   "download-whisper-model": ["onboarding", "settings"],
+  // Built-in voice (whisper.cpp): engine state, model downloads, engine choice.
+  // Progress arrives as voice-model-progress events on the requesting window.
+  "get-voice-status": ["settings", "onboarding"],
+  "download-voice-model": ["settings", "onboarding"],
+  "cancel-voice-model-download": ["settings", "onboarding"],
+  "set-voice-engine": ["settings", "onboarding"],
   "test-provider": ["onboarding", "settings"],
 });
 
@@ -566,6 +579,8 @@ class ApplicationController {
     this._whisperInstaller = null;
     // "install" or "download" while one runs; see install-whisper.
     this._whisperJob = null;
+    // The voice model download that runs now: { id, controller, received, total }.
+    this._voiceDownload = null;
     this.isFirstRun = false;
     this.isQuitting = false;
     // Quit sequence (onBeforeQuit): true once Settings had its chance to save.
@@ -1833,6 +1848,13 @@ class ApplicationController {
       }
     });
 
+    // Built-in voice engine (whisper.cpp). Ids are checked against
+    // whisperModels.MODELS; the renderer never names a file or folder.
+    this.handleIpc("get-voice-status", () => this.getVoiceStatus());
+    this.handleIpc("download-voice-model", (event, input) => this.downloadVoiceModel(event, input));
+    this.handleIpc("cancel-voice-model-download", (_event, input) => this.cancelVoiceModelDownload(input));
+    this.handleIpc("set-voice-engine", (_event, input) => this.setVoiceEngine(input));
+
     // Test an AI provider from the wizard or Settings without saving it or
     // changing the running provider.
     this.handleIpc("test-provider", (_event, input) => this.testProvider(input));
@@ -1922,7 +1944,8 @@ class ApplicationController {
       try {
         windowManager.broadcastToAllWindows("speech-availability", { available: false });
         // Alt+R works even when the mic buttons are hidden: say why nothing happens.
-        this.reportSpeechError(friendlySpeechError(`Speech provider "${speechService.provider || "none"}" is not available`));
+        const reason = typeof speechService.getUnavailableReason === "function" ? speechService.getUnavailableReason() : "";
+        this.reportSpeechError(reason || friendlySpeechError(`Speech provider "${speechService.provider || "none"}" is not available`));
       } catch (e) {
         logger.warn("Could not report that voice input is unavailable", { error: e.message });
       }
@@ -2650,6 +2673,15 @@ class ApplicationController {
       this.tray = null;
     }
     globalShortcut.unregisterAll();
+    if (this._speechReinitTimer) {
+      clearInterval(this._speechReinitTimer);
+      this._speechReinitTimer = null;
+    }
+    // A model download stops here; its .part file is resumed next time.
+    if (this._voiceDownload) {
+      try { this._voiceDownload.controller.abort(); } catch (_) { /* already stopped */ }
+    }
+    // Also stops the whisper.cpp server process.
     speechService.shutdown();
     windowManager.destroyAllWindows();
 
@@ -2720,6 +2752,11 @@ class ApplicationController {
         (process.env.WHISPER_MANUAL_CAPTURE === "true" ? "manual" : "vad"),
       whisperResponseTarget: process.env.WHISPER_RESPONSE_TARGET || "both",
       whisperSegmentMs: process.env.WHISPER_SEGMENT_MS || "4000",
+      // As saved: "" means Cuewell picks (see speech.service _initializeWhisperClient).
+      whisperEngine: process.env.WHISPER_ENGINE || "",
+      // The engine that choice resolves to now: whispercpp or python.
+      whisperEngineEffective: speechService.getWhisperEngineState().choice || "whispercpp",
+      whisperCppModel: speechService.getWhisperCppModelId(),
       geminiKey: maskSecret(process.env.GEMINI_API_KEY),
       llmProvider: getActiveProviderId(),
       llmProviders: listProviders(),
@@ -2839,6 +2876,207 @@ class ApplicationController {
       modelDir,
       busy: this._whisperJob || null,
     };
+  }
+
+  /**
+   * Built-in voice state for Settings and onboarding. Reads files only (no
+   * process, no network), so it is cheap to call whenever a page shows.
+   */
+  getVoiceStatus() {
+    const state = speechService.getWhisperEngineState();
+    const modelDir = state.modelDir;
+    const download = this._voiceDownload;
+    return {
+      engine: state.choice,
+      activeEngine: state.active,
+      binaryAvailable: state.binaryAvailable,
+      platformSupported: state.platformSupported,
+      models: whisperModels.MODELS.map((model) => ({
+        id: model.id,
+        label: model.label,
+        bytes: model.bytes,
+        downloaded: !!modelDir && whisperModels.isModelDownloaded(model.id, modelDir),
+      })),
+      selectedModel: state.selectedModel,
+      language: String(process.env.WHISPER_LANGUAGE || "auto").trim() || "auto",
+      pythonConfigured: speechService.hasPythonWhisper(),
+      speechProvider: speechService.provider,
+      // Local voice works now (the mic button shows).
+      ready: speechService.provider === "whisper" && speechService.isAvailable(),
+      // Why the built-in engine is not in use, in words for the user.
+      problem: state.problem,
+      problemMessage: state.problemMessage,
+      downloading: download ? { id: download.id, received: download.received, total: download.total } : null,
+    };
+  }
+
+  /** The model id from a { id } payload when it is one of whisperModels.MODELS, else null. */
+  voiceModelIdFrom(input) {
+    const id = input && typeof input === "object" && !Array.isArray(input) ? input.id : undefined;
+    return typeof id === "string" && whisperModels.isModelId(id) ? id : null;
+  }
+
+  /**
+   * Download a voice model. One download at a time; progress goes to the
+   * requesting window as voice-model-progress { id, received, total }.
+   * Returns { success, id } or { success: false, error, code, cancelled? }.
+   */
+  async downloadVoiceModel(event, input) {
+    const id = this.voiceModelIdFrom(input);
+    if (!id) return { success: false, error: "Unknown voice model.", code: "UNKNOWN_MODEL" };
+    if (this._voiceDownload) {
+      return this._voiceDownload.id === id
+        ? { success: false, error: "This model is already downloading.", code: "BUSY" }
+        : { success: false, error: "Another voice model is downloading. Wait for it to finish or cancel it.", code: "BUSY" };
+    }
+    let modelDir = "";
+    try {
+      modelDir = speechService.getWhisperModelDir() || "";
+    } catch (_) { /* handled below */ }
+    if (!modelDir || !path.isAbsolute(modelDir)) {
+      return { success: false, error: "Cuewell could not find its voice model folder.", code: "NO_MODEL_DIR" };
+    }
+
+    const model = whisperModels.getModel(id);
+    const controller = new AbortController();
+    const job = { id, controller, received: 0, total: model.bytes };
+    this._voiceDownload = job;
+    const sender = event && event.sender;
+    let lastSent = 0;
+    const send = (received, total, force = false) => {
+      job.received = received;
+      job.total = total;
+      const now = Date.now();
+      if (!force && now - lastSent < VOICE_PROGRESS_INTERVAL_MS) return;
+      lastSent = now;
+      try {
+        if (sender && !sender.isDestroyed()) sender.send("voice-model-progress", { id, received, total });
+      } catch (_) { /* window closed */ }
+    };
+
+    logger.info("Voice model download started", { id });
+    const startedAt = Date.now();
+    try {
+      await whisperModels.downloadModel(id, {
+        modelDir,
+        signal: controller.signal,
+        onProgress: (received, total) => send(received, total, received >= total),
+      });
+      send(model.bytes, model.bytes, true);
+      logger.info("Voice model downloaded", { id, ms: Date.now() - startedAt });
+    } catch (error) {
+      const cancelled = error && error.code === "ABORTED";
+      if (cancelled) {
+        logger.info("Voice model download cancelled", { id, received: job.received });
+      } else {
+        logger.warn("Voice model download failed", {
+          id, code: error && error.code, error: error && error.message,
+          cause: error && error.cause ? error.cause.code || error.cause.message : undefined,
+        });
+      }
+      return {
+        success: false,
+        cancelled,
+        code: (error && error.code) || "FAILED",
+        error: (error && error.message) || "The download failed. Try again.",
+      };
+    } finally {
+      if (this._voiceDownload === job) this._voiceDownload = null;
+    }
+
+    // The selected model arrived for the built-in engine that is not running
+    // yet: start using it (after any recording in progress).
+    if (speechService.provider === "whisper" &&
+        speechService.whisperEngineChoice === "whispercpp" &&
+        speechService.whisperEngine !== "whispercpp" &&
+        id === speechService.getWhisperCppModelId()) {
+      this.reinitializeSpeechWhenIdle("voice model downloaded");
+    }
+    return { success: true, id };
+  }
+
+  cancelVoiceModelDownload(input) {
+    const id = this.voiceModelIdFrom(input);
+    if (!id) return { success: false, error: "Unknown voice model." };
+    if (!this._voiceDownload || this._voiceDownload.id !== id) {
+      return { success: false, error: "This model is not downloading." };
+    }
+    this._voiceDownload.controller.abort();
+    return { success: true };
+  }
+
+  /**
+   * Choose the local voice engine, and for the built-in one optionally the
+   * model. Saved to .env as WHISPER_ENGINE and WHISPER_CPP_MODEL. Returns
+   * { success, available } or { success: false, error }.
+   */
+  setVoiceEngine(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      return { success: false, error: "Choose a voice engine." };
+    }
+    const engine = typeof input.engine === "string" ? input.engine.trim().toLowerCase() : "";
+    if (!WHISPER_ENGINES.includes(engine)) {
+      return { success: false, error: "Voice engine must be Built-in or Python Whisper." };
+    }
+    const hasModel = input.model !== undefined && input.model !== null && input.model !== "";
+    if (hasModel && (typeof input.model !== "string" || !whisperModels.isModelId(input.model))) {
+      return { success: false, error: "Unknown voice model." };
+    }
+    if (hasModel && engine !== "whispercpp") {
+      return { success: false, error: "A voice model can only be chosen for the built-in engine." };
+    }
+    if (engine === "python" && !speechService.findPythonWhisper()) {
+      return {
+        success: false,
+        error: "Python Whisper is not installed. Install it first, or use the built-in engine.",
+      };
+    }
+
+    const updates = { WHISPER_ENGINE: engine };
+    if (hasModel) updates.WHISPER_CPP_MODEL = input.model;
+    const persisted = this.persistEnvUpdates(updates);
+    this.reinitializeSpeech("voice engine changed");
+    const available = speechService.provider === "whisper" && speechService.isAvailable();
+    logger.info("Voice engine set", { engine, model: hasModel ? input.model : undefined, available });
+    const result = { success: true, available };
+    if (persisted.length < Object.keys(updates).length) {
+      result.persisted = false;
+      result.warning = "Changed for now, but Cuewell could not write its settings file, so the change is lost when it restarts.";
+    }
+    return result;
+  }
+
+  /**
+   * reinitializeSpeech once no recording or transcription runs (a reinit
+   * would cut it off). Checks every second for up to 10 minutes.
+   */
+  reinitializeSpeechWhenIdle(reason) {
+    const busy = () => speechService.isRecording || speechService.isProcessingAudio;
+    if (!busy()) {
+      this.reinitializeSpeech(reason);
+      return;
+    }
+    if (this._speechReinitTimer) clearInterval(this._speechReinitTimer);
+    const deadline = Date.now() + 10 * 60 * 1000;
+    this._speechReinitTimer = setInterval(() => {
+      if (busy() && Date.now() < deadline) return;
+      clearInterval(this._speechReinitTimer);
+      this._speechReinitTimer = null;
+      this.reinitializeSpeech(reason);
+    }, 1000);
+    if (typeof this._speechReinitTimer.unref === "function") this._speechReinitTimer.unref();
+  }
+
+  /** Re-read the speech settings and tell every window whether the mic works. */
+  reinitializeSpeech(reason) {
+    try {
+      speechService.initializeClient();
+      this.speechAvailable = speechService.isAvailable ? speechService.isAvailable() : false;
+      windowManager.broadcastToAllWindows("speech-availability", { available: this.speechAvailable });
+      logger.info("Speech service reinitialized", { reason, speechAvailable: this.speechAvailable });
+    } catch (e) {
+      logger.warn("Failed to reinitialize speech service", { reason, error: e.message });
+    }
   }
 
   /** Bare Whisper commands the installer probes, e.g. ["whisper"], ["python3", "-m", "whisper"]. */
@@ -3029,6 +3267,24 @@ class ApplicationController {
       }
     });
     check(() => {
+      if (has("whisperEngine")) {
+        const value = text("whisperEngine").toLowerCase();
+        if (value && !WHISPER_ENGINES.includes(value)) {
+          throw new SettingsValidationError("whisperEngine", "Voice engine must be Built-in or Python Whisper.");
+        }
+        clean.whisperEngine = value;
+      }
+    });
+    check(() => {
+      if (has("whisperCppModel")) {
+        const value = text("whisperCppModel");
+        if (value && !whisperModels.isModelId(value)) {
+          throw new SettingsValidationError("whisperCppModel", "Unknown voice model.");
+        }
+        clean.whisperCppModel = value;
+      }
+    });
+    check(() => {
       if (has("whisperSegmentMs")) {
         const value = text("whisperSegmentMs");
         if (value && !unchanged("WHISPER_SEGMENT_MS", value) && !/^\d{1,6}$/.test(value)) {
@@ -3154,6 +3410,12 @@ class ApplicationController {
       if (settings.whisperSegmentMs !== undefined) {
         envUpdates.WHISPER_SEGMENT_MS = String(settings.whisperSegmentMs);
       }
+      if (settings.whisperEngine !== undefined) {
+        envUpdates.WHISPER_ENGINE = settings.whisperEngine;
+      }
+      if (settings.whisperCppModel !== undefined) {
+        envUpdates.WHISPER_CPP_MODEL = settings.whisperCppModel;
+      }
       if (settings.geminiKey) {
         envUpdates.GEMINI_API_KEY = settings.geminiKey;
       }
@@ -3174,6 +3436,8 @@ class ApplicationController {
       // equal and skip the speech re-init below (the exact stale-mic-after-install
       // bug the re-init guards against).
       const prevWhisperCommand = process.env.WHISPER_COMMAND || '';
+      const voiceEngineChanged = ["WHISPER_ENGINE", "WHISPER_CPP_MODEL"].some((key) =>
+        envUpdates[key] !== undefined && String(envUpdates[key]) !== (process.env[key] || ""));
 
       // Same reason: decide now whether any AI-provider value actually changes.
       const llmEnvKeys = ["LLM_PROVIDER", "GEMINI_API_KEY", ...Object.values(LLM_SETTING_ENV_KEYS)];
@@ -3214,7 +3478,7 @@ class ApplicationController {
       const providerChanged = settings.speechProvider && speechService.provider !== settings.speechProvider;
       const whisperCommandChanged = envUpdates.WHISPER_COMMAND !== undefined &&
         prevWhisperCommand !== envUpdates.WHISPER_COMMAND;
-      if (providerChanged || whisperCommandChanged) {
+      if (providerChanged || whisperCommandChanged || voiceEngineChanged) {
         try {
           speechService.initializeClient();
           this.speechAvailable = speechService.isAvailable
@@ -3232,6 +3496,7 @@ class ApplicationController {
           logger.info('Speech service reinitialized after settings change', {
             providerChanged,
             whisperCommandChanged,
+            voiceEngineChanged,
             speechAvailable: this.speechAvailable,
           });
         } catch (e) {

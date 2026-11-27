@@ -121,6 +121,23 @@ function flushBeforeQuit() {
   }
 }
 
+// Built-in voice engine (whisper.cpp), for Settings and onboarding. Model
+// ids are checked in main against its model list.
+function voiceApi() {
+  return {
+    // { engine, binaryAvailable, platformSupported, models: [{ id, label, bytes, downloaded }],
+    //   selectedModel, language, pythonConfigured, ready, downloading, problemMessage, ... }
+    getVoiceStatus: invoke('get-voice-status'),
+    // -> { success, error?, cancelled? }; progress arrives through onVoiceModelProgress.
+    downloadVoiceModel: (id) => ipcRenderer.invoke('download-voice-model', { id }),
+    cancelVoiceModelDownload: (id) => ipcRenderer.invoke('cancel-voice-model-download', { id }),
+    // engine: 'whispercpp' | 'python'; model: optional id for the built-in engine.
+    setVoiceEngine: (engine, model) => ipcRenderer.invoke('set-voice-engine', { engine, model }),
+    // callback({ id, received, total }); returns an unsubscribe function.
+    onVoiceModelProgress: listen('voice-model-progress')
+  }
+}
+
 const PAGES = {
   // Toolbar overlay (index.html, src/ui/main-window.js)
   main: () => ({
@@ -179,6 +196,7 @@ const PAGES = {
       installWhisper: invoke('install-whisper'),
       downloadWhisperModel: (modelName) => ipcRenderer.invoke('download-whisper-model', modelName),
       onInstallProgress: listen('install-progress'),
+      ...voiceApi(),
       // Interview context (userData/profile.json); main validates on save.
       getProfile: invoke('get-profile'),
       saveProfile: (profile) => ipcRenderer.invoke('save-profile', profile),
@@ -206,7 +224,8 @@ const PAGES = {
       detectWhisper: invoke('detect-whisper'),
       installWhisper: invoke('install-whisper'),
       downloadWhisperModel: (modelName) => ipcRenderer.invoke('download-whisper-model', modelName),
-      onInstallProgress: listen('install-progress')
+      onInstallProgress: listen('install-progress'),
+      ...voiceApi()
     }
   })
 }
