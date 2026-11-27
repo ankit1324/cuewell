@@ -26,13 +26,13 @@ class LLMService {
     this.providerId = null;
     this.provider = null;
     // Prompt settings main.js keeps current: answer length (Settings) and
-    // the interview context (userData/profile.json).
+    // the About you details and interview context (userData/profile.json).
     this.promptContext = { answerLength: 'auto', profile: null };
     
     this.initializeClient();
   }
 
-  /** Update the answer length and/or interview context used in every prompt. */
+  /** Update the answer length and/or profile (About you, interview context) used in every prompt. */
   setPromptContext({ answerLength, profile } = {}) {
     if (answerLength !== undefined) {
       this.promptContext.answerLength = promptLoader.isAnswerLength(answerLength) ? answerLength : 'auto';

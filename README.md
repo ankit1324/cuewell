@@ -12,6 +12,7 @@ Cuewell is free and open source (Apache-2.0), built on Electron, and maintained 
 - **One-line answer first.** Every answer opens with one sentence you can say right away, then the details. Answer length is Auto, Short, Standard or Detailed. Auto is Short for voice and Standard for typed and screenshot questions.
 - **Coding language.** In Auto and Coding modes, code is written in C++, C, Python, Java or JavaScript, as chosen on the toolbar or in Settings.
 - **Interview context.** Add your target role, company, job description, resume and notes in Settings. They are stored in `profile.json` in the app data folder and sent to your AI provider with every question, so answers fit the job and your experience.
+- **About you.** Settings > About you holds your name, current title and company, years of experience, skills, projects, education, location, relocation, notice period, expected salary, languages, and the tone and language for answers. Every field is optional. Answers use these real details instead of blanks like [X years] and never make up employers, numbers or degrees. They are stored with the interview context in `profile.json` and sent to your AI provider with every question. **Clear all** removes them.
 - **Three ways to ask.**
   - Screenshot: capture the display under the mouse pointer. The image goes to the AI provider directly, with no OCR step.
   - Voice: local Whisper by default, or Azure Speech. Capture is automatic (pause detection) or manual start/stop.

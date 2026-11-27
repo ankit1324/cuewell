@@ -11,6 +11,7 @@
     const SECTION_TITLES = {
         general: 'General',
         ai: 'AI provider',
+        you: 'About you',
         context: 'Interview context',
         voice: 'Voice',
         shortcuts: 'Shortcuts',
@@ -756,16 +757,31 @@
         };
     }
 
-    // ---------- Interview context ----------
+    // ---------- About you and interview context (profile.json) ----------
+    //
+    // Both pages edit one profile, saved as a whole. Each group shows the
+    // save state for its own edits; editing stays off until the saved
+    // profile has loaded, so a failed load can never overwrite it.
 
     const profileInputs = Array.from(document.querySelectorAll('[data-profile-field]'));
-    const contextStatus = $('contextStatus');
+    const aboutInputs = profileInputs.filter((input) => input.closest('[data-section="you"]'));
+    const profileLoadErrors = Array.from(document.querySelectorAll('[data-profile-load-error]'));
+    const profileRetryButtons = Array.from(document.querySelectorAll('[data-profile-retry]'));
+    let profileLoaded = false;
+    let profileLoading = false;
     let profileDirty = false;
     let profileTimer = null;
     let profileSaving = null;
     // Shown with the next "saved" state, e.g. that pasted text was cut.
     let profileNotice = '';
     let profileSeq = 0;
+    // Group status elements with edits whose save has not reported yet.
+    const profileStatusTargets = new Set();
+
+    const groupStatusOf = (input) => {
+        const group = input && input.closest('.sw-group');
+        return group ? group.querySelector('[data-profile-status]') : null;
+    };
 
     function updateCount(input) {
         const counter = document.querySelector(`[data-count-for="${input.id}"]`);
@@ -776,38 +792,69 @@
         counter.classList.toggle('is-near', limit > 0 && length >= limit * 0.9);
     }
 
+    function setProfileEditable(editable) {
+        profileInputs.forEach((input) => { input.disabled = !editable; });
+        updateClearButton();
+    }
+
     async function loadProfile() {
-        if (!api || !api.getProfile || profileDirty) return;
+        if (profileDirty || profileLoading) return;
+        profileLoading = true;
+        profileRetryButtons.forEach((button) => { button.disabled = true; });
         try {
+            if (!api || !api.getProfile) throw new Error('unavailable');
             const result = await api.getProfile();
-            if (profileDirty || !result || !result.success) {
-                if (result && !result.success) setStatus(contextStatus, 'error', 'Could not load your interview context.', { sticky: true });
-                return;
+            // Edits made while loading win; they save on their own.
+            if (profileDirty) return;
+            if (!result || !result.success || !result.profile || typeof result.profile !== 'object') {
+                throw new Error('failed');
             }
-            const limits = result.limits || {};
+            const limits = { ...(result.limits || {}), ...(result.aboutLimits || {}) };
             profileInputs.forEach((input) => {
                 const field = input.dataset.profileField;
-                if (Number(limits[field]) > 0) input.setAttribute('maxlength', String(limits[field]));
-                const value = result.profile && typeof result.profile[field] === 'string' ? result.profile[field] : '';
+                if (input.tagName !== 'SELECT' && Number(limits[field]) > 0) {
+                    input.setAttribute('maxlength', String(limits[field]));
+                }
+                const value = typeof result.profile[field] === 'string' ? result.profile[field] : '';
                 input.value = value;
+                // A value this page has no option for shows as "not set".
+                if (input.tagName === 'SELECT' && input.value !== value) input.value = '';
                 markInvalid(input, false);
                 updateCount(input);
             });
+            profileLoaded = true;
+            profileLoadErrors.forEach((banner) => { banner.hidden = true; });
+            hideClearConfirm();
+            setProfileEditable(true);
         } catch (_) {
-            setStatus(contextStatus, 'error', 'Could not load your interview context.', { sticky: true });
+            // After a good load the fields already match what is saved.
+            if (!profileLoaded) {
+                setProfileEditable(false);
+                profileLoadErrors.forEach((banner) => { banner.hidden = false; });
+            }
+        } finally {
+            profileLoading = false;
+            profileRetryButtons.forEach((button) => { button.disabled = false; });
         }
     }
 
+    /**
+     * Save the whole profile if anything changed. Resolves to { ok: true },
+     * { ok: false, error }, or null when a newer save took over.
+     */
     function saveProfile() {
         clearTimeout(profileTimer);
         profileTimer = null;
-        if (!profileDirty) return profileSaving || Promise.resolve();
-        if (!api || !api.saveProfile) return Promise.resolve();
+        if (!profileDirty) return profileSaving || Promise.resolve({ ok: true });
+        if (!profileLoaded || !api || !api.saveProfile) {
+            profileStatusTargets.forEach((node) => setStatus(node, 'error', `Not saved: ${SAVE_FAILED}`, { sticky: true }));
+            return Promise.resolve({ ok: false, error: SAVE_FAILED });
+        }
         profileDirty = false;
         const seq = ++profileSeq;
         const profile = {};
         profileInputs.forEach((input) => { profile[input.dataset.profileField] = input.value; });
-        setStatus(contextStatus, 'busy', 'Saving…');
+        profileStatusTargets.forEach((node) => setStatus(node, 'busy', 'Saving…'));
         const run = (async () => {
             let result;
             try {
@@ -816,23 +863,30 @@
                 result = { success: false, error: SAVE_FAILED };
             }
             // Only the newest save reports; newer edits save again anyway.
-            if (seq !== profileSeq || profileDirty) return;
+            if (seq !== profileSeq || profileDirty) return null;
+            const targets = Array.from(profileStatusTargets);
+            profileStatusTargets.clear();
             profileInputs.forEach((input) => markInvalid(input, false));
             if (result && result.success) {
                 if (profileNotice) {
-                    setStatus(contextStatus, 'warn', `Saved. ${profileNotice}`, { sticky: true });
+                    targets.forEach((node) => setStatus(node, 'warn', `Saved. ${profileNotice}`, { sticky: true }));
                     profileNotice = '';
                 } else {
-                    setStatus(contextStatus, 'ok', 'All changes saved');
+                    targets.forEach((node) => setStatus(node, 'ok', 'All changes saved'));
                 }
-                return;
+                return { ok: true };
             }
             const message = (result && result.error) || SAVE_FAILED;
-            setStatus(contextStatus, 'error', `Not saved: ${message}`, { sticky: true });
             const bad = result && result.field ? profileInputs.find((i) => i.dataset.profileField === result.field) : null;
             markInvalid(bad, true);
-            // Try again on the next edit.
+            // The group with the bad field says why too, wherever the edit was.
+            const badStatus = groupStatusOf(bad);
+            if (badStatus && !targets.includes(badStatus)) targets.push(badStatus);
+            targets.forEach((node) => setStatus(node, 'error', `Not saved: ${message}`, { sticky: true }));
+            // Try again on the next edit, and report there again.
+            targets.forEach((node) => profileStatusTargets.add(node));
             profileDirty = true;
+            return { ok: false, error: message };
         })();
         const tracked = run.finally(() => { if (profileSaving === tracked) profileSaving = null; });
         profileSaving = tracked;
@@ -843,11 +897,17 @@
         input.addEventListener('input', () => {
             profileDirty = true;
             updateCount(input);
-            setStatus(contextStatus, 'info', 'Editing…');
+            updateClearButton();
+            const status = groupStatusOf(input);
+            if (status) {
+                profileStatusTargets.add(status);
+                setStatus(status, 'info', 'Editing…');
+            }
             clearTimeout(profileTimer);
             profileTimer = setTimeout(saveProfile, 800);
         });
         input.addEventListener('change', saveProfile);
+        if (input.tagName === 'SELECT') return;
         // maxlength cuts pasted text silently; say so.
         input.addEventListener('paste', (e) => {
             const limit = Number(input.getAttribute('maxlength')) || 0;
@@ -859,6 +919,80 @@
             }
         });
     });
+
+    profileRetryButtons.forEach((button) => button.addEventListener('click', loadProfile));
+
+    // ---------- About you: Clear all ----------
+
+    const clearButton = $('youClear');
+    const clearConfirm = $('youClearConfirm');
+    const clearStatus = $('youClearStatus');
+
+    function updateClearButton() {
+        clearButton.disabled = !profileLoaded || !aboutInputs.some((input) => input.value.trim());
+        clearButton.title = clearButton.disabled && profileLoaded ? 'Nothing to clear' : '';
+    }
+
+    function hideClearConfirm({ focus = false } = {}) {
+        if (clearConfirm.hidden) return;
+        clearConfirm.hidden = true;
+        clearButton.hidden = false;
+        if (focus && !clearButton.disabled) clearButton.focus();
+    }
+
+    async function clearAbout() {
+        hideClearConfirm();
+        const before = aboutInputs.map((input) => input.value);
+        aboutInputs.forEach((input) => {
+            input.value = '';
+            markInvalid(input, false);
+            updateCount(input);
+        });
+        profileDirty = true;
+        updateClearButton();
+        setStatus(clearStatus, 'busy', 'Clearing…');
+        const result = await saveProfile();
+        if (result && result.ok) {
+            setStatus(clearStatus, 'ok', 'Your details were cleared');
+            aboutInputs[0].focus();
+            return;
+        }
+        if (!result) {
+            // Something was typed meanwhile; that save reports instead.
+            setStatus(clearStatus, '', '');
+            return;
+        }
+        // Put the details back unless something was typed since.
+        if (aboutInputs.every((input) => !input.value)) {
+            aboutInputs.forEach((input, i) => {
+                input.value = before[i];
+                updateCount(input);
+            });
+        }
+        updateClearButton();
+        setStatus(clearStatus, 'error', `Not cleared: ${result.error}`, { sticky: true });
+        if (!clearButton.disabled) clearButton.focus();
+    }
+
+    clearButton.addEventListener('click', () => {
+        if (clearButton.disabled) return;
+        setStatus(clearStatus, '', '');
+        clearButton.hidden = true;
+        clearConfirm.hidden = false;
+        $('youClearNo').focus();
+    });
+    $('youClearNo').addEventListener('click', () => hideClearConfirm({ focus: true }));
+    $('youClearYes').addEventListener('click', clearAbout);
+    clearConfirm.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            // Esc backs out of clearing instead of closing the window.
+            e.preventDefault();
+            e.stopPropagation();
+            hideClearConfirm({ focus: true });
+        }
+    });
+
+    setProfileEditable(false);
 
     // ---------- Voice ----------
 
