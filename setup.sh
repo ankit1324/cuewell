@@ -6,6 +6,8 @@ DO_RUN=1
 USE_CI=0
 INSTALL_SYSTEM_DEPS=0
 SETUP_WHISPER=1
+# 1 = install the Python openai-whisper engine instead of fetching whisper.cpp.
+PYTHON_WHISPER=0
 WHISPER_MODEL="${WHISPER_MODEL:-base}"
 WHISPER_LANGUAGE="${WHISPER_LANGUAGE:-en}"
 WHISPER_SEGMENT_MS="${WHISPER_SEGMENT_MS:-4000}"
@@ -36,7 +38,8 @@ Usage: ./setup.sh [options]
 This script will:
 1. Create .env from env.example when needed
 2. Install Node dependencies
-3. Optionally set up local Whisper in ${WHISPER_VENV_DIR}
+3. Fetch the built-in local voice engine (whisper.cpp) into vendor/whisper
+   (or, with --python-whisper, install Python Whisper in ${WHISPER_VENV_DIR})
 4. Optionally install system audio dependencies
 5. Optionally build the app
 6. Optionally run Cuewell
@@ -47,14 +50,19 @@ Options:
   --run                   Start the app after setup (default)
   --ci                    Use 'npm ci' instead of 'npm install'
   --install-system-deps   Install a microphone recorder on Linux (arecord or sox)
-  --skip-whisper          Skip local Whisper environment setup
+  --skip-whisper          Skip the local voice engine setup
+  --python-whisper        Advanced: install the Python openai-whisper engine
+                          (needs Python 3.10+ and 3 to 5 GB) instead of whisper.cpp
   -h, --help              Show this help
 
 Environment variables:
   GEMINI_API_KEY          If provided, writes into .env
-  WHISPER_MODEL           Whisper model to configure (default: base)
-  WHISPER_LANGUAGE        Whisper language to configure (default: en)
-  WHISPER_SEGMENT_MS      Segment size in ms (default: 4000)
+  WHISPER_MODEL           With --python-whisper: model to configure (default: base)
+  WHISPER_LANGUAGE        With --python-whisper: language to configure (default: en)
+  WHISPER_SEGMENT_MS      With --python-whisper: segment size in ms (default: 4000)
+
+The speech model for the built-in engine (Small 190 MB or Base 60 MB)
+downloads once from the Cuewell setup wizard or Settings > Voice.
 
 Example:
   GEMINI_API_KEY=your_key_here ./setup.sh --install-system-deps
@@ -69,6 +77,7 @@ for arg in "$@"; do
     --ci) USE_CI=1 ;;
     --install-system-deps) INSTALL_SYSTEM_DEPS=1 ;;
     --skip-whisper) SETUP_WHISPER=0 ;;
+    --python-whisper) PYTHON_WHISPER=1 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $arg"; usage; exit 1 ;;
   esac
@@ -209,7 +218,7 @@ upsert_env() {
 }
 
 # Run a command without API keys, tokens or secrets in its environment, so
-# pip, Python and Whisper never see them.
+# downloads, pip, Python and Whisper never see them.
 run_without_secrets() {
   (
     local name
@@ -307,23 +316,78 @@ install_node_deps() {
   fi
 }
 
-setup_whisper_env() {
+# Clear the env.example Azure placeholders, but never a real Azure key.
+clear_azure_placeholders() {
+  if grep -qx 'AZURE_SPEECH_KEY=your_azure_speech_key_here' .env 2>/dev/null; then
+    upsert_env "AZURE_SPEECH_KEY" ""
+  fi
+  if grep -qx 'AZURE_SPEECH_REGION=your_azure_region_here' .env 2>/dev/null; then
+    upsert_env "AZURE_SPEECH_REGION" ""
+  fi
+}
+
+# Fetch the pinned whisper.cpp whisper-server for this machine into
+# vendor/whisper/<platform>-<arch>/ with the project's own script. It skips
+# the work when a valid binary is already there. A failure only disables
+# local voice; setup carries on.
+setup_whisper_cpp() {
+  if ! node -e 'const s = require("./package.json").scripts || {}; process.exit(s["fetch:whisper"] ? 0 : 1)' >/dev/null 2>&1; then
+    echo "WARNING: this checkout has no 'npm run fetch:whisper' script, so the built-in"
+    echo "voice engine was not set up. Update the repository and run ./setup.sh again."
+    return
+  fi
+
+  echo "Setting up the built-in voice engine (whisper.cpp)"
+  if [[ "$OS_NAME" == "macos" ]]; then
+    echo "On macOS it is compiled from source the first time; this can take a few minutes."
+  fi
+  if run_without_secrets npm run fetch:whisper; then
+    clear_azure_placeholders
+    echo "The built-in voice engine is ready."
+    echo "Cuewell downloads a speech model once (Small 190 MB or Base 60 MB) from"
+    echo "the setup wizard or Settings > Voice."
+  else
+    echo "WARNING: the built-in voice engine could not be set up, so local voice is off."
+    case "$OS_NAME" in
+      macos)
+        echo "Building it needs cmake and the Xcode Command Line Tools:"
+        echo "  xcode-select --install"
+        echo "  brew install cmake"
+        ;;
+      *)
+        echo "Check your network connection. Only 64-bit (x64) Windows and Linux are supported."
+        ;;
+    esac
+    echo "Then run ./setup.sh again, or use Azure Speech in Settings > Voice."
+  fi
+}
+
+setup_voice() {
   if [[ "$SETUP_WHISPER" -ne 1 ]]; then
-    echo "Skipping local Whisper setup"
+    echo "Skipping local voice setup"
     return
   fi
 
-  # Skip whisper setup when only building (build distributions don't need local whisper)
+  # Skip it when only building: the build scripts fetch the engine they bundle.
   if [[ "$DO_BUILD" -eq 1 && "$DO_RUN" -eq 0 ]]; then
-    echo "Skipping local Whisper setup (build-only mode)"
+    echo "Skipping local voice setup (build-only mode)"
     return
   fi
 
+  if [[ "$PYTHON_WHISPER" -eq 1 ]]; then
+    setup_python_whisper
+  else
+    setup_whisper_cpp
+  fi
+}
+
+# Advanced (--python-whisper): install openai-whisper into a Python venv.
+setup_python_whisper() {
   if [[ ! -d "$WHISPER_VENV_DIR" ]]; then
     if ! find_python; then
       echo "WARNING: Python 3.10 or newer was not found, so local Whisper was not set up."
-      echo "Install Python 3.12 (https://www.python.org/downloads/), then run ./setup.sh again,"
-      echo "or set up Whisper later from the Cuewell setup wizard."
+      echo "Install Python 3.12 (https://www.python.org/downloads/), then run ./setup.sh --python-whisper again,"
+      echo "or run ./setup.sh without --python-whisper to use the built-in engine, which needs no Python."
       return
     fi
     echo "Creating Whisper virtual environment at $WHISPER_VENV_DIR with $PYTHON_BIN ${PYTHON_ARG}"
@@ -348,7 +412,6 @@ setup_whisper_env() {
   # Verify Whisper loads before claiming it's configured. Prefer
   # "<venv python> -m whisper": the app checks that form quickly at startup,
   # while the whisper script has to import PyTorch first.
-  local whisper_found=0
   local venv_python
   if [[ "$OS_NAME" == "windows" ]]; then
     venv_python="${WHISPER_VENV_DIR}/Scripts/python.exe"
@@ -358,38 +421,29 @@ setup_whisper_env() {
   if [[ -f "$venv_python" ]] && run_without_secrets "$venv_python" -c 'import whisper' >/dev/null 2>&1; then
     WHISPER_COMMAND_PATH="${venv_python} -m whisper"
     echo "Whisper is installed: $WHISPER_COMMAND_PATH"
-    whisper_found=1
   else
     if [[ -f "$WHISPER_COMMAND_PATH" ]]; then
       echo "Whisper CLI found at: $WHISPER_COMMAND_PATH"
-      whisper_found=1
     else
       echo "WARNING: Whisper CLI not found at $WHISPER_COMMAND_PATH"
       echo "Speech recognition will be unavailable until Whisper is properly installed."
-      echo "You can skip this with: ./setup.sh --skip-whisper"
+      echo "Run ./setup.sh without --python-whisper to use the built-in engine instead."
+      echo "Your voice settings in .env were left unchanged."
+      return
     fi
   fi
 
   upsert_env "SPEECH_PROVIDER" "whisper"
-  # Clear the env.example placeholders, but never a real Azure key.
-  if grep -qx 'AZURE_SPEECH_KEY=your_azure_speech_key_here' .env 2>/dev/null; then
-    upsert_env "AZURE_SPEECH_KEY" ""
-  fi
-  if grep -qx 'AZURE_SPEECH_REGION=your_azure_region_here' .env 2>/dev/null; then
-    upsert_env "AZURE_SPEECH_REGION" ""
-  fi
+  clear_azure_placeholders
+  upsert_env "WHISPER_ENGINE" "python"
   upsert_env "WHISPER_COMMAND" "${WHISPER_COMMAND_PATH}"
   upsert_env "WHISPER_MODEL_DIR" "${WHISPER_MODEL_DIR}"
   upsert_env "WHISPER_MODEL" "${WHISPER_MODEL}"
   upsert_env "WHISPER_LANGUAGE" "${WHISPER_LANGUAGE}"
   upsert_env "WHISPER_SEGMENT_MS" "${WHISPER_SEGMENT_MS}"
 
-  if [[ "$whisper_found" -eq 1 ]]; then
-    echo "Running Whisper smoke test"
-    run_without_secrets npm run test-speech
-  else
-    echo "Skipping Whisper smoke test (CLI not found)"
-  fi
+  echo "Running Whisper smoke test"
+  run_without_secrets npm run test-speech
 }
 
 build_app() {
@@ -423,6 +477,6 @@ ensure_env_file
 ensure_gemini_key
 install_system_deps
 install_node_deps
-setup_whisper_env
+setup_voice
 build_app
 run_app
