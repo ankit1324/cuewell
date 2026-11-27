@@ -20,7 +20,7 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "author": {
-    "name": "Ankit Chaudhry"
+    "name": "Ankit Chaudhary"
   },
   "license": "Apache-2.0",
   "engines": {
@@ -46,7 +46,7 @@
     "electron-builder": "^26.18.1"
   },
   "build": {
-    "appId": "com.ankitchaudhry.superinterview",
+    "appId": "com.ankitchaudhary.superinterview",
     "productName": "Super Interview",
     "directories": {
       "output": "dist"

@@ -217,7 +217,7 @@ Released under the Apache-2.0 License. See [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-Maintained by **Ankit Chaudhry**.
+Maintained by **Ankit Chaudhary**.
 
 </div>
 
