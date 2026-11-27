@@ -206,7 +206,10 @@ speechService.setEnvPath(ENV_PATH);
 const llmService = require("./src/services/llm.service");
 const { promptLoader } = require("./prompt-loader");
 const profileStore = require("./src/core/profile-store");
-const { getActiveProviderId, getProviderConfig, listProviders, isPlaceholderKey } = require("./src/services/providers");
+const {
+  getActiveProviderId, getProviderConfig, listProviders, isPlaceholderKey,
+  isConfigured, getApiKey, getModel, getBaseURL, createProvider,
+} = require("./src/services/providers");
 
 // AI-provider fields the Settings window edits, mapped to their .env keys.
 // geminiKey (GEMINI_API_KEY) and llmProvider (LLM_PROVIDER) are handled
@@ -261,7 +264,8 @@ const SETTINGS_FIELDS_BY_WINDOW = {
   ],
   // whisperModelDownload is recorded by the wizard but not stored.
   onboarding: [
-    "geminiKey", "speechProvider", "azureKey", "azureRegion",
+    "geminiKey", "llmProvider", ...Object.keys(LLM_SETTING_ENV_KEYS),
+    "speechProvider", "azureKey", "azureRegion",
     "whisperCommand", "whisperModelDownload",
   ],
 };
@@ -306,6 +310,7 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   "detect-whisper": ["onboarding"],
   "install-whisper": ["onboarding"],
   "download-whisper-model": ["onboarding"],
+  "test-provider": ["onboarding"],
 });
 
 /** Masked form of a secret for the renderer: whether it is set, and its last 4 characters for long keys. */
@@ -326,6 +331,8 @@ class SettingsValidationError extends Error {
 const MAX_MAIN_WINDOW_HEIGHT = 800;
 const MAX_MOVE_DELTA = 200;
 const MAX_CHAT_MESSAGE_LENGTH = 100000;
+// Onboarding's Test connection; a cold local Ollama model can take a while.
+const PROVIDER_TEST_TIMEOUT_MS = 60000;
 
 const MODEL_NAME_RE = /^[A-Za-z0-9._:/-]{1,100}$/;
 // Whisper model names (tiny, small, large-v3, turbo, ...). No "/" so a name
@@ -1118,6 +1125,10 @@ class ApplicationController {
         return { ok: false, message: e.message, path: null };
       }
     });
+
+    // Test an AI provider from the wizard without saving it or changing the
+    // running provider.
+    this.handleIpc("test-provider", (_event, input) => this.testProvider(input));
 
     this.handleIpc("save-settings", (event, settings) => {
       return this.saveSettings(settings, this.windowTypeForSender(event));
@@ -2351,6 +2362,91 @@ class ApplicationController {
     } catch (error) {
       logger.error("Failed to save settings", { error: error.message });
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Check { provider, apiKey, baseUrl, model } with the same rules as
+   * save-settings, then send one short request with them. Nothing is saved
+   * and the running llmService is not touched: the test runs on a separate
+   * instance built from a copy of process.env. An empty apiKey, model or
+   * baseUrl falls back to the saved value. Returns { ok, message }; the key
+   * is never logged or returned.
+   */
+  async testProvider(input) {
+    const fail = (message) => ({ ok: false, message });
+    if (!input || typeof input !== "object" || Array.isArray(input)) return fail("Choose an AI provider.");
+    const unexpected = Object.keys(input).find((k) => !["provider", "apiKey", "baseUrl", "model"].includes(k));
+    if (unexpected) return fail(`Unexpected field ${unexpected}.`);
+    const id = typeof input.provider === "string" ? input.provider.trim().toLowerCase() : "";
+    const provider = getProviderConfig(id);
+    if (!provider) return fail("Unknown AI provider.");
+    const given = (v) => v !== undefined && v !== null && v !== "";
+    if (given(input.apiKey) && typeof input.apiKey !== "string") return fail("API key must be text.");
+    if (provider.noKey && given(input.apiKey)) return fail(`${provider.label} does not use an API key.`);
+    if (given(input.baseUrl) && id !== "ollama") return fail("Only Ollama takes a server URL.");
+
+    const keyField = id === "gemini" ? "geminiKey" : `${id}Key`;
+    const modelField = `${id}Model`;
+    const payload = { llmProvider: id };
+    if (given(input.apiKey)) payload[keyField] = input.apiKey;
+    if (given(input.model)) payload[modelField] = input.model;
+    if (given(input.baseUrl)) payload.ollamaBaseUrl = input.baseUrl;
+    let clean;
+    try {
+      const { clean: checked, errors } = this.validateSettings(payload, "onboarding");
+      if (errors.length > 0) return fail(errors[0].message);
+      clean = checked;
+    } catch (error) {
+      if (error instanceof SettingsValidationError) return fail(error.message);
+      throw error;
+    }
+
+    const env = { ...process.env, LLM_PROVIDER: id };
+    if (provider.keyEnv && clean[keyField]) env[provider.keyEnv] = clean[keyField];
+    if (clean[modelField]) env[provider.modelEnv] = clean[modelField];
+    if (clean.ollamaBaseUrl) env.OLLAMA_BASE_URL = clean.ollamaBaseUrl;
+    if (!isConfigured(id, env)) return fail(`Enter your ${provider.label} API key.`);
+
+    try {
+      // Same methods as llmService, own state.
+      const proto = Object.getPrototypeOf(llmService);
+      const tester = Object.create(proto);
+      Object.assign(tester, {
+        providerId: id, model: getModel(id, env), client: null, provider: null,
+        isInitialized: true, requestCount: 0, errorCount: 0,
+      });
+      if (provider.kind === "gemini") {
+        const { GoogleGenAI } = require("@google/genai");
+        tester.client = new GoogleGenAI({ apiKey: getApiKey(id, env) });
+      } else {
+        tester.provider = createProvider(id, env);
+        // The shared copy names the saved Ollama URL; name the tested one.
+        const baseURL = getBaseURL(id, env);
+        tester._providerCopy = function () {
+          const copy = proto._providerCopy.call(this);
+          return id === "ollama"
+            ? { ...copy, unreachable: `Cannot reach ${provider.label} at ${baseURL}. Make sure it is running.` }
+            : copy;
+        };
+      }
+
+      let timer;
+      const timeout = new Promise((resolve) => {
+        timer = setTimeout(() => resolve({
+          success: false,
+          error: `${provider.label} did not answer within ${PROVIDER_TEST_TIMEOUT_MS / 1000} seconds.`,
+        }), PROVIDER_TEST_TIMEOUT_MS);
+      });
+      const result = await Promise.race([tester.testConnection(), timeout]).finally(() => clearTimeout(timer));
+      if (result && result.success) {
+        return { ok: true, message: `Connected to ${provider.label} (${result.model || tester.model}).` };
+      }
+      // The shared wording points at Settings; the wizard has the fields right here.
+      return fail(((result && result.error) || "Connection failed.").replace(/ in Settings\b/g, ""));
+    } catch (error) {
+      logger.warn("AI provider test failed", { provider: id, error: error.message });
+      return fail(error.message || "Connection failed.");
     }
   }
 
