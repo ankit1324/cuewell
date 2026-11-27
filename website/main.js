@@ -1,0 +1,525 @@
+/*
+ * Super Interview website: scroll reveal, code copy, and the live demo stage.
+ * No dependencies, no network. Everything still reads fine without this file.
+ */
+(function () {
+  'use strict';
+
+  var doc = document;
+  // Set here, not inline, so a failed script load never hides content.
+  doc.documentElement.classList.add('js');
+  var reduceMQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
+
+  function $(sel, root) { return (root || doc).querySelector(sel); }
+  function $$(sel, root) { return Array.prototype.slice.call((root || doc).querySelectorAll(sel)); }
+
+  /* ---------- Scroll reveal ---------- */
+
+  function initReveal() {
+    var els = $$('.reveal');
+    if (!('IntersectionObserver' in window) || reduceMQ.matches) {
+      els.forEach(function (el) { el.classList.add('is-in'); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-in');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.06 });
+    els.forEach(function (el) { io.observe(el); });
+  }
+
+  /* ---------- Copy buttons on code blocks ---------- */
+
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var ta = doc.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '0';
+      ta.style.opacity = '0';
+      doc.body.appendChild(ta);
+      ta.select();
+      try { (doc.execCommand('copy') ? resolve : reject)(); } catch (err) { reject(err); }
+      ta.remove();
+    });
+  }
+
+  function initCopy() {
+    doc.addEventListener('click', function (e) {
+      var btn = e.target.closest && e.target.closest('.code-copy');
+      if (!btn) return;
+      var code = btn.closest('.code').querySelector('pre');
+      var label = btn.querySelector('span');
+      var use = btn.querySelector('use');
+      var live = doc.getElementById('copy-status');
+      function reset() {
+        clearTimeout(btn._t);
+        btn._t = setTimeout(function () {
+          btn.classList.remove('is-done');
+          label.textContent = 'Copy';
+          if (use) use.setAttribute('href', '#i-copy');
+        }, 1600);
+      }
+      copyText(code.textContent).then(function () {
+        btn.classList.add('is-done');
+        label.textContent = 'Copied';
+        if (use) use.setAttribute('href', '#i-check');
+        if (live) live.textContent = 'Code copied to clipboard';
+        reset();
+      }, function () {
+        // Leave the code selected so the user can copy it by hand.
+        var range = doc.createRange();
+        range.selectNodeContents(code);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        label.textContent = 'Press ⌘C';
+        if (live) live.textContent = 'Code selected. Press Command C or Control C to copy.';
+        reset();
+      });
+    });
+  }
+
+  /* ---------- Live demo ---------- */
+
+  function initDemo() {
+    var stage = $('#demo-stage');
+    if (!stage || !('content' in doc.createElement('template'))) return;
+
+    var scenarios = $$('template[id^="sc-"]').map(function (t) {
+      return { tpl: t, q: t.dataset.q, mode: t.dataset.mode, lang: t.dataset.lang };
+    });
+    if (!scenarios.length) return;
+
+    var el = {
+      mic: $('#demo-mic'),
+      micText: $('#demo-mic .mic-text'),
+      mode: $('#demo-mode'),
+      modeText: $('#demo-mode .mode-text'),
+      lang: $('#demo-lang'),
+      heard: $('#demo-heard'),
+      heardLabel: $('#demo-heard .heard-label'),
+      question: $('#demo-question'),
+      status: $('#demo-status'),
+      statusText: $('#demo-status .st-text'),
+      progress: $('.panel-progress', stage),
+      answer: $('#demo-answer'),
+      counter: $('#demo-counter'),
+      play: $('#demo-play'),
+      playLabel: $('#demo-play-label'),
+      tabs: $$('.demo-tab')
+    };
+    var tabBars = el.tabs.map(function (t) { return t.querySelector('.tab-bar i'); });
+
+    /* Pause-aware clock. Time only advances while nothing pauses the demo,
+       so hover, focus, scrolling away and the pause button all freeze it. */
+    var clock = 0;
+    var last = 0;
+    var raf = 0;
+    var waiters = [];
+    var pauses = {};
+    var run = 0;
+    var current = 0;
+    var scStart = 0;
+    var scDur = 1;
+    var animating = false;
+    var lastP = -1;
+    var CANCEL = {};
+
+    function isPaused() { for (var k in pauses) if (pauses[k]) return true; return false; }
+
+    function frame(t) {
+      raf = 0;
+      if (last) {
+        var dt = Math.min(t - last, 64);
+        if (!isPaused()) clock += dt;
+      }
+      last = t;
+      if (waiters.length) {
+        var due = [];
+        waiters = waiters.filter(function (w) {
+          if (w.at <= clock) { due.push(w); return false; }
+          return true;
+        });
+        due.forEach(function (w) { w.resolve(); });
+      }
+      drawProgress();
+      // Stop the loop entirely while paused; setPause() restarts it.
+      if (animating && !isPaused()) raf = requestAnimationFrame(frame);
+      else last = 0;
+    }
+    function ensureLoop() {
+      if (!raf && animating && !isPaused()) raf = requestAnimationFrame(frame);
+    }
+
+    function sleep(ms, r) {
+      return new Promise(function (resolve) {
+        waiters.push({ at: clock + ms, resolve: resolve });
+        ensureLoop();
+      }).then(function () { if (r !== run) throw CANCEL; });
+    }
+
+    function drawProgress() {
+      var p = animating ? Math.max(0, Math.min(1, (clock - scStart) / scDur)) : 0;
+      if (Math.abs(p - lastP) < 0.002) return;
+      lastP = p;
+      tabBars.forEach(function (bar, i) {
+        bar.style.transform = 'scaleX(' + (i === current ? p : 0) + ')';
+      });
+    }
+
+    function setPause(key, on) {
+      pauses[key] = on;
+      var paused = isPaused() && animating;
+      el.counter.textContent = counterText() + (paused && !pauses.offscreen ? ' · Paused' : '');
+      stage.classList.toggle('is-paused', isPaused());
+      ensureLoop();
+    }
+
+    /* ----- Stage state helpers ----- */
+
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    function counterText() { return 'Scenario ' + pad(current + 1) + ' / ' + pad(scenarios.length); }
+
+    function selectTab(i) {
+      current = i;
+      el.tabs.forEach(function (tab, k) {
+        var on = k === i;
+        tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        tab.tabIndex = on ? 0 : -1;
+      });
+      stage.setAttribute('aria-labelledby', el.tabs[i].id);
+      el.counter.textContent = counterText();
+      lastP = -1;
+      drawProgress();
+    }
+
+    function setMic(live) {
+      el.mic.classList.toggle('is-live', live);
+      el.micText.textContent = live ? 'Listening' : 'Listen';
+    }
+
+    function setHeard(state, text) {
+      el.heard.classList.toggle('is-live', state === 'live');
+      el.heard.classList.toggle('is-typing', state === 'live');
+      el.heard.classList.toggle('is-idle', state === 'idle');
+      el.heardLabel.textContent = state === 'live' ? 'Listening' : state === 'idle' ? 'Ready' : 'Heard';
+      if (text != null) el.question.textContent = text;
+    }
+
+    function setMode(name, how) {
+      var m = el.mode;
+      m.classList.remove('is-flash', 'is-auto', 'is-set');
+      if (!name) {
+        el.modeText.textContent = 'Auto';
+        if (how === 'detecting') m.classList.add('is-auto');
+        return;
+      }
+      el.modeText.textContent = name;
+      m.classList.add('is-set');
+      if (how === 'flash') {
+        void m.offsetWidth; // restart the flash animation
+        m.classList.add('is-flash');
+      }
+    }
+
+    function setStatus(state, text) {
+      el.status.setAttribute('data-state', state);
+      el.statusText.textContent = text;
+      el.progress.classList.toggle('is-on', state === 'thinking');
+    }
+
+    function idleAnswer() {
+      el.answer.innerHTML = '';
+      var p = doc.createElement('p');
+      p.className = 'panel-idle';
+      p.textContent = 'Answers appear here as they stream.';
+      el.answer.appendChild(p);
+      el.answer.scrollTop = 0;
+    }
+
+    /* Clone a scenario's answer. Drop whitespace-only text between block
+       elements so hidden blocks don't leave stray gaps. */
+    function cloneAnswer(sc) {
+      var root = doc.createElement('div');
+      root.appendChild(sc.tpl.content.cloneNode(true));
+      var walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      var drop = [];
+      var n;
+      while ((n = walker.nextNode())) {
+        if (/^\s*$/.test(n.data) && /^(DIV|UL|OL)$/.test(n.parentNode.nodeName)) drop.push(n);
+      }
+      drop.forEach(function (t) { t.remove(); });
+      return root;
+    }
+
+    /* Split the answer into word tokens, all hidden, with a per-token delay. */
+    function planAnswer(sc) {
+      var root = cloneAnswer(sc);
+      Array.prototype.forEach.call(root.children, function (child) {
+        if (child.hasAttribute('data-instant')) return;
+        child.classList.add('blk-off');
+        $$('li', child).forEach(function (li) { li.classList.add('blk-off'); });
+      });
+
+      var texts = [];
+      var walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode: function (node) {
+          var p = node.parentNode;
+          if (p.closest('[data-instant], .code-bar')) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      var node;
+      while ((node = walker.nextNode())) texts.push(node);
+
+      var tokens = [];
+      texts.forEach(function (t) {
+        var chunks = t.data.match(/\s*\S+|\s+/g) || [];
+        var inCode = !!t.parentNode.closest('pre');
+        var frag = doc.createDocumentFragment();
+        chunks.forEach(function (chunk) {
+          var span = doc.createElement('span');
+          span.className = 'tk-off';
+          span.textContent = chunk;
+          frag.appendChild(span);
+          tokens.push({ el: span, ws: !/\S/.test(chunk), code: inCode, text: chunk });
+        });
+        t.parentNode.replaceChild(frag, t);
+      });
+
+      // Hidden ancestors to show with each token, and its top-level block.
+      tokens.forEach(function (tok) {
+        var hide = [];
+        var top = null;
+        for (var a = tok.el.parentNode; a && a !== root; a = a.parentNode) {
+          if (a.classList.contains('blk-off')) hide.push(a);
+          if (a.parentNode === root) top = a;
+        }
+        tok.hide = hide;
+        tok.top = top;
+      });
+
+      var total = 0;
+      tokens.forEach(function (tok, i) {
+        var d;
+        if (tok.ws) d = 0;
+        else if (tok.code) d = 24;
+        else {
+          d = 34;
+          var end = tok.text.trim().slice(-1);
+          if ('.!?'.indexOf(end) !== -1) d += 110;
+          else if (',;:'.indexOf(end) !== -1) d += 45;
+        }
+        var next = tokens[i + 1];
+        if (!tok.ws && next && next.top !== tok.top) d += 170;
+        tok.delay = d;
+        total += d;
+      });
+
+      return { root: root, tokens: tokens, total: total };
+    }
+
+    var T = { lead: 450, micOn: 420, afterQ: 480, detect: 800, think: 850, hold: 4200 };
+    function charDelay(ch) { return ch === ' ' ? 26 : 40; }
+
+    var readerScrolled = false;
+    ['wheel', 'touchmove'].forEach(function (type) {
+      el.answer.addEventListener(type, function () { readerScrolled = true; }, { passive: true });
+    });
+    el.answer.addEventListener('keydown', function () { readerScrolled = true; });
+
+    function keepVisible(span) {
+      if (readerScrolled) return;
+      var body = el.answer;
+      var bottom = span.offsetTop + span.offsetHeight + 26;
+      if (bottom > body.scrollTop + body.clientHeight) {
+        body.scrollTo({ top: bottom - body.clientHeight, behavior: 'smooth' });
+      }
+    }
+
+    function resetFor(sc) {
+      setMic(false);
+      setHeard('idle', 'Ask by voice, screenshot or chat.');
+      setMode(null);
+      el.lang.textContent = sc.lang;
+      setStatus('idle', 'Ready');
+      idleAnswer();
+    }
+
+    async function playScenario(i, r) {
+      var sc = scenarios[i];
+      var plan = planAnswer(sc);
+      var qTime = 0;
+      for (var c = 0; c < sc.q.length; c++) qTime += charDelay(sc.q[c]);
+
+      scStart = clock;
+      scDur = T.lead + T.micOn + qTime + T.afterQ + T.detect + T.think + plan.total + T.hold;
+      readerScrolled = false;
+      selectTab(i);
+      resetFor(sc);
+
+      await sleep(T.lead, r);
+      setMic(true);
+      setHeard('live', '');
+      setStatus('listening', 'Listening');
+      await sleep(T.micOn, r);
+
+      for (var k = 1; k <= sc.q.length; k++) {
+        el.question.textContent = sc.q.slice(0, k);
+        await sleep(charDelay(sc.q[k - 1]), r);
+      }
+      await sleep(T.afterQ, r);
+
+      setMic(false);
+      setHeard('heard');
+      setStatus('detecting', 'Detecting');
+      setMode(null, 'detecting');
+      await sleep(T.detect, r);
+
+      setMode(sc.mode, 'flash');
+      setStatus('thinking', 'Thinking');
+      await sleep(T.think, r);
+
+      el.answer.innerHTML = '';
+      el.answer.scrollTop = 0;
+      while (plan.root.firstChild) el.answer.appendChild(plan.root.firstChild);
+      setStatus('streaming', 'Streaming');
+
+      for (var t = 0; t < plan.tokens.length; t++) {
+        var tok = plan.tokens[t];
+        for (var h = 0; h < tok.hide.length; h++) tok.hide[h].classList.remove('blk-off');
+        tok.el.className = '';
+        if (tok.delay) {
+          keepVisible(tok.el);
+          await sleep(tok.delay, r);
+        }
+      }
+
+      setStatus('done', 'Done');
+      await sleep(T.hold, r);
+    }
+
+    async function runFrom(i) {
+      var r = ++run;
+      waiters = [];
+      animating = true;
+      try {
+        for (;;) {
+          await playScenario(i, r);
+          i = (i + 1) % scenarios.length;
+        }
+      } catch (err) {
+        if (err !== CANCEL) throw err;
+      }
+    }
+
+    /* Static final state: reduced motion, or a jump while paused. */
+    function renderFinal(i) {
+      run++;
+      waiters = [];
+      animating = false;
+      var sc = scenarios[i];
+      selectTab(i);
+      setMic(false);
+      setHeard('heard', sc.q);
+      setMode(sc.mode);
+      el.lang.textContent = sc.lang;
+      setStatus('done', 'Done');
+      var root = cloneAnswer(sc);
+      el.answer.innerHTML = '';
+      while (root.firstChild) el.answer.appendChild(root.firstChild);
+      el.answer.scrollTop = 0;
+      lastP = -1;
+      drawProgress();
+    }
+
+    function go(i) {
+      if (reduceMQ.matches || pauses.user) renderFinal(i);
+      else runFrom(i);
+    }
+
+    /* ----- Controls ----- */
+
+    el.tabs.forEach(function (tab, i) {
+      tab.addEventListener('click', function () { go(i); });
+    });
+    $('#demo-tabs').addEventListener('keydown', function (e) {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      var i = el.tabs.indexOf(doc.activeElement);
+      if (i < 0) return;
+      var n = el.tabs.length;
+      var to = null;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') to = (i + 1) % n;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') to = (i - 1 + n) % n;
+      else if (e.key === 'Home') to = 0;
+      else if (e.key === 'End') to = n - 1;
+      if (to === null) return;
+      e.preventDefault();
+      el.tabs[to].focus();
+      go(to);
+    });
+
+    function syncPlayButton() {
+      var paused = !!pauses.user;
+      el.play.setAttribute('data-paused', paused ? 'true' : 'false');
+      el.playLabel.textContent = paused ? 'Play demo' : 'Pause demo';
+      el.play.title = paused ? 'Play demo' : 'Pause demo';
+    }
+    el.play.addEventListener('click', function () {
+      var resume = !!pauses.user;
+      setPause('user', !resume);
+      syncPlayButton();
+      if (resume && !animating) runFrom(current);
+    });
+
+    stage.addEventListener('pointerenter', function (e) { if (e.pointerType === 'mouse') setPause('hover', true); });
+    stage.addEventListener('pointerleave', function (e) { if (e.pointerType === 'mouse') setPause('hover', false); });
+    stage.addEventListener('focusin', function (e) {
+      var keyboard = true;
+      try { keyboard = e.target.matches(':focus-visible'); } catch (err) { /* old browsers */ }
+      if (keyboard) setPause('focus', true);
+    });
+    stage.addEventListener('focusout', function (e) {
+      if (!stage.contains(e.relatedTarget)) setPause('focus', false);
+    });
+
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) { setPause('offscreen', !entry.isIntersecting); });
+      }, { threshold: 0.15 }).observe(stage);
+    }
+
+    function applyMotionPref() {
+      if (reduceMQ.matches) {
+        el.play.hidden = true;
+        renderFinal(current);
+      } else {
+        el.play.hidden = false;
+        syncPlayButton();
+        if (!pauses.user) runFrom(current);
+      }
+    }
+    if (reduceMQ.addEventListener) reduceMQ.addEventListener('change', applyMotionPref);
+    else if (reduceMQ.addListener) reduceMQ.addListener(applyMotionPref);
+
+    applyMotionPref();
+  }
+
+  function init() {
+    initReveal();
+    initCopy();
+    initDemo();
+  }
+
+  if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
