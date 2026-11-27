@@ -43,14 +43,32 @@ const SECRET_ENV_NAME = /(_API_KEY|_KEY|_TOKEN|_SECRET)$/;
  * a copy of process.env without API keys, tokens and secrets. PATH, HOME,
  * locale, Python/venv and WHISPER_* variables are kept. `extra` is merged in
  * last.
+ *
+ * On macOS, an app opened from Finder or the Dock (for example after
+ * installing the .dmg) gets PATH=/usr/bin:/bin:/usr/sbin:/sbin. That hides
+ * Homebrew and python.org Python, so only the old /usr/bin/python3 (3.9)
+ * would be found. The usual install folders are added to the end of PATH.
  */
-function childProcessEnv(extra = {}) {
+const MAC_EXTRA_PATH_DIRS = [
+  '/opt/homebrew/bin',
+  '/usr/local/bin',
+  '/Library/Frameworks/Python.framework/Versions/Current/bin',
+];
+
+function childProcessEnv(extra = {}, platform = process.platform) {
   const env = {};
   for (const [name, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
     const upper = name.toUpperCase();
     if (SECRET_ENV_NAME.test(upper) || upper.startsWith('AZURE_SPEECH_KEY')) continue;
     env[name] = value;
+  }
+  if (platform === 'darwin') {
+    const parts = (env.PATH || '').split(':').filter(Boolean);
+    for (const dir of MAC_EXTRA_PATH_DIRS) {
+      if (!parts.includes(dir)) parts.push(dir);
+    }
+    env.PATH = parts.join(':');
   }
   return Object.assign(env, extra);
 }
