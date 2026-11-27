@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings</title>
     <link href="./src/styles/common.css" rel="stylesheet">
+    <link href="./assests/vendor/fontawesome/all.min.css" rel="stylesheet">
     <style>
         *,
         *::before,
@@ -13,6 +14,10 @@
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+        }
+
+        [hidden] {
+            display: none !important;
         }
 
         html,
@@ -25,135 +30,476 @@
             overflow: hidden;
         }
 
-        /* ---------- Window ---------- */
-
-        .settings-container {
-            display: flex;
-            flex-direction: column;
+        button,
+        input,
+        select,
+        textarea {
+            font-family: inherit;
         }
 
-        .settings-container .settings-header {
-            justify-content: space-between;
-            padding: 0 6px 0 14px;
+        a {
+            color: var(--oc-accent);
+            text-decoration: none;
+            border-radius: var(--oc-r-xs);
         }
 
-        .header-title {
-            display: flex;
-            align-items: center;
-            gap: 9px;
+        a:hover {
+            text-decoration: underline;
+            text-underline-offset: 2px;
         }
 
-        .header-actions {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-
-        .settings-content {
-            flex: 1;
-            min-height: 0;
-            padding: 14px 16px 18px;
-            overflow-y: auto;
-            color: var(--oc-text);
-        }
-
-        /* ---------- Sections ---------- */
-
-        .settings-section + .settings-section {
-            margin-top: 18px;
-        }
-
-        .section-head {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 10px;
-        }
-
-        .section-head::after {
-            content: '';
-            flex: 1;
-            height: 1px;
-            background: var(--oc-line);
-        }
-
-        .settings-stack,
-        .settings-group,
-        .provider-fields {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .settings-stack > .settings-group,
-        .settings-stack > .provider-fields {
-            margin: 0;
-        }
-
-        .field-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-
-        .field {
-            min-width: 0;
-        }
-
-        .field-label {
-            display: block;
-            margin-bottom: 6px;
-            font-size: var(--oc-fs-xs);
-            font-weight: 600;
-            color: var(--oc-text-2);
-        }
-
-        .field-help,
-        .settings-note {
-            font-size: var(--oc-fs-xs);
-            line-height: 1.45;
-            color: var(--oc-text-3);
-        }
-
-        .field-help {
-            margin-top: 5px;
-        }
-
-        .field-help code,
-        .settings-note code {
-            padding: 0 4px;
+        code,
+        .sw-mono {
             font-family: var(--oc-mono);
             font-size: var(--oc-fs-2xs);
+        }
+
+        code {
+            padding: 1px 5px;
             color: var(--oc-text-2);
             background: var(--oc-sunken);
             border: 1px solid var(--oc-line);
             border-radius: var(--oc-r-xs);
+            word-break: break-all;
         }
 
-        .settings-note--warn {
+        /* ---------- Window ---------- */
+
+        .sw {
+            display: grid;
+            grid-template-columns: 216px minmax(0, 1fr);
+            color: var(--oc-text);
+        }
+
+        /* Windows and Linux get an opaque, square window (the OS rounds it on Windows 11). */
+        html:not([data-platform="darwin"]) .sw {
+            border-radius: 0;
+        }
+
+        /* ---------- Sidebar ---------- */
+
+        .sw-side {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            background: rgba(0, 0, 0, 0.22);
+            border-right: 1px solid var(--oc-line);
+        }
+
+        .sw-side-head {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 9px;
+            flex: none;
+            height: 48px;
+            padding: 0 16px;
+        }
+
+        /* Leave room for the macOS traffic lights. */
+        html[data-platform="darwin"] .sw-side-head {
+            padding-left: 84px;
+        }
+
+        .sw-side-title {
+            font-size: var(--oc-fs-sm);
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        html[data-platform="darwin"] .sw-side-head .oc-mark {
+            display: none;
+        }
+
+        .sw-search {
+            position: relative;
+            flex: none;
+            margin: 2px 12px 10px;
+        }
+
+        .sw-search i {
+            position: absolute;
+            top: 50%;
+            left: 10px;
+            font-size: 11px;
+            color: var(--oc-text-3);
+            transform: translateY(-50%);
+            pointer-events: none;
+        }
+
+        .sw-search .oc-input {
+            height: 30px;
+            padding-left: 29px;
+            font-size: var(--oc-fs-sm);
+        }
+
+        .sw-search .oc-input::-webkit-search-cancel-button {
+            filter: invert(0.7);
+            cursor: pointer;
+        }
+
+        .sw-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            min-height: 0;
+            padding: 0 8px;
+            overflow-y: auto;
+        }
+
+        .sw-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            height: 32px;
+            padding: 0 10px;
+            font: 600 var(--oc-fs-sm) / 1 var(--oc-font);
+            color: var(--oc-text-2);
+            text-align: left;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: var(--oc-r-md);
+            cursor: pointer;
+            transition: background var(--oc-t-fast) var(--oc-ease), color var(--oc-t-fast) var(--oc-ease);
+        }
+
+        .sw-nav-item i {
+            width: 14px;
+            font-size: 12px;
+            text-align: center;
+            color: var(--oc-text-3);
+        }
+
+        .sw-nav-item:hover {
+            color: var(--oc-text);
+            background: var(--oc-raised);
+        }
+
+        .sw-nav-item[aria-current="page"] {
+            color: var(--oc-text);
+            background: var(--oc-raised-2);
+            border-color: var(--oc-line);
+        }
+
+        .sw-nav-item[aria-current="page"] i {
+            color: var(--oc-accent);
+        }
+
+        .sw-nav-item:focus-visible {
+            outline: 2px solid var(--oc-accent-line);
+            outline-offset: -1px;
+        }
+
+        .sw-nav-label {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .sw-nav-count {
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-2xs);
+            color: var(--oc-text-3);
+        }
+
+        .sw-nav-item.is-empty {
+            opacity: 0.45;
+        }
+
+        .sw-nav-alert {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--oc-warn);
+        }
+
+        .sw-side-foot {
+            flex: none;
+            padding: 10px 8px 12px;
+            border-top: 1px solid var(--oc-line);
+        }
+
+        .sw-side-foot .oc-btn {
+            width: 100%;
+            justify-content: flex-start;
+            height: 30px;
+            padding: 0 10px;
+            font-size: var(--oc-fs-sm);
+            gap: 10px;
+        }
+
+        .sw-side-foot .oc-btn i {
+            width: 14px;
+            font-size: 11px;
+        }
+
+        .sw-side-foot .oc-btn:hover {
+            color: var(--oc-error);
+            background: var(--oc-error-soft);
+        }
+
+        /* ---------- Content pane ---------- */
+
+        .sw-main {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 0;
+        }
+
+        .sw-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: none;
+            height: 48px;
+            padding: 0 10px 0 28px;
+            border-bottom: 1px solid var(--oc-line);
+        }
+
+        .sw-head-title {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            font-size: var(--oc-fs-lg);
+            font-weight: 700;
+            letter-spacing: -0.005em;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        html[data-platform="darwin"] .sw-close {
+            display: none;
+        }
+
+        .sw-progress {
+            flex: none;
+            margin-top: -2px;
+        }
+
+        .sw-scroll {
+            flex: 1;
+            min-height: 0;
+            padding: 22px 28px 40px;
+            overflow-y: auto;
+            scroll-padding: 16px;
+        }
+
+        .sw-banner {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            margin-bottom: 16px;
+            padding: 11px 13px;
+            font-size: var(--oc-fs-sm);
+            line-height: 1.5;
+            color: var(--oc-text);
+            background: var(--oc-error-soft);
+            border: 1px solid rgba(255, 122, 114, 0.32);
+            border-radius: var(--oc-r-lg);
+        }
+
+        .sw-banner > i {
+            margin-top: 3px;
+            font-size: 12px;
+            color: var(--oc-error);
+        }
+
+        .sw-banner--warn {
+            background: var(--oc-warn-soft);
+            border-color: rgba(246, 196, 83, 0.32);
+        }
+
+        .sw-banner--warn > i {
             color: var(--oc-warn);
         }
 
-        .settings-note--warn i {
-            font-size: 10px;
+        .sw-banner--ok {
+            background: var(--oc-accent-soft);
+            border-color: var(--oc-accent-line);
         }
 
-        /* Compact controls for the settings panel */
-        .settings-content .oc-input {
+        .sw-banner--ok > i {
+            color: var(--oc-accent);
+        }
+
+        .sw-banner-body {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .sw-banner .oc-btn {
+            flex: none;
+            height: 26px;
+            padding: 0 10px;
+            font-size: var(--oc-fs-xs);
+        }
+
+        /* ---------- Sections and groups ---------- */
+
+        .sw-section {
+            max-width: 680px;
+        }
+
+        .sw-section-title {
+            display: none;
+            margin: 0 0 10px;
+        }
+
+        /* While searching every section shows, each under its name. */
+        .is-searching .sw-section-title {
+            display: block;
+        }
+
+        .is-searching .sw-section {
+            margin-bottom: 26px;
+        }
+
+        .sw-intro {
+            margin: 0 0 16px;
+            font-size: var(--oc-fs-sm);
+            line-height: 1.55;
+            color: var(--oc-text-3);
+        }
+
+        .sw-group {
+            margin: 0 0 16px;
+            background: var(--oc-raised);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-lg);
+        }
+
+        .sw-group-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 13px 16px 11px;
+            border-bottom: 1px solid var(--oc-line);
+        }
+
+        .sw-group-title {
+            flex: 1;
+            min-width: 0;
+            font-size: var(--oc-fs-md);
+            font-weight: 700;
+        }
+
+        .sw-group-status {
+            font-size: var(--oc-fs-xs);
+            font-weight: 600;
+            color: var(--oc-text-3);
+            white-space: nowrap;
+        }
+
+        .sw-group-status.is-ok {
+            color: var(--oc-accent);
+        }
+
+        .sw-group-status.is-error {
+            color: var(--oc-error);
+            white-space: normal;
+        }
+
+        .sw-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(200px, 260px);
+            align-items: start;
+            gap: 8px 20px;
+            padding: 14px 16px;
+        }
+
+        .sw-row + .sw-row {
+            border-top: 1px solid var(--oc-line);
+        }
+
+        .sw-row--auto {
+            grid-template-columns: minmax(0, 1fr) auto;
+        }
+
+        .sw-row--stack {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .sw-row-label {
+            display: block;
+            font-size: var(--oc-fs-md);
+            font-weight: 600;
+            color: var(--oc-text);
+        }
+
+        .sw-row-help code {
+            white-space: nowrap;
+            word-break: normal;
+        }
+
+        .sw-row-help {
+            margin-top: 4px;
+            font-size: var(--oc-fs-xs);
+            line-height: 1.55;
+            color: var(--oc-text-3);
+        }
+
+        .sw-row-control {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .sw-inline {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sw-inline > .oc-input {
+            flex: 1;
+            min-width: 140px;
+        }
+
+        .sw-fields-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .sw-field-label {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: var(--oc-fs-sm);
+            font-weight: 600;
+            color: var(--oc-text-2);
+        }
+
+        /* ---------- Controls ---------- */
+
+        .sw .oc-input {
             height: 32px;
             font-size: var(--oc-fs-sm);
         }
 
-        .settings-content .oc-input:disabled {
+        .sw .oc-input:disabled {
             opacity: 0.5;
             cursor: default;
         }
 
-        .settings-content input[type="password"].oc-input,
-        .settings-content .oc-input--mono {
+        .sw .oc-input[aria-invalid="true"] {
+            border-color: rgba(255, 122, 114, 0.6);
+        }
+
+        .sw .oc-input[aria-invalid="true"]:focus {
+            box-shadow: 0 0 0 3px var(--oc-error-soft);
+        }
+
+        .sw .oc-input--mono,
+        .sw input[type="password"].oc-input {
             font-family: var(--oc-mono);
             font-size: var(--oc-fs-xs);
             letter-spacing: 0.02em;
@@ -164,506 +510,1128 @@
             background: #16171b;
         }
 
-        input[type="number"].oc-input::-webkit-inner-spin-button {
-            opacity: 0.4;
-        }
-
-        /* Multi-line fields (interview context) */
-        .settings-content textarea.oc-input {
-            height: auto;
-            min-height: 64px;
-            max-height: 320px;
-            padding: 8px 11px;
-            font-size: var(--oc-fs-sm);
-            line-height: 1.45;
-            resize: vertical;
-        }
-
-        .field-label-row {
-            display: flex;
-            align-items: baseline;
-            justify-content: space-between;
-            gap: 8px;
-        }
-
-        .field-count {
-            margin-bottom: 6px;
-            font-family: var(--oc-mono);
-            font-size: var(--oc-fs-2xs);
+        select.oc-input option:disabled {
             color: var(--oc-text-4);
         }
 
-        .field-count.is-over {
+        .sw textarea.oc-input {
+            height: auto;
+            min-height: 72px;
+            padding: 8px 11px;
+            font-size: var(--oc-fs-sm);
+            line-height: 1.5;
+            resize: vertical;
+        }
+
+        .sw .oc-btn {
+            height: 30px;
+            font-size: var(--oc-fs-sm);
+        }
+
+        .sw .oc-btn i {
+            font-size: 11px;
+        }
+
+        .sw .oc-btn--danger:hover {
+            background: rgba(255, 122, 114, 0.22);
+        }
+
+        .sw .oc-btn:focus-visible,
+        .sw .oc-input:focus-visible {
+            outline: 2px solid var(--oc-accent-line);
+            outline-offset: 2px;
+        }
+
+        .sw .oc-input:focus-visible {
+            outline: none;
+        }
+
+        /* Inline save state under a control */
+        .sw-status {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            min-height: 0;
+            font-size: var(--oc-fs-xs);
+            font-weight: 600;
+            line-height: 1.45;
+        }
+
+        .sw-status:empty {
+            display: none;
+        }
+
+        .sw-status i {
+            margin-top: 2px;
+            font-size: 10px;
+        }
+
+        .sw-status.is-ok {
+            color: var(--oc-accent);
+        }
+
+        .sw-status.is-error {
             color: var(--oc-error);
         }
 
-        /* After the section rule (the ::after flex item) */
-        .context-status {
-            order: 1;
+        .sw-status.is-busy,
+        .sw-status.is-info {
+            color: var(--oc-text-3);
+        }
+
+        .sw-status.is-warn {
+            color: var(--oc-warn);
+        }
+
+        .sw-count {
+            font-family: var(--oc-mono);
             font-size: var(--oc-fs-2xs);
+            font-weight: 500;
+            color: var(--oc-text-4);
+        }
+
+        .sw-count.is-near {
+            color: var(--oc-warn);
+        }
+
+        /* Segmented choice built from real radio buttons */
+        .sw-segmented {
+            display: inline-flex;
+            gap: 2px;
+            padding: 3px;
+            background: var(--oc-sunken);
+            border: 1px solid var(--oc-line-2);
+            border-radius: var(--oc-r-md);
+        }
+
+        .sw-segmented label {
+            position: relative;
+        }
+
+        .sw-segmented input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .sw-segmented span {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            height: 26px;
+            padding: 0 10px;
+            font-size: var(--oc-fs-sm);
+            font-weight: 600;
+            color: var(--oc-text-2);
+            border-radius: var(--oc-r-sm);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .sw-segmented span:hover {
+            color: var(--oc-text);
+        }
+
+        .sw-segmented input:checked + span {
+            color: var(--oc-accent-ink);
+            background: var(--oc-accent);
+        }
+
+        .sw-segmented input:focus-visible + span {
+            outline: 2px solid var(--oc-accent-line);
+            outline-offset: 2px;
+        }
+
+        /* ---------- Provider cards ---------- */
+
+        .sw-providers {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 8px;
+            padding: 14px 16px 16px;
+        }
+
+        .sw-provider {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+            min-height: 64px;
+            padding: 11px 12px;
+            text-align: left;
+            color: var(--oc-text);
+            background: var(--oc-sunken);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-md);
+            cursor: pointer;
+            transition: background var(--oc-t-fast) var(--oc-ease), border-color var(--oc-t-fast) var(--oc-ease);
+        }
+
+        .sw-provider:hover {
+            background: var(--oc-raised-2);
+            border-color: var(--oc-line-2);
+        }
+
+        .sw-provider[aria-checked="true"] {
+            background: var(--oc-accent-soft);
+            border-color: var(--oc-accent-line);
+        }
+
+        .sw-provider:focus-visible {
+            outline: 2px solid var(--oc-accent-line);
+            outline-offset: 2px;
+        }
+
+        .sw-provider:disabled {
+            cursor: progress;
+        }
+
+        .sw-provider-name {
+            padding-right: 18px;
+            font-size: var(--oc-fs-sm);
+            font-weight: 700;
+            line-height: 1.25;
+        }
+
+        .sw-provider-meta {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px 8px;
+            font-size: var(--oc-fs-2xs);
+            font-weight: 600;
+            color: var(--oc-text-3);
+        }
+
+        .sw-provider-meta .is-ok {
+            color: var(--oc-accent);
+        }
+
+        .sw-provider-meta .is-missing {
+            color: var(--oc-warn);
+        }
+
+        .sw-provider-check {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 15px;
+            height: 15px;
+            font-size: 8px;
+            color: var(--oc-accent-ink);
+            background: var(--oc-accent);
+            border-radius: 50%;
+        }
+
+        .sw-provider[aria-checked="true"] .sw-provider-check {
+            display: inline-flex;
+        }
+
+        /* ---------- Saved key ---------- */
+
+        .sw-key-saved {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sw-key-mask {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            height: 32px;
+            padding: 0 11px;
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-xs);
+            color: var(--oc-text-2);
+            background: var(--oc-sunken);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-md);
+        }
+
+        .sw-key-mask i {
+            font-size: 10px;
+            color: var(--oc-accent);
+        }
+
+        .sw-key-input {
+            position: relative;
+            flex: 1;
+            min-width: 180px;
+        }
+
+        .sw-key-input .oc-input {
+            padding-right: 38px;
+        }
+
+        .sw-key-reveal {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 28px;
+            height: 28px;
+        }
+
+        .sw-confirm {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 12px;
+            padding: 10px 12px;
+            font-size: var(--oc-fs-sm);
+            line-height: 1.45;
+            background: var(--oc-error-soft);
+            border: 1px solid rgba(255, 122, 114, 0.32);
+            border-radius: var(--oc-r-md);
+        }
+
+        .sw-confirm p {
+            flex: 1 1 220px;
+        }
+
+        .sw-confirm .sw-inline {
+            flex: none;
+        }
+
+        /* ---------- Status blocks ---------- */
+
+        .sw-state {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 32px;
+            font-size: var(--oc-fs-sm);
+            line-height: 1.45;
+        }
+
+        .sw-state-text {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .sw-state-text strong {
+            font-weight: 650;
+        }
+
+        .sw-state-sub {
+            display: block;
+            margin-top: 2px;
+            font-size: var(--oc-fs-xs);
+            color: var(--oc-text-3);
+            overflow-wrap: anywhere;
+        }
+
+        .sw .oc-dot--warn {
+            background: var(--oc-warn);
+            box-shadow: 0 0 0 3px var(--oc-warn-soft);
+        }
+
+        .sw .oc-dot--error {
+            background: var(--oc-error);
+            box-shadow: 0 0 0 3px var(--oc-error-soft);
+        }
+
+        .sw-log {
+            max-height: 160px;
+            margin-top: 8px;
+            padding: 9px 11px;
+            overflow: auto;
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-2xs);
+            line-height: 1.55;
+            color: var(--oc-text-2);
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            background: var(--oc-sunken);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-md);
+            user-select: text;
+        }
+
+        details.sw-details summary {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+            font-size: var(--oc-fs-xs);
+            font-weight: 600;
+            color: var(--oc-text-3);
+            cursor: pointer;
+            border-radius: var(--oc-r-xs);
+        }
+
+        details.sw-details summary:hover {
+            color: var(--oc-text);
+        }
+
+        details.sw-details summary:focus-visible {
+            outline: 2px solid var(--oc-accent-line);
+            outline-offset: 2px;
+        }
+
+        .fa-spin-fast {
+            animation: fa-spin 0.9s linear infinite;
+        }
+
+        /* ---------- Tables ---------- */
+
+        .sw-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: var(--oc-fs-sm);
+        }
+
+        .sw-table th {
+            padding: 10px 16px 8px;
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-2xs);
+            font-weight: 500;
+            letter-spacing: 0.08em;
+            text-align: left;
+            text-transform: uppercase;
+            color: var(--oc-text-3);
+            border-bottom: 1px solid var(--oc-line);
+        }
+
+        .sw-table td {
+            padding: 10px 16px;
+            line-height: 1.45;
+            vertical-align: middle;
+        }
+
+        .sw-table tr + tr td {
+            border-top: 1px solid var(--oc-line);
+        }
+
+        .sw-table .sw-keys {
+            white-space: nowrap;
+        }
+
+        .sw-table .oc-kbd {
+            min-width: 20px;
+            height: 20px;
+        }
+
+        .sw-scope {
+            font-size: var(--oc-fs-xs);
             font-weight: 600;
             color: var(--oc-text-3);
             white-space: nowrap;
         }
 
-        .context-status.is-error {
-            color: var(--oc-error);
+        .sw-scope.is-global {
+            color: var(--oc-text-2);
         }
 
-        .context-status.is-saved {
-            color: var(--oc-accent);
+        .sw-scope.is-warn {
+            color: var(--oc-warn);
+            white-space: normal;
+        }
+
+        .sw-here {
+            margin-left: 8px;
+        }
+
+        /* ---------- Lists ---------- */
+
+        .sw-list {
+            display: flex;
+            flex-direction: column;
+            list-style: none;
+        }
+
+        .sw-list li {
+            display: grid;
+            grid-template-columns: 16px minmax(0, 1fr);
+            gap: 12px;
+            padding: 11px 16px;
+            font-size: var(--oc-fs-sm);
+            line-height: 1.5;
+            color: var(--oc-text-2);
+        }
+
+        .sw-list li + li {
+            border-top: 1px solid var(--oc-line);
+        }
+
+        .sw-list li > i {
+            margin-top: 4px;
+            font-size: 11px;
+            color: var(--oc-text-3);
+            text-align: center;
+        }
+
+        .sw-list strong {
+            font-weight: 650;
+            color: var(--oc-text);
         }
 
         /* ---------- App icon tiles ---------- */
 
-        .icon-grid {
+        .sw-icons {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 8px;
+            padding: 14px 16px 16px;
         }
 
-        .icon-option {
+        .sw-icon {
             position: relative;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            gap: 6px;
-            padding: 12px 8px 10px;
-            background: var(--oc-raised);
+            gap: 7px;
+            padding: 14px 8px 11px;
+            font-size: var(--oc-fs-xs);
+            font-weight: 600;
+            color: var(--oc-text-2);
+            background: var(--oc-sunken);
             border: 1px solid var(--oc-line);
-            border-radius: var(--oc-r-lg);
+            border-radius: var(--oc-r-md);
             cursor: pointer;
-            transition:
-                background var(--oc-t-fast) var(--oc-ease),
-                border-color var(--oc-t-fast) var(--oc-ease),
-                transform var(--oc-t-fast) var(--oc-ease);
+            transition: background var(--oc-t-fast) var(--oc-ease), border-color var(--oc-t-fast) var(--oc-ease);
         }
 
-        .icon-option:hover {
+        .sw-icon:hover {
             background: var(--oc-raised-2);
             border-color: var(--oc-line-2);
         }
 
-        .icon-option.selected {
+        .sw-icon[aria-checked="true"] {
+            color: var(--oc-text);
             background: var(--oc-accent-soft);
             border-color: var(--oc-accent-line);
         }
 
-        /* Lime check on the selected tile */
-        .icon-option.selected::after {
-            content: '';
-            position: absolute;
-            top: 7px;
-            right: 7px;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background: var(--oc-accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23141a08' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center;
+        .sw-icon:focus-visible {
+            outline: 2px solid var(--oc-accent-line);
+            outline-offset: 2px;
         }
 
-        .icon-option img {
-            width: 28px;
-            height: 28px;
+        .sw-icon img {
+            width: 32px;
+            height: 32px;
             object-fit: contain;
         }
 
-        .icon-option div {
-            text-align: center;
-            font-size: var(--oc-fs-xs);
-            font-weight: 600;
-            color: var(--oc-text-2);
+        .sw-icon .sw-provider-check {
+            top: 7px;
+            right: 7px;
         }
 
-        .icon-option.selected div {
-            color: var(--oc-text);
+        .sw-icon[aria-checked="true"] .sw-provider-check {
+            display: inline-flex;
         }
 
-        /* ---------- Footer ---------- */
+        /* ---------- About ---------- */
 
-        .settings-footer {
-            display: flex;
-            flex: none;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            height: 36px;
-            padding: 0 8px 0 14px;
-            border-top: 1px solid var(--oc-line);
-        }
-
-        .footer-brand {
+        .sw-about-hero {
             display: flex;
             align-items: center;
-            gap: 7px;
-            font-size: var(--oc-fs-xs);
+            gap: 16px;
+            padding: 20px 16px;
+        }
+
+        .sw-about-hero .oc-mark {
+            --s: 44px;
+        }
+
+        .sw-about-name {
+            font-size: var(--oc-fs-xl);
+            font-weight: 750;
+            letter-spacing: -0.01em;
+        }
+
+        .sw-about-sub {
+            margin-top: 3px;
+            font-size: var(--oc-fs-sm);
             color: var(--oc-text-3);
         }
 
-        .footer-brand .oc-mark {
-            --s: 10px;
+        .sw-defs {
+            display: grid;
+            grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
         }
 
-        .settings-footer .oc-btn {
-            height: 24px;
-            padding: 0 9px;
-            font-size: var(--oc-fs-xs);
-            -webkit-app-region: no-drag;
+        .sw-defs dt,
+        .sw-defs dd {
+            padding: 10px 16px;
+            font-size: var(--oc-fs-sm);
+            line-height: 1.5;
         }
 
-        .settings-footer .oc-btn--danger:hover {
-            background: rgba(255, 122, 114, 0.22);
+        .sw-defs dt {
+            color: var(--oc-text-3);
         }
 
-        .settings-footer .oc-btn i {
-            font-size: 10px;
+        .sw-defs dd {
+            color: var(--oc-text);
+            overflow-wrap: anywhere;
+            user-select: text;
+        }
+
+        .sw-defs dt:not(:first-of-type),
+        .sw-defs dt:not(:first-of-type) + dd {
+            border-top: 1px solid var(--oc-line);
+        }
+
+        /* ---------- Search ---------- */
+
+        .sw-empty {
+            padding: 48px 16px;
+            text-align: center;
+            font-size: var(--oc-fs-sm);
+            color: var(--oc-text-3);
+        }
+
+        .sw-empty i {
+            display: block;
+            margin-bottom: 12px;
+            font-size: 18px;
+            color: var(--oc-text-4);
+        }
+
+        .sw-empty strong {
+            color: var(--oc-text);
+            font-weight: 650;
+        }
+
+        /* Search hides rows that do not match, and the notes around them. */
+        .sw-filtered,
+        .is-searching .sw-section .sw-banner,
+        .is-searching .sw-intro {
+            display: none !important;
+        }
+
+        .sw-state-sub.is-ok {
+            color: var(--oc-accent);
+        }
+
+        .sw-group-help {
+            padding: 12px 16px 0;
+        }
+
+        .sw-flash {
+            animation: sw-flash 1.4s var(--oc-ease) 1;
+        }
+
+        @keyframes sw-flash {
+            0%, 40% { background: var(--oc-accent-soft); }
+            100% { background: transparent; }
+        }
+
+        .sw-sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            white-space: nowrap;
+        }
+
+        @media (max-width: 780px) {
+            .sw {
+                grid-template-columns: 204px minmax(0, 1fr);
+            }
+
+            .sw-row {
+                grid-template-columns: minmax(0, 1fr);
+            }
+
+            .sw-scroll {
+                padding: 18px 18px 32px;
+            }
+
+            .sw-head {
+                padding-left: 18px;
+            }
         }
     </style>
     <link rel="stylesheet" href="./src/styles/theme.css">
 </head>
 <body>
-    <div class="settings-container oc-window oc-window--native">
-        <div class="settings-header oc-titlebar oc-drag">
-            <div class="header-title">
+    <div class="sw oc-window oc-window--native" id="settingsRoot">
+        <aside class="sw-side" aria-label="Settings sections">
+            <div class="sw-side-head oc-drag">
                 <span class="oc-mark" aria-hidden="true"></span>
-                <span class="oc-title">Settings</span>
+                <span class="sw-side-title">Settings</span>
             </div>
-            <div class="header-actions oc-no-drag">
-                <button class="oc-btn oc-btn--ghost oc-icon-btn" id="closeButton" type="button" aria-label="Close" title="Close (Esc)">
-                    <i class="fas fa-times" aria-hidden="true"></i>
+            <div class="sw-search" role="search">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input type="search" class="oc-input" id="settingsSearch" placeholder="Search settings" aria-label="Search settings" aria-controls="settingsScroll" autocomplete="off" spellcheck="false">
+            </div>
+            <nav class="sw-nav" id="settingsNav" aria-label="Sections">
+                <button type="button" class="sw-nav-item" data-nav="general"><i class="fas fa-sliders" aria-hidden="true"></i><span class="sw-nav-label">General</span><span class="sw-nav-count"></span></button>
+                <button type="button" class="sw-nav-item" data-nav="ai"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i><span class="sw-nav-label">AI provider</span><span class="sw-nav-alert" id="aiNavAlert" title="The selected provider has no key" hidden></span><span class="sw-nav-count"></span></button>
+                <button type="button" class="sw-nav-item" data-nav="context"><i class="fas fa-id-card" aria-hidden="true"></i><span class="sw-nav-label">Interview context</span><span class="sw-nav-count"></span></button>
+                <button type="button" class="sw-nav-item" data-nav="voice"><i class="fas fa-microphone" aria-hidden="true"></i><span class="sw-nav-label">Voice</span><span class="sw-nav-count"></span></button>
+                <button type="button" class="sw-nav-item" data-nav="shortcuts"><i class="fas fa-keyboard" aria-hidden="true"></i><span class="sw-nav-label">Shortcuts</span><span class="sw-nav-count"></span></button>
+                <button type="button" class="sw-nav-item" data-nav="privacy"><i class="fas fa-shield-halved" aria-hidden="true"></i><span class="sw-nav-label">Privacy &amp; appearance</span><span class="sw-nav-count"></span></button>
+                <button type="button" class="sw-nav-item" data-nav="about"><i class="fas fa-circle-info" aria-hidden="true"></i><span class="sw-nav-label">About</span><span class="sw-nav-count"></span></button>
+            </nav>
+            <div class="sw-side-foot">
+                <button type="button" class="oc-btn oc-btn--ghost" id="quitButton"><i class="fas fa-power-off" aria-hidden="true"></i>Quit Cuewell</button>
+            </div>
+        </aside>
+
+        <main class="sw-main">
+            <header class="sw-head oc-drag">
+                <h1 class="sw-head-title" id="sectionTitle">General</h1>
+                <button type="button" class="oc-btn oc-btn--ghost oc-icon-btn sw-close oc-no-drag" id="closeButton" aria-label="Close settings" title="Close (Esc)">
+                    <i class="fas fa-xmark" aria-hidden="true"></i>
                 </button>
-            </div>
-        </div>
+            </header>
+            <div class="oc-progress sw-progress" id="loadingBar" role="progressbar" aria-label="Loading settings" hidden></div>
 
-        <div class="settings-content">
-            <section class="settings-section">
-                <div class="section-head"><h2 class="oc-label">Interview</h2></div>
-                <div class="settings-stack">
-                    <div class="field">
-                        <label class="field-label" for="activeSkill">Mode</label>
-                        <select class="oc-input" id="activeSkill">
-                            <option value="auto">Auto</option>
-                            <option value="dsa">Coding</option>
-                            <option value="technical">Technical</option>
-                            <option value="system-design">System design</option>
-                            <option value="behavioral">Behavioral</option>
-                            <option value="hr">HR</option>
-                        </select>
-                        <div class="field-help">Auto answers any question in the format that fits it. Pick a mode to force one format. Click the mode chip on the toolbar to switch.</div>
-                    </div>
-                    <div class="field-row">
-                        <div class="field">
-                            <label class="field-label" for="codingLanguage">Coding language</label>
-                            <select class="oc-input" id="codingLanguage">
-                                <option value="cpp">C++</option>
-                                <option value="c">C</option>
-                                <option value="python">Python</option>
-                                <option value="java">Java</option>
-                                <option value="javascript">JavaScript</option>
-                            </select>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="answerLength">Answer length</label>
-                            <select class="oc-input" id="answerLength">
-                                <option value="auto">Auto</option>
-                                <option value="short">Short</option>
-                                <option value="standard">Standard</option>
-                                <option value="detailed">Detailed</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="field-help" style="margin-top: -6px;">Code is written in this language in Auto and Coding. Auto length is Short for voice and Standard for typed and screenshot questions.</div>
+            <div class="sw-scroll" id="settingsScroll" tabindex="-1">
+                <div class="sw-banner" id="loadError" role="alert" hidden>
+                    <i class="fas fa-circle-exclamation" aria-hidden="true"></i>
+                    <div class="sw-banner-body" id="loadErrorText">Settings could not be loaded.</div>
+                    <button type="button" class="oc-btn" id="loadRetry">Try again</button>
                 </div>
-            </section>
 
-            <section class="settings-section">
-                <div class="section-head">
-                    <h2 class="oc-label">Interview context</h2>
-                    <span class="context-status" id="contextStatus" role="status" aria-live="polite"></span>
+                <div class="sw-empty" id="searchEmpty" hidden>
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                    No settings match <strong id="searchEmptyQuery"></strong>.
                 </div>
-                <div class="settings-stack">
-                    <div class="settings-note">Sent to your AI provider with each question.</div>
-                    <div class="field-row">
-                        <div class="field">
-                            <label class="field-label" for="profileRole">Target role</label>
-                            <input type="text" class="oc-input" id="profileRole" data-profile-field="role" maxlength="200" placeholder="e.g. Senior Frontend Engineer" spellcheck="false">
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="profileCompany">Company</label>
-                            <input type="text" class="oc-input" id="profileCompany" data-profile-field="company" maxlength="200" placeholder="e.g. Acme Corp" spellcheck="false">
-                        </div>
-                    </div>
-                    <div class="field">
-                        <div class="field-label-row">
-                            <label class="field-label" for="profileJobDescription">Job description</label>
-                            <span class="field-count" data-count-for="profileJobDescription"></span>
-                        </div>
-                        <textarea class="oc-input" id="profileJobDescription" data-profile-field="jobDescription" maxlength="20000" rows="4" placeholder="Paste the job description"></textarea>
-                    </div>
-                    <div class="field">
-                        <div class="field-label-row">
-                            <label class="field-label" for="profileResume">Resume</label>
-                            <span class="field-count" data-count-for="profileResume"></span>
-                        </div>
-                        <textarea class="oc-input" id="profileResume" data-profile-field="resume" maxlength="20000" rows="5" placeholder="Paste your resume as plain text"></textarea>
-                        <div class="field-help">Behavioral and HR answers draw their examples from it.</div>
-                    </div>
-                    <div class="field">
-                        <div class="field-label-row">
-                            <label class="field-label" for="profileNotes">Extra notes</label>
-                            <span class="field-count" data-count-for="profileNotes"></span>
-                        </div>
-                        <textarea class="oc-input" id="profileNotes" data-profile-field="notes" maxlength="20000" rows="3" placeholder="e.g. Notice period 30 days, expected salary range, topics to highlight"></textarea>
-                    </div>
-                    <div class="field-help" style="margin-top: -6px;">Saved on this computer in your app data folder, not in <code>.env</code>.</div>
-                </div>
-            </section>
 
-            <section class="settings-section">
-                <div class="section-head"><h2 class="oc-label">AI Provider</h2></div>
-                <div class="settings-stack">
-                    <div class="field">
-                        <label class="field-label" for="llmProvider">Provider</label>
-                        <select class="oc-input" id="llmProvider">
-                            <option value="gemini">Google Gemini</option>
-                            <option value="anthropic">Anthropic Claude</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="openrouter">OpenRouter</option>
-                            <option value="groq">Groq</option>
-                            <option value="deepseek">DeepSeek</option>
-                            <option value="ollama">Ollama (local)</option>
-                        </select>
-                        <div class="field-help">The AI service that answers your questions</div>
-                    </div>
-
-                    <!-- One group per provider; only the selected one is shown -->
-                    <div class="provider-fields" data-provider="gemini">
-                        <div class="field">
-                            <label class="field-label" for="geminiKey">Google API key</label>
-                            <input type="password" class="oc-input" id="geminiKey" placeholder="Enter your Google API key" autocomplete="off" spellcheck="false">
-                            <div class="field-help">Your Google API key for Gemini models</div>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="geminiModel">Model</label>
-                            <input type="text" class="oc-input oc-input--mono" id="geminiModel" placeholder="gemini-3.1-flash-lite" spellcheck="false">
-                            <div class="field-help">Leave empty to use the default</div>
-                        </div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="anthropic">
-                        <div class="field">
-                            <label class="field-label" for="anthropicKey">Anthropic API key</label>
-                            <input type="password" class="oc-input" id="anthropicKey" placeholder="Enter your Anthropic API key" autocomplete="off" spellcheck="false">
-                            <div class="field-help">Your API key from console.anthropic.com</div>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="anthropicModel">Model</label>
-                            <input type="text" class="oc-input oc-input--mono" id="anthropicModel" placeholder="claude-opus-5-5" spellcheck="false">
-                            <div class="field-help">Leave empty to use the default</div>
-                        </div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="openai">
-                        <div class="field">
-                            <label class="field-label" for="openaiKey">OpenAI API key</label>
-                            <input type="password" class="oc-input" id="openaiKey" placeholder="Enter your OpenAI API key" autocomplete="off" spellcheck="false">
-                            <div class="field-help">Your API key from platform.openai.com</div>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="openaiModel">Model</label>
-                            <input type="text" class="oc-input oc-input--mono" id="openaiModel" placeholder="gpt-5-mini" spellcheck="false">
-                            <div class="field-help">Leave empty to use the default</div>
-                        </div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="openrouter">
-                        <div class="field">
-                            <label class="field-label" for="openrouterKey">OpenRouter API key</label>
-                            <input type="password" class="oc-input" id="openrouterKey" placeholder="Enter your OpenRouter API key" autocomplete="off" spellcheck="false">
-                            <div class="field-help">Your API key from openrouter.ai</div>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="openrouterModel">Model</label>
-                            <input type="text" class="oc-input oc-input--mono" id="openrouterModel" placeholder="openrouter/auto" spellcheck="false">
-                            <div class="field-help">Leave empty to use the default</div>
-                        </div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="groq">
-                        <div class="field">
-                            <label class="field-label" for="groqKey">Groq API key</label>
-                            <input type="password" class="oc-input" id="groqKey" placeholder="Enter your Groq API key" autocomplete="off" spellcheck="false">
-                            <div class="field-help">Your API key from console.groq.com</div>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="groqModel">Model</label>
-                            <input type="text" class="oc-input oc-input--mono" id="groqModel" placeholder="llama-3.3-70b-versatile" spellcheck="false">
-                            <div class="field-help">Leave empty to use the default</div>
-                        </div>
-                        <div class="settings-note settings-note--warn"><i class="fas fa-circle-info" aria-hidden="true"></i>Text only. Screenshots need a vision model.</div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="deepseek">
-                        <div class="field">
-                            <label class="field-label" for="deepseekKey">DeepSeek API key</label>
-                            <input type="password" class="oc-input" id="deepseekKey" placeholder="Enter your DeepSeek API key" autocomplete="off" spellcheck="false">
-                            <div class="field-help">Your API key from platform.deepseek.com</div>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="deepseekModel">Model</label>
-                            <input type="text" class="oc-input oc-input--mono" id="deepseekModel" placeholder="deepseek-chat" spellcheck="false">
-                            <div class="field-help">Leave empty to use the default</div>
-                        </div>
-                        <div class="settings-note settings-note--warn"><i class="fas fa-circle-info" aria-hidden="true"></i>Text only. Screenshots need a vision model.</div>
-                    </div>
-
-                    <div class="provider-fields" data-provider="ollama">
-                        <div class="field">
-                            <label class="field-label" for="ollamaModel">Model</label>
-                            <input type="text" class="oc-input oc-input--mono" id="ollamaModel" placeholder="llama3.2-vision" spellcheck="false">
-                            <div class="field-help">A model you have pulled with <code>ollama pull</code></div>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="ollamaBaseUrl">Server URL</label>
-                            <input type="text" class="oc-input oc-input--mono" id="ollamaBaseUrl" placeholder="http://localhost:11434/v1" spellcheck="false">
-                            <div class="field-help">OpenAI-compatible endpoint of your Ollama server</div>
-                        </div>
-                    </div>
-
-                    <div class="settings-note">
-                        Provider settings apply immediately and are also written back to <code>.env</code> so they persist across restarts.
-                    </div>
-                </div>
-            </section>
-
-            <section class="settings-section">
-                <div class="section-head"><h2 class="oc-label">Voice</h2></div>
-                <div class="settings-stack">
-                    <div class="field">
-                        <label class="field-label" for="speechProvider">Speech provider</label>
-                        <select class="oc-input" id="speechProvider">
-                            <option value="azure">Azure Speech</option>
-                            <option value="whisper">Local Whisper</option>
-                        </select>
-                        <div class="field-help">Choose Azure Speech or a local OpenAI Whisper CLI</div>
-                    </div>
-
-                    <!-- Azure fields (shown only when Azure is selected) -->
-                    <div id="azureFields" class="settings-group">
-                        <div class="field">
-                            <label class="field-label" for="azureKey">Azure Speech key</label>
-                            <input type="password" class="oc-input" id="azureKey" placeholder="Enter your Azure key" autocomplete="off" spellcheck="false">
-                            <div class="field-help">Your Azure Cognitive Services API key</div>
-                        </div>
-                        <div class="field">
-                            <label class="field-label" for="azureRegion">Azure region</label>
-                            <input type="text" class="oc-input oc-input--mono" id="azureRegion" placeholder="e.g. eastus" spellcheck="false">
-                            <div class="field-help">Your Azure service region</div>
-                        </div>
-                    </div>
-
-                    <!-- Whisper fields (shown only when Whisper is selected) -->
-                    <div id="whisperFields" class="settings-group">
-                        <div class="field">
-                            <label class="field-label" for="whisperCommand">Whisper command</label>
-                            <input type="text" class="oc-input oc-input--mono" id="whisperCommand" placeholder="whisper" spellcheck="false">
-                            <div class="field-help">CLI command for local Whisper, such as <code>whisper</code> or <code>python3 -m whisper</code></div>
-                        </div>
-                        <div class="field-row">
-                            <div class="field">
-                                <label class="field-label" for="whisperModel">Model</label>
-                                <input type="text" class="oc-input oc-input--mono" id="whisperModel" placeholder="small" spellcheck="false">
+                <!-- ============ General ============ -->
+                <section class="sw-section" data-section="general" aria-labelledby="h-general">
+                    <h2 class="oc-label sw-section-title" id="h-general">General</h2>
+                    <div class="sw-group">
+                        <div class="sw-row" data-search="mode format auto coding dsa technical system design behavioral hr">
+                            <div>
+                                <label class="sw-row-label" for="activeSkill">Interview mode</label>
+                                <p class="sw-row-help" id="activeSkillHelp">Auto works out the question type and answers in the format that fits. Pick a mode to always use one format. The mode button on the toolbar switches it too.</p>
                             </div>
-                            <div class="field">
-                                <label class="field-label" for="whisperLanguage">Language</label>
-                                <input type="text" class="oc-input oc-input--mono" id="whisperLanguage" placeholder="auto" spellcheck="false">
+                            <div class="sw-row-control">
+                                <select class="oc-input" id="activeSkill" data-setting="activeSkill" aria-describedby="activeSkillHelp activeSkillStatus">
+                                    <option value="auto">Auto</option>
+                                    <option value="dsa">Coding</option>
+                                    <option value="technical">Technical</option>
+                                    <option value="system-design">System design</option>
+                                    <option value="behavioral">Behavioral</option>
+                                    <option value="hr">HR</option>
+                                </select>
+                                <div class="sw-status" id="activeSkillStatus" role="status"></div>
                             </div>
                         </div>
-                        <div class="field-help" style="margin-top: -6px;">Local model name, and a language code or <code>auto</code> for detection</div>
-                        <div class="field">
-                            <label class="field-label" for="whisperDevice">Compute device</label>
-                            <select class="oc-input" id="whisperDevice">
-                                <option value="auto">Auto</option>
-                                <option value="cpu">CPU</option>
-                                <option value="cuda">CUDA</option>
-                            </select>
-                            <div class="field-help">Automatically use CUDA when available, or force CPU/GPU</div>
+                        <div class="sw-row" data-search="code programming language c++ cpp python java javascript">
+                            <div>
+                                <label class="sw-row-label" for="codingLanguage">Coding language</label>
+                                <p class="sw-row-help" id="codingLanguageHelp">Code in Auto and Coding answers is written in this language. The toolbar has the same picker.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <select class="oc-input" id="codingLanguage" data-setting="codingLanguage" aria-describedby="codingLanguageHelp codingLanguageStatus">
+                                    <option value="cpp">C++</option>
+                                    <option value="c">C</option>
+                                    <option value="python">Python</option>
+                                    <option value="java">Java</option>
+                                    <option value="javascript">JavaScript</option>
+                                </select>
+                                <div class="sw-status" id="codingLanguageStatus" role="status"></div>
+                            </div>
                         </div>
-                        <div class="field">
-                            <label class="field-label" for="whisperCaptureMode">Capture mode</label>
-                            <select class="oc-input" id="whisperCaptureMode">
-                                <option value="vad">Automatic (VAD)</option>
-                                <option value="manual">Manual start/stop</option>
-                            </select>
-                            <div class="field-help">Manual records until you press stop; VAD detects natural pauses</div>
+                        <div class="sw-row" data-search="answer length short standard detailed long">
+                            <div>
+                                <label class="sw-row-label" for="answerLength">Answer length</label>
+                                <p class="sw-row-help" id="answerLengthHelp">Every answer starts with one line you can say first. Auto is Short for voice questions and Standard for typed and screenshot questions.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <select class="oc-input" id="answerLength" data-setting="answerLength" aria-describedby="answerLengthHelp answerLengthStatus">
+                                    <option value="auto">Auto</option>
+                                    <option value="short">Short</option>
+                                    <option value="standard">Standard</option>
+                                    <option value="detailed">Detailed</option>
+                                </select>
+                                <div class="sw-status" id="answerLengthStatus" role="status"></div>
+                            </div>
                         </div>
-                        <div class="field">
-                            <label class="field-label" for="whisperResponseTarget">Voice response target</label>
-                            <select class="oc-input" id="whisperResponseTarget">
-                                <option value="both">Chat and overlay</option>
-                                <option value="chat">Chat only</option>
-                                <option value="overlay">Overlay only</option>
-                            </select>
-                            <div class="field-help">Choose where answers generated from speech are displayed</div>
+                    </div>
+                </section>
+
+                <!-- ============ AI provider ============ -->
+                <section class="sw-section" data-section="ai" aria-labelledby="h-ai" hidden>
+                    <h2 class="oc-label sw-section-title" id="h-ai">AI provider</h2>
+                    <div class="sw-banner sw-banner--warn" id="providerMissingKey" role="status" hidden>
+                        <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
+                        <div class="sw-banner-body" id="providerMissingKeyText"></div>
+                    </div>
+                    <div class="sw-group" data-search="ai provider service gemini google claude anthropic openai gpt openrouter groq deepseek ollama local model">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title" id="providerGroupTitle">Provider</h3>
+                            <span class="sw-group-status" id="llmProviderStatus" role="status"></span>
                         </div>
-                        <div class="field">
-                            <label class="field-label" for="whisperSegmentMs">Segment length (ms)</label>
-                            <input type="number" class="oc-input oc-input--mono" id="whisperSegmentMs" placeholder="4000" min="2000" step="500">
-                            <div class="field-help">Chunk size in milliseconds for local transcription</div>
+                        <div class="sw-providers" id="providerGrid" role="radiogroup" aria-labelledby="providerGroupTitle"></div>
+                    </div>
+
+                    <div class="sw-group" id="providerDetail">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title" id="providerDetailTitle">Provider settings</h3>
                         </div>
-                        <div class="settings-note">
-                            Local Whisper runs on this machine and needs a Whisper CLI installed. These settings apply immediately for the current app session and are also written back to <code>.env</code> so they persist across restarts.
+                        <div class="sw-row sw-row--stack" id="providerKeyRow" data-search="api key secret token remove clear replace">
+                            <div>
+                                <span class="sw-row-label" id="providerKeyLabel">API key</span>
+                                <p class="sw-row-help" id="providerKeyHelp"></p>
+                            </div>
+                            <div class="sw-row-control" id="providerKeyField" data-secret-root></div>
+                        </div>
+                        <div class="sw-row" data-search="model name version">
+                            <div>
+                                <label class="sw-row-label" for="providerModel">Model</label>
+                                <p class="sw-row-help" id="providerModelHelp">Leave empty to use the default.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <input type="text" class="oc-input oc-input--mono" id="providerModel" autocomplete="off" spellcheck="false" maxlength="100" aria-describedby="providerModelHelp providerModelStatus">
+                                <div class="sw-status" id="providerModelStatus" role="status"></div>
+                            </div>
+                        </div>
+                        <div class="sw-row" id="providerUrlRow" data-search="server url base url endpoint localhost ollama">
+                            <div>
+                                <label class="sw-row-label" for="ollamaBaseUrl">Server URL</label>
+                                <p class="sw-row-help" id="ollamaBaseUrlHelp">The OpenAI-compatible address of your Ollama server. Leave empty for <code>http://localhost:11434/v1</code>.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <input type="url" class="oc-input oc-input--mono" id="ollamaBaseUrl" data-setting="ollamaBaseUrl" autocomplete="off" spellcheck="false" maxlength="300" placeholder="http://localhost:11434/v1" aria-describedby="ollamaBaseUrlHelp ollamaBaseUrlStatus">
+                                <div class="sw-status" id="ollamaBaseUrlStatus" role="status"></div>
+                            </div>
+                        </div>
+                        <div class="sw-row" data-search="test connection check verify works">
+                            <div>
+                                <span class="sw-row-label">Test connection</span>
+                                <p class="sw-row-help" id="providerTestHelp">Sends one short request with these settings. Nothing is saved.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <div class="sw-inline">
+                                    <button type="button" class="oc-btn" id="providerTestButton" aria-describedby="providerTestHelp"><i class="fas fa-plug" aria-hidden="true"></i><span>Test connection</span></button>
+                                </div>
+                                <div class="sw-status" id="providerTestStatus" role="status"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============ Interview context ============ -->
+                <section class="sw-section" data-section="context" aria-labelledby="h-context" hidden>
+                    <h2 class="oc-label sw-section-title" id="h-context">Interview context</h2>
+                    <p class="sw-intro">Sent to your AI provider with every question, so answers fit the job and your experience. Stored on this computer in <code>profile.json</code>, not in <code>.env</code>.</p>
+                    <div class="sw-group" data-search="interview context profile job role company description resume cv notes">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title">Your interview</h3>
+                            <span class="sw-group-status" id="contextStatus" role="status" aria-live="polite"></span>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="target role position title company employer">
+                            <div class="sw-fields-2">
+                                <div>
+                                    <label class="sw-field-label" for="profileRole">Target role</label>
+                                    <input type="text" class="oc-input" id="profileRole" data-profile-field="role" maxlength="200" placeholder="Senior Frontend Engineer" spellcheck="false" autocomplete="off">
+                                </div>
+                                <div>
+                                    <label class="sw-field-label" for="profileCompany">Company</label>
+                                    <input type="text" class="oc-input" id="profileCompany" data-profile-field="company" maxlength="200" placeholder="Acme Corp" spellcheck="false" autocomplete="off">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="job description jd posting requirements">
+                            <div>
+                                <label class="sw-field-label" for="profileJobDescription"><span>Job description</span><span class="sw-count" data-count-for="profileJobDescription" aria-hidden="true"></span></label>
+                                <textarea class="oc-input" id="profileJobDescription" data-profile-field="jobDescription" maxlength="20000" rows="4" placeholder="Paste the job description"></textarea>
+                            </div>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="resume cv experience examples">
+                            <div>
+                                <label class="sw-field-label" for="profileResume"><span>Resume</span><span class="sw-count" data-count-for="profileResume" aria-hidden="true"></span></label>
+                                <textarea class="oc-input" id="profileResume" data-profile-field="resume" maxlength="20000" rows="5" placeholder="Paste your resume as plain text" aria-describedby="profileResumeHelp"></textarea>
+                                <p class="sw-row-help" id="profileResumeHelp">Behavioral and HR answers take their examples from it.</p>
+                            </div>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="notes extra salary notice period topics">
+                            <div>
+                                <label class="sw-field-label" for="profileNotes"><span>Notes</span><span class="sw-count" data-count-for="profileNotes" aria-hidden="true"></span></label>
+                                <textarea class="oc-input" id="profileNotes" data-profile-field="notes" maxlength="20000" rows="3" placeholder="Notice period, salary range, topics to highlight"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============ Voice ============ -->
+                <section class="sw-section" data-section="voice" aria-labelledby="h-voice" hidden>
+                    <h2 class="oc-label sw-section-title" id="h-voice">Voice</h2>
+                    <div class="sw-banner" id="voiceBanner" role="status" hidden>
+                        <i class="fas fa-circle-info" aria-hidden="true" id="voiceBannerIcon"></i>
+                        <div class="sw-banner-body" id="voiceBannerText"></div>
+                    </div>
+                    <div class="sw-group" data-search="voice speech microphone mic transcription provider whisper azure">
+                        <div class="sw-row sw-row--auto">
+                            <div>
+                                <span class="sw-row-label" id="speechProviderLabel">Speech provider</span>
+                                <p class="sw-row-help" id="speechProviderHelp">Local Whisper runs on this computer and keeps audio here. Azure Speech sends audio to Microsoft.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <div class="sw-segmented" role="radiogroup" aria-labelledby="speechProviderLabel" aria-describedby="speechProviderHelp">
+                                    <label><input type="radio" name="speechProvider" value="whisper"><span><i class="fas fa-laptop" aria-hidden="true"></i>Local Whisper</span></label>
+                                    <label><input type="radio" name="speechProvider" value="azure"><span><i class="fas fa-cloud" aria-hidden="true"></i>Azure Speech</span></label>
+                                </div>
+                                <div class="sw-status" id="speechProviderStatus" role="status"></div>
+                            </div>
                         </div>
                     </div>
 
-                    <div id="azureFieldsNote" class="settings-note">
-                        Azure credentials apply immediately and are also written back to <code>.env</code> so they persist across restarts.
+                    <!-- Whisper -->
+                    <div class="sw-group" id="whisperGroup" data-search="whisper local install model download">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title">Local Whisper</h3>
+                            <button type="button" class="oc-btn oc-btn--ghost" id="whisperRecheck"><i class="fas fa-rotate-right" aria-hidden="true"></i>Check again</button>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="whisper program installed install python">
+                            <div class="sw-state" id="whisperProgramState" role="status" aria-live="polite">
+                                <span class="oc-dot" id="whisperProgramDot" aria-hidden="true"></span>
+                                <span class="sw-state-text" id="whisperProgramText">Checking for Whisper…</span>
+                                <button type="button" class="oc-btn oc-btn--primary" id="whisperInstall" hidden><i class="fas fa-download" aria-hidden="true"></i><span>Install Whisper</span></button>
+                            </div>
+                            <details class="sw-details" id="whisperLogDetails" hidden>
+                                <summary>Show setup log</summary>
+                                <pre class="sw-log" id="whisperLog" tabindex="0" aria-label="Whisper setup log"></pre>
+                            </details>
+                        </div>
+                        <div class="sw-row" data-search="whisper model size tiny base small medium large turbo download">
+                            <div>
+                                <label class="sw-row-label" for="whisperModel">Model</label>
+                                <p class="sw-row-help" id="whisperModelHelp">Larger models are more accurate but slower. Small is a good start.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <select class="oc-input" id="whisperModel" data-setting="whisperModel" aria-describedby="whisperModelHelp whisperModelStatus">
+                                    <option value="tiny">Tiny (75 MB, fastest)</option>
+                                    <option value="base">Base (145 MB)</option>
+                                    <option value="small">Small (465 MB)</option>
+                                    <option value="medium">Medium (1.5 GB)</option>
+                                    <option value="large-v3">Large v3 (2.9 GB)</option>
+                                    <option value="turbo">Turbo (1.5 GB)</option>
+                                </select>
+                                <div class="sw-inline" id="whisperModelActions">
+                                    <span class="sw-state-sub" id="whisperModelState"></span>
+                                    <button type="button" class="oc-btn" id="whisperDownload" hidden><i class="fas fa-download" aria-hidden="true"></i><span>Download</span></button>
+                                </div>
+                                <div class="sw-status" id="whisperModelStatus" role="status"></div>
+                            </div>
+                        </div>
+                        <div class="sw-row" data-search="whisper language detect english">
+                            <div>
+                                <label class="sw-row-label" for="whisperLanguage">Language</label>
+                                <p class="sw-row-help" id="whisperLanguageHelp"><code>auto</code> to detect it, or a language code such as <code>en</code>, <code>hi</code> or <code>es</code>.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <input type="text" class="oc-input oc-input--mono" id="whisperLanguage" data-setting="whisperLanguage" maxlength="32" placeholder="auto" autocomplete="off" spellcheck="false" aria-describedby="whisperLanguageHelp whisperLanguageStatus">
+                                <div class="sw-status" id="whisperLanguageStatus" role="status"></div>
+                            </div>
+                        </div>
+                        <div class="sw-row" data-search="capture mode automatic pause vad manual start stop">
+                            <div>
+                                <label class="sw-row-label" for="whisperCaptureMode">Capture</label>
+                                <p class="sw-row-help" id="whisperCaptureModeHelp">Automatic sends each question when you pause. Manual records until you press stop.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <select class="oc-input" id="whisperCaptureMode" data-setting="whisperCaptureMode" aria-describedby="whisperCaptureModeHelp whisperCaptureModeStatus">
+                                    <option value="vad">Automatic</option>
+                                    <option value="manual">Manual start and stop</option>
+                                </select>
+                                <div class="sw-status" id="whisperCaptureModeStatus" role="status"></div>
+                            </div>
+                        </div>
+                        <div class="sw-row" data-search="voice answers show chat answer panel overlay target">
+                            <div>
+                                <label class="sw-row-label" for="whisperResponseTarget">Show voice answers in</label>
+                                <p class="sw-row-help" id="whisperResponseTargetHelp">Where answers to spoken questions appear.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <select class="oc-input" id="whisperResponseTarget" data-setting="whisperResponseTarget" aria-describedby="whisperResponseTargetHelp whisperResponseTargetStatus">
+                                    <option value="both">Chat and answer panel</option>
+                                    <option value="chat">Chat only</option>
+                                    <option value="overlay">Answer panel only</option>
+                                </select>
+                                <div class="sw-status" id="whisperResponseTargetStatus" role="status"></div>
+                            </div>
+                        </div>
+                        <div class="sw-row" data-search="compute device gpu cuda cpu nvidia">
+                            <div>
+                                <label class="sw-row-label" for="whisperDevice">Compute device</label>
+                                <p class="sw-row-help" id="whisperDeviceHelp">Auto uses an NVIDIA GPU (CUDA) when there is one, otherwise the CPU.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <select class="oc-input" id="whisperDevice" data-setting="whisperDevice" aria-describedby="whisperDeviceHelp whisperDeviceStatus">
+                                    <option value="auto">Auto</option>
+                                    <option value="cpu">CPU</option>
+                                    <option value="cuda">CUDA (NVIDIA GPU)</option>
+                                </select>
+                                <div class="sw-status" id="whisperDeviceStatus" role="status"></div>
+                            </div>
+                        </div>
+                        <div class="sw-row" data-search="segment length chunk milliseconds ms">
+                            <div>
+                                <label class="sw-row-label" for="whisperSegmentMs">Segment length</label>
+                                <p class="sw-row-help" id="whisperSegmentMsHelp">Audio chunk size for transcription, in milliseconds.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <input type="number" class="oc-input oc-input--mono" id="whisperSegmentMs" data-setting="whisperSegmentMs" min="1000" max="60000" step="500" placeholder="4000" aria-describedby="whisperSegmentMsHelp whisperSegmentMsStatus">
+                                <div class="sw-status" id="whisperSegmentMsStatus" role="status"></div>
+                            </div>
+                        </div>
+                        <div class="sw-row" data-search="whisper command path program cli advanced">
+                            <div>
+                                <label class="sw-row-label" for="whisperCommand">Whisper command</label>
+                                <p class="sw-row-help" id="whisperCommandHelp">Leave empty to find Whisper automatically. Otherwise the full path to the program, or <code>python3 -m whisper</code>.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <input type="text" class="oc-input oc-input--mono" id="whisperCommand" data-setting="whisperCommand" maxlength="1000" placeholder="Found automatically" autocomplete="off" spellcheck="false" aria-describedby="whisperCommandHelp whisperCommandStatus">
+                                <div class="sw-status" id="whisperCommandStatus" role="status"></div>
+                            </div>
+                        </div>
                     </div>
-                </div>
-            </section>
 
-            <section class="settings-section">
-                <div class="section-head"><h2 class="oc-label">App Icon</h2></div>
-                <div class="icon-grid" id="iconGrid">
-                    <div class="icon-option" data-icon="cuewell">
-                        <img src="./assests/icons/app-icon.png" alt="Cuewell">
-                        <div>Cuewell</div>
+                    <!-- Azure -->
+                    <div class="sw-group" id="azureGroup" data-search="azure microsoft speech cloud key region">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title">Azure Speech</h3>
+                        </div>
+                        <div class="sw-row sw-row--stack" data-search="azure key secret remove clear replace">
+                            <div>
+                                <span class="sw-row-label" id="azureKeyLabel">Azure Speech key</span>
+                                <p class="sw-row-help" id="azureKeyHelp">From your Speech resource in the Azure portal, under Keys and Endpoint.</p>
+                            </div>
+                            <div class="sw-row-control" id="azureKeyField" data-secret-root></div>
+                        </div>
+                        <div class="sw-row" data-search="azure region location eastus">
+                            <div>
+                                <label class="sw-row-label" for="azureRegion">Region</label>
+                                <p class="sw-row-help" id="azureRegionHelp">The region of your Speech resource, such as <code>eastus</code>.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <input type="text" class="oc-input oc-input--mono" id="azureRegion" data-setting="azureRegion" maxlength="40" placeholder="eastus" autocomplete="off" spellcheck="false" aria-describedby="azureRegionHelp azureRegionStatus">
+                                <div class="sw-status" id="azureRegionStatus" role="status"></div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="icon-option" data-icon="terminal">
-                        <img src="./assests/icons/terminal.png" alt="Terminal">
-                        <div>Terminal</div>
-                    </div>
-                    <div class="icon-option" data-icon="activity">
-                        <img src="./assests/icons/activity.png" alt="Activity">
-                        <div>Activity</div>
-                    </div>
-                    <div class="icon-option" data-icon="settings">
-                        <img src="./assests/icons/settings.png" alt="Settings">
-                        <div>Settings</div>
-                    </div>
-                </div>
-            </section>
+                </section>
 
-            <section class="settings-section">
-                <div class="section-head"><h2 class="oc-label">Window</h2></div>
-                <div class="field">
-                    <label class="field-label" for="windowGap">Window gap (px)</label>
-                    <input type="number" class="oc-input oc-input--mono" id="windowGap" placeholder="20" min="0" max="100">
-                    <div class="field-help">Gap between bound windows, in pixels</div>
-                </div>
-            </section>
-        </div>
+                <!-- ============ Shortcuts ============ -->
+                <section class="sw-section" data-section="shortcuts" aria-labelledby="h-shortcuts" hidden>
+                    <h2 class="oc-label sw-section-title" id="h-shortcuts">Shortcuts</h2>
+                    <p class="sw-intro">Shortcuts marked Everywhere work from any app. The others work only while a Cuewell window has focus, so other apps keep those keys.</p>
+                    <div class="sw-group" data-search="shortcuts keyboard keys hotkeys">
+                        <table class="sw-table" id="shortcutsTable">
+                            <caption class="sw-sr-only">Keyboard shortcuts</caption>
+                            <thead>
+                                <tr><th scope="col">Action</th><th scope="col">Keys</th><th scope="col">Works</th></tr>
+                            </thead>
+                            <tbody id="shortcutsBody"></tbody>
+                        </table>
+                    </div>
+                </section>
 
-        <div class="settings-footer">
-            <div class="footer-brand">
-                <span class="oc-mark" aria-hidden="true"></span>
-                <span>Cuewell · by Ankit Chaudhary</span>
+                <!-- ============ Privacy & appearance ============ -->
+                <section class="sw-section" data-section="privacy" aria-labelledby="h-privacy" hidden>
+                    <h2 class="oc-label sw-section-title" id="h-privacy">Privacy &amp; appearance</h2>
+                    <div class="sw-group" data-search="privacy screen capture protection share sharing recording hidden">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title">Screen-capture protection</h3>
+                            <span class="oc-chip" id="protectionChip"></span>
+                        </div>
+                        <div class="sw-row sw-row--stack">
+                            <p class="sw-row-help" id="protectionText"></p>
+                        </div>
+                        <table class="sw-table" aria-label="Screen-capture protection by platform">
+                            <tbody>
+                                <tr data-platform-row="darwin"><td>macOS</td><td>Hidden from most screen sharing and recording tools</td></tr>
+                                <tr data-platform-row="win32"><td>Windows</td><td>Hidden from most screen sharing and recording tools (Windows 10 version 2004 or later)</td></tr>
+                                <tr data-platform-row="linux"><td>Linux</td><td>Not available: windows always show in shares and recordings</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="sw-group" data-search="data privacy where sent provider telemetry stored">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title">Where your data goes</h3>
+                        </div>
+                        <ul class="sw-list">
+                            <li><i class="fas fa-server" aria-hidden="true"></i><span><strong>No Cuewell server.</strong> No account, telemetry or analytics.</span></li>
+                            <li><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i><span><strong>Your AI provider</strong> gets your questions, screenshots and interview context. With Ollama on this computer, nothing leaves it.</span></li>
+                            <li><i class="fas fa-microphone" aria-hidden="true"></i><span><strong>Audio</strong> stays on this computer with local Whisper. With Azure Speech it goes to Microsoft.</span></li>
+                            <li><i class="fas fa-key" aria-hidden="true"></i><span><strong>API keys</strong> are stored in <code>.env</code>, readable only by you on macOS and Linux, and go only to the provider they belong to.</span></li>
+                            <li><i class="fas fa-clock-rotate-left" aria-hidden="true"></i><span><strong>Conversation history</strong> is kept in memory only and is cleared when Cuewell quits.</span></li>
+                        </ul>
+                    </div>
+
+                    <div class="sw-group" data-search="app icon dock name disguise terminal activity monitor system settings appearance">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title" id="iconGroupTitle">App icon</h3>
+                            <span class="sw-group-status" id="selectedIconStatus" role="status"></span>
+                        </div>
+                        <p class="sw-row-help sw-group-help" id="iconHelp">The icon and name Cuewell uses for its Dock icon and process name, as seen in Activity Monitor or Task Manager.</p>
+                        <div class="sw-icons" id="iconGrid" role="radiogroup" aria-labelledby="iconGroupTitle" aria-describedby="iconHelp">
+                            <button type="button" class="sw-icon" role="radio" data-icon="cuewell" aria-checked="false"><img src="./assests/icons/app-icon.png" alt=""><span>Cuewell</span><span class="sw-provider-check" aria-hidden="true"><i class="fas fa-check"></i></span></button>
+                            <button type="button" class="sw-icon" role="radio" data-icon="terminal" aria-checked="false"><img src="./assests/icons/terminal.png" alt=""><span>Terminal</span><span class="sw-provider-check" aria-hidden="true"><i class="fas fa-check"></i></span></button>
+                            <button type="button" class="sw-icon" role="radio" data-icon="activity" aria-checked="false"><img src="./assests/icons/activity.png" alt=""><span>Activity Monitor</span><span class="sw-provider-check" aria-hidden="true"><i class="fas fa-check"></i></span></button>
+                            <button type="button" class="sw-icon" role="radio" data-icon="settings" aria-checked="false"><img src="./assests/icons/settings.png" alt=""><span>System Settings</span><span class="sw-provider-check" aria-hidden="true"><i class="fas fa-check"></i></span></button>
+                        </div>
+                    </div>
+
+                    <div class="sw-group" data-search="window gap spacing toolbar answer panel pixels appearance">
+                        <div class="sw-row">
+                            <div>
+                                <label class="sw-row-label" for="windowGap">Window gap</label>
+                                <p class="sw-row-help" id="windowGapHelp">Space between the toolbar and the answer panel, in pixels (0 to 100).</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <input type="number" class="oc-input oc-input--mono" id="windowGap" data-setting="windowGap" min="0" max="100" step="1" placeholder="10" aria-describedby="windowGapHelp windowGapStatus">
+                                <div class="sw-status" id="windowGapStatus" role="status"></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ============ About ============ -->
+                <section class="sw-section" data-section="about" aria-labelledby="h-about" hidden>
+                    <h2 class="oc-label sw-section-title" id="h-about">About</h2>
+                    <div class="sw-group" data-search="about version cuewell ankit chaudhary">
+                        <div class="sw-about-hero">
+                            <span class="oc-mark" aria-hidden="true"></span>
+                            <div>
+                                <div class="sw-about-name">Cuewell</div>
+                                <div class="sw-about-sub"><span id="aboutVersion">Version</span> · by Ankit Chaudhary</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sw-group" data-search="license apache open source opencluely credits attribution">
+                        <dl class="sw-defs">
+                            <dt>License</dt>
+                            <dd>Free and open source under the <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener noreferrer">Apache License 2.0</a></dd>
+                            <dt>Based on</dt>
+                            <dd><a href="https://github.com/TechyCSR/OpenCluely" target="_blank" rel="noopener noreferrer">OpenCluely</a> by TechyCSR, under the Apache License 2.0</dd>
+                            <dt>Fonts</dt>
+                            <dd>Manrope and JetBrains Mono, under the SIL Open Font License 1.1</dd>
+                        </dl>
+                    </div>
+                    <div class="sw-group" data-search="version electron chromium node files folder logs path settings file">
+                        <dl class="sw-defs">
+                            <dt>Settings file</dt>
+                            <dd class="sw-mono" id="aboutEnvPath">Unknown</dd>
+                            <dt>Interview context</dt>
+                            <dd class="sw-mono" id="aboutProfilePath">Unknown</dd>
+                            <dt>Logs</dt>
+                            <dd class="sw-mono" id="aboutLogsPath">Unknown</dd>
+                            <dt>Built with</dt>
+                            <dd class="sw-mono" id="aboutRuntime">Unknown</dd>
+                        </dl>
+                    </div>
+                </section>
             </div>
-            <button class="oc-btn oc-btn--danger" id="quitButton" type="button" title="Quit Cuewell">
-                <i class="fas fa-power-off" aria-hidden="true"></i>
-                Quit
-            </button>
-        </div>
+        </main>
+        <div class="sw-sr-only" id="srAnnounce" role="status" aria-live="polite"></div>
     </div>
 
     <script src="./src/ui/settings-window.js"></script>

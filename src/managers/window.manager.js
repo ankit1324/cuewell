@@ -104,22 +104,15 @@ class WindowManager {
         title: 'AI Response',
         alwaysOnTop: true
       },
+      // A normal app window (see createWindow): resizable, centered when it
+      // opens, on top only while it has focus, never click-through.
       settings: {
-        width: 460,
-        height: 640,
+        width: 860,
+        height: 600,
+        minWidth: 720,
+        minHeight: 520,
         file: 'settings.html',
-        title: 'Settings',
-        frame: false,
-        titleBarStyle: 'hidden',
-        transparent: true,
-        skipTaskbar: true,
-        resizable: false,
-        minimizable: false,
-        maximizable: false,
-        closable: false,
-        alwaysOnTop: true,
-        visibleOnAllWorkspaces: true,
-        fullscreenable: false
+        title: 'Settings'
       },
       onboarding: {
         width: 560,
@@ -310,8 +303,137 @@ class WindowManager {
     }
     const window = await this.createWindow('settings');
     this.windows.set('settings', window);
+
+    // The close button, Cmd+W and Alt+F4 hide Settings so it keeps its state;
+    // quitting the app still closes it.
+    if (!this._watchingQuit) {
+      this._watchingQuit = true;
+      app.on('before-quit', () => { this.appQuitting = true; });
+    }
+    window.on('close', (event) => {
+      if (this.appQuitting) return;
+      event.preventDefault();
+      window.hide();
+    });
+
     window.hide();
     return window;
+  }
+
+  /** True when `win` is the Settings window. */
+  isSettingsWindow(win) {
+    const settingsWindow = this.windows.get('settings');
+    return !!win && !!settingsWindow && settingsWindow === win;
+  }
+
+  /** True while the Settings window is visible and has keyboard focus. */
+  isSettingsFocused() {
+    const win = this.windows.get('settings');
+    return !!win && !win.isDestroyed() && win.isVisible() && win.isFocused();
+  }
+
+  /**
+   * Settings counterpart of applyStealthMeasures: hidden from screen capture
+   * like every other window, but only raised above other windows (the
+   * overlay included) while it has focus. When focus moves to another app it
+   * drops back like any normal window.
+   */
+  applySettingsWindowMeasures(window) {
+    try {
+      window.setContentProtection(true);
+    } catch (error) {
+      logger.debug('Content protection not supported on this platform');
+    }
+    window.setSkipTaskbar(true);
+
+    const raise = () => {
+      if (window.isDestroyed() || !window.isFocused()) return;
+      try {
+        if (process.platform === 'darwin') {
+          // One step above the overlay's level (screen-saver, 2).
+          window.setAlwaysOnTop(true, 'screen-saver', 3);
+        } else {
+          window.setAlwaysOnTop(true);
+        }
+      } catch (error) {
+        logger.debug('Could not raise the settings window', { error: error.message });
+      }
+    };
+    const lower = () => {
+      if (window.isDestroyed()) return;
+      try {
+        window.setAlwaysOnTop(false);
+      } catch (error) {
+        logger.debug('Could not lower the settings window', { error: error.message });
+      }
+    };
+    window.on('focus', raise);
+    window.on('blur', lower);
+    window.on('hide', lower);
+    this._raiseSettingsWindow = raise;
+  }
+
+  /**
+   * On Windows and Linux every always-on-top window shares one band, so an
+   * overlay window raised while Settings has focus would cover it. Put
+   * Settings back on top. (macOS uses a higher level instead.)
+   */
+  keepSettingsOnTop() {
+    if (process.platform === 'darwin' || !this.isSettingsFocused() || !this._raiseSettingsWindow) return;
+    this._raiseSettingsWindow();
+  }
+
+  /** Center `win` on the display under the pointer, shrunk to fit its work area. */
+  centerSettingsWindow(win) {
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay();
+    const area = display.workArea;
+    const config = this.windowConfigs.settings;
+    const [currentWidth, currentHeight] = win.getSize();
+    const width = Math.max(Math.min(config.minWidth, area.width), Math.min(currentWidth, area.width));
+    const height = Math.max(Math.min(config.minHeight, area.height), Math.min(currentHeight, area.height));
+    win.setBounds({
+      x: Math.round(area.x + (area.width - width) / 2),
+      y: Math.round(area.y + (area.height - height) / 2),
+      width,
+      height
+    });
+  }
+
+  /**
+   * Show Settings on the current desktop. On macOS it briefly joins every
+   * Space (as the overlay windows do) so it opens on the one in use instead
+   * of switching Spaces.
+   */
+  revealSettingsWindow(win, { focus = true } = {}) {
+    if (!win || win.isDestroyed()) return;
+    // Back on screen if its display was removed or it was moved off screen.
+    try {
+      const b = win.getBounds();
+      const onScreen = screen.getAllDisplays().some(({ workArea: a }) =>
+        b.x < a.x + a.width - 40 && b.x + b.width > a.x + 40 &&
+        b.y < a.y + a.height - 40 && b.y + b.height > a.y);
+      if (!onScreen) this.centerSettingsWindow(win);
+    } catch (error) {
+      logger.debug('Could not check the settings window position', { error: error.message });
+    }
+    const reveal = () => {
+      if (win.isDestroyed()) return;
+      if (focus) {
+        win.show();
+        win.focus();
+      } else {
+        win.showInactive();
+      }
+    };
+    if (process.platform === 'darwin') {
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      reveal();
+      setTimeout(() => {
+        if (!win.isDestroyed()) win.setVisibleOnAllWorkspaces(false);
+      }, 300);
+    } else {
+      reveal();
+    }
   }
 
   /**
@@ -385,25 +507,34 @@ class WindowManager {
     let browserWindowOptions;
     
     if (type === 'settings') {
-      // Completely minimal settings window - no decorations at all
+      // A regular window, unlike the overlay panels: not pinned above other
+      // apps (applySettingsWindowMeasures raises it only while focused) and
+      // resizable. macOS keeps a hidden title bar with the traffic lights
+      // inset over the page; Windows and Linux are frameless and the page
+      // draws its own close button. Closing only hides it.
+      const { level: _level, ...regular } = baseOptions;
       browserWindowOptions = {
-        ...baseOptions,
-        frame: false,
-        titleBarStyle: 'hidden',
-        transparent: true,
-        resizable: false,
+        ...regular,
+        alwaysOnTop: false,
+        visibleOnAllWorkspaces: false,
+        minWidth: windowConfig.minWidth,
+        minHeight: windowConfig.minHeight,
+        resizable: true,
         minimizable: false,
         maximizable: false,
-        closable: false,
-        hasShadow: false,
-        backgroundColor: '#00000000',
-        level: process.platform === 'darwin' ? 'floating' : undefined,
-        // Additional macOS flags for better always-on-top behavior
-        ...(process.platform === 'darwin' && {
-          type: 'panel',
-          acceptFirstMouse: true,
-          disableAutoHideCursor: true
-        })
+        fullscreenable: false,
+        closable: true,
+        hasShadow: true,
+        ...(process.platform === 'darwin'
+          ? {
+            titleBarStyle: 'hiddenInset',
+            trafficLightPosition: { x: 18, y: 18 }
+          }
+          : {
+            frame: false,
+            transparent: false,
+            backgroundColor: '#121317'
+          })
       };
   } else if (type === 'onboarding') {
       // First-run onboarding wizard — same frameless/panel style as
@@ -548,6 +679,12 @@ class WindowManager {
       };
     }
 
+    // Frameless Windows windows need the thick frame for resize borders,
+    // snapping and the system shadow.
+    if (type === 'settings' && process.platform === 'win32') {
+      browserWindowOptions.thickFrame = true;
+    }
+
     browserWindowOptions.kiosk = false;
     browserWindowOptions.simpleFullscreen = false;
 
@@ -589,11 +726,16 @@ class WindowManager {
   // Position the window
     this.positionWindow(window, type);
     
-  // Apply simplified stealth measures
-    this.applyStealthMeasures(window, type);
+  // Apply simplified stealth measures (Settings: capture protection only)
+    if (type === 'settings') {
+      this.applySettingsWindowMeasures(window);
+    } else {
+      this.applyStealthMeasures(window, type);
+    }
     
   // Initialize interaction mode based on current state for ALL windows
-    if (this.isInteractive) {
+  // except Settings, which is never click-through.
+    if (this.isInteractive || type === 'settings') {
       window.setIgnoreMouseEvents(false);
     } else {
       window.setIgnoreMouseEvents(true, { forward: true });
@@ -756,6 +898,8 @@ class WindowManager {
     
     // More aggressive event listeners to maintain always-on-top behavior
     const enforceAlwaysOnTop = () => {
+      // The overlay stays put while Settings has focus, so it never covers it.
+      if (this.isSettingsFocused()) return;
       if (!window.isDestroyed()) {
         try {
           if (process.platform === 'darwin') {
@@ -961,6 +1105,11 @@ class WindowManager {
    */
   showOnCurrentDesktop(win, { focus = true } = {}) {
     if (!win || win.isDestroyed()) return;
+    // Settings is a regular window with its own rules.
+    if (this.isSettingsWindow(win)) {
+      this.revealSettingsWindow(win, { focus });
+      return;
+    }
     this.watchShownWindow(win);
     const type = this.getWindowTypeForWebContents(win.webContents);
     const isLLM = type === 'llmResponse';
@@ -1003,6 +1152,8 @@ class WindowManager {
       win.showInactive();
     }
     if (fade) this.fadeInWindow(win);
+    // An open Settings window stays above the overlay on Windows and Linux.
+    if (process.platform !== 'darwin') this.keepSettingsOnTop();
 
     // The answer window stays on every Space; the others are pinned to the
     // Space they were shown on.
@@ -1332,8 +1483,9 @@ class WindowManager {
     
     this.windows.forEach((window, type) => {
       if (!window.isDestroyed()) {
-        if (interactive) {
-          // Interactive mode: allow mouse events for all windows
+        if (interactive || type === 'settings') {
+          // Interactive mode: allow mouse events for all windows. Settings
+          // is never click-through.
           window.setIgnoreMouseEvents(false);
         } else {
           // Non-interactive mode: enable click-through with forwarding for all windows
@@ -1362,6 +1514,8 @@ class WindowManager {
   // New method to enforce always-on-top for all windows
   enforceAlwaysOnTopForAllWindows() {
     this.windows.forEach((window, type) => {
+      // Settings is only on top while focused (applySettingsWindowMeasures).
+      if (type === 'settings') return;
       if (!window.isDestroyed()) {
         try {
           if (process.platform === 'darwin') {
@@ -1718,26 +1872,32 @@ class WindowManager {
     logger.debug('Answer window fitted to its content', { from: currentHeight, to: target });
   }
 
+  /**
+   * Open Settings, centered on the display under the pointer. When it is
+   * already open it keeps its place and only comes to the front. The page
+   * reloads its values on settings-window-shown.
+   */
   showSettings() {
     if (this.isScreenBeingShared) return;
 
     const settingsWindow = this.windows.get('settings');
-    if (settingsWindow) {
-      this.showOnCurrentDesktop(settingsWindow);
-      this.centerWindow(settingsWindow); // This now positions at top-center
-      
-      // Notify that settings window is shown
-      setTimeout(() => {
-        settingsWindow.webContents.send('settings-window-shown');
-      }, 50);
-      
-      logger.info('Settings window displayed at top');
+    if (!settingsWindow || settingsWindow.isDestroyed()) {
+      logger.warn('Settings window not available');
+      return;
     }
+    if (!settingsWindow.isVisible()) {
+      this.centerSettingsWindow(settingsWindow);
+    }
+    this.revealSettingsWindow(settingsWindow, { focus: true });
+    if (!settingsWindow.webContents.isDestroyed()) {
+      settingsWindow.webContents.send('settings-window-shown');
+    }
+    logger.info('Settings window shown');
   }
 
   hideSettings() {
     const settingsWindow = this.windows.get('settings');
-    if (settingsWindow) {
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
       settingsWindow.hide();
     }
   }
@@ -1963,6 +2123,10 @@ class WindowManager {
       if (window && !window.isDestroyed()) {
         // Skip main and llmResponse if they're bound (already handled above)
         if (this.bindWindows && (type === 'main' || type === 'llmResponse')) {
+          return;
+        }
+        // Settings stays where the user put it, like any app window.
+        if (type === 'settings') {
           return;
         }
         
