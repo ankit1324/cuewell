@@ -893,6 +893,190 @@
             animation: fa-spin 0.9s linear infinite;
         }
 
+        /* ---------- Local voice models ---------- */
+
+        .sw-state-icon {
+            flex: none;
+            width: 14px;
+            font-size: 12px;
+            text-align: center;
+            color: var(--oc-accent);
+        }
+
+        .sw-models {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .sw-model {
+            position: relative;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px 14px;
+            padding: 11px 12px;
+            background: var(--oc-sunken);
+            border: 1px solid var(--oc-line);
+            border-radius: var(--oc-r-md);
+            transition: background var(--oc-t-fast) var(--oc-ease), border-color var(--oc-t-fast) var(--oc-ease);
+        }
+
+        .sw-model.is-selected {
+            background: var(--oc-accent-soft);
+            border-color: var(--oc-accent-line);
+        }
+
+        .sw-model:has(input:focus-visible) {
+            outline: 2px solid var(--oc-accent-line);
+            outline-offset: 2px;
+        }
+
+        .sw-model-pick {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            min-width: 0;
+            cursor: pointer;
+        }
+
+        .sw-model-pick:has(input:disabled) {
+            cursor: default;
+        }
+
+        .sw-model-pick input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Radio ring; a lime check once the model is in use. */
+        .sw-model-ring {
+            flex: none;
+            width: 16px;
+            height: 16px;
+            margin-top: 1px;
+            border: 1.5px solid var(--oc-line-2);
+            border-radius: 50%;
+            transition: background-color var(--oc-t-fast) var(--oc-ease), border-color var(--oc-t-fast) var(--oc-ease);
+        }
+
+        .sw-model-pick input:disabled + .sw-model-ring {
+            border-style: dashed;
+            opacity: 0.6;
+        }
+
+        .sw-model-pick input:checked + .sw-model-ring {
+            border-color: var(--oc-accent);
+            background: var(--oc-accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23141a08' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center;
+        }
+
+        .sw-model-pick input:checked:disabled + .sw-model-ring {
+            border-style: solid;
+            background: transparent;
+            border-color: var(--oc-accent-line);
+            opacity: 1;
+        }
+
+        .sw-model-text {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 0;
+        }
+
+        .sw-model-name {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            font-size: var(--oc-fs-md);
+            font-weight: 650;
+            color: var(--oc-text);
+        }
+
+        .sw-model-tag.oc-chip {
+            height: 18px;
+            padding: 0 7px;
+            font-size: var(--oc-fs-2xs);
+        }
+
+        .sw-model-desc {
+            font-size: var(--oc-fs-xs);
+            line-height: 1.45;
+            color: var(--oc-text-3);
+        }
+
+        .sw-model-side {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .sw-model-state {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: var(--oc-fs-xs);
+            font-weight: 600;
+            color: var(--oc-text-3);
+            white-space: nowrap;
+        }
+
+        .sw-model-state:empty {
+            display: none;
+        }
+
+        .sw-model-state.is-ok {
+            color: var(--oc-accent);
+        }
+
+        .sw-model-state i {
+            font-size: 10px;
+        }
+
+        .sw-model-progress {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .sw-meter {
+            flex: 1;
+            height: 4px;
+            overflow: hidden;
+            background: var(--oc-line-2);
+            border-radius: var(--oc-r-pill);
+        }
+
+        .sw-meter > span {
+            display: block;
+            width: 0;
+            height: 100%;
+            background: var(--oc-accent);
+            border-radius: inherit;
+            transition: width 240ms var(--oc-ease);
+        }
+
+        .sw-model-progress-text {
+            font-family: var(--oc-mono);
+            font-size: var(--oc-fs-2xs);
+            font-variant-numeric: tabular-nums;
+            color: var(--oc-text-2);
+            white-space: nowrap;
+        }
+
+        .sw-model > .sw-status {
+            grid-column: 1 / -1;
+        }
+
+        .sw-models-empty {
+            color: var(--oc-text-3);
+        }
+
         /* ---------- Tables ---------- */
 
         .sw-table {
@@ -1504,7 +1688,7 @@
                             <h3 class="sw-group-title">Answer style</h3>
                             <span class="sw-group-status" role="status" aria-live="polite" data-profile-status></span>
                         </div>
-                        <div class="sw-row sw-row--stack" data-search="tone confident friendly formal concise answer in language reply translate">
+                        <div class="sw-row sw-row--stack" data-search="tone confident friendly formal concise answer in language reply translate hinglish hindi roman script">
                             <div class="sw-fields-2">
                                 <div>
                                     <label class="sw-field-label" for="profileTone">Tone</label>
@@ -1519,8 +1703,13 @@
                                 </div>
                                 <div>
                                     <label class="sw-field-label" for="profileAnswerLanguage">Answer in</label>
-                                    <input type="text" class="oc-input" id="profileAnswerLanguage" data-profile-field="answerLanguage" maxlength="40" placeholder="English" spellcheck="false" autocomplete="off" aria-describedby="profileAnswerLanguageHelp">
-                                    <p class="sw-row-help sw-field-help" id="profileAnswerLanguageHelp">Leave empty for English. Code and technical terms stay as they are.</p>
+                                    <input type="text" class="oc-input" id="profileAnswerLanguage" data-profile-field="answerLanguage" list="answerLanguageOptions" maxlength="40" placeholder="English" spellcheck="false" autocomplete="off" aria-describedby="profileAnswerLanguageHelp">
+                                    <datalist id="answerLanguageOptions">
+                                        <option value="English"></option>
+                                        <option value="Hinglish (Roman script)"></option>
+                                        <option value="Hindi"></option>
+                                    </datalist>
+                                    <p class="sw-row-help sw-field-help" id="profileAnswerLanguageHelp">Pick from the list or type any language. Leave empty for English. Hinglish (Roman script) mixes Hindi and English in Latin letters. Code and technical terms stay in English.</p>
                                 </div>
                             </div>
                         </div>
@@ -1599,15 +1788,15 @@
                         <i class="fas fa-circle-info" aria-hidden="true" id="voiceBannerIcon"></i>
                         <div class="sw-banner-body" id="voiceBannerText"></div>
                     </div>
-                    <div class="sw-group" data-search="voice speech microphone mic transcription provider whisper azure">
+                    <div class="sw-group" data-search="voice speech microphone mic transcription provider local whisper whisper.cpp azure">
                         <div class="sw-row sw-row--auto">
                             <div>
                                 <span class="sw-row-label" id="speechProviderLabel">Speech provider</span>
-                                <p class="sw-row-help" id="speechProviderHelp">Local Whisper runs on this computer and keeps audio here. Azure Speech sends audio to Microsoft.</p>
+                                <p class="sw-row-help" id="speechProviderHelp">Local voice runs on this computer and keeps audio here. Azure Speech sends audio to Microsoft.</p>
                             </div>
                             <div class="sw-row-control">
                                 <div class="sw-segmented" role="radiogroup" aria-labelledby="speechProviderLabel" aria-describedby="speechProviderHelp">
-                                    <label><input type="radio" name="speechProvider" value="whisper"><span><i class="fas fa-laptop" aria-hidden="true"></i>Local Whisper</span></label>
+                                    <label><input type="radio" name="speechProvider" value="whisper"><span><i class="fas fa-laptop" aria-hidden="true"></i>Local voice</span></label>
                                     <label><input type="radio" name="speechProvider" value="azure"><span><i class="fas fa-cloud" aria-hidden="true"></i>Azure Speech</span></label>
                                 </div>
                                 <div class="sw-status" id="speechProviderStatus" role="status"></div>
@@ -1615,51 +1804,62 @@
                         </div>
                     </div>
 
-                    <!-- Whisper -->
-                    <div class="sw-group" id="whisperGroup" data-gate="speech:whisper" data-search="whisper local install model download">
+                    <!-- Local voice (whisper.cpp, or Python Whisper for existing setups) -->
+                    <div class="sw-group" id="whisperGroup" data-gate="speech:whisper" data-search="local voice whisper whisper.cpp built-in offline">
                         <div class="sw-group-head">
-                            <h3 class="sw-group-title">Local Whisper</h3>
-                            <button type="button" class="oc-btn oc-btn--ghost" id="whisperRecheck"><i class="fas fa-rotate-right" aria-hidden="true"></i>Check again</button>
+                            <h3 class="sw-group-title">Local voice</h3>
+                            <button type="button" class="oc-btn oc-btn--ghost" id="voiceRecheck"><i class="fas fa-rotate-right" aria-hidden="true"></i>Check again</button>
                         </div>
-                        <div class="sw-row sw-row--stack" data-search="whisper program installed install python">
-                            <div class="sw-state" id="whisperProgramState" role="status" aria-live="polite">
-                                <span class="oc-dot" id="whisperProgramDot" aria-hidden="true"></span>
-                                <span class="sw-state-text" id="whisperProgramText">Checking for Whisper…</span>
-                                <button type="button" class="oc-btn oc-btn--primary" id="whisperInstall" hidden><i class="fas fa-download" aria-hidden="true"></i><span>Install Whisper</span></button>
+                        <div class="sw-row sw-row--stack" data-search="private privacy offline audio never leaves computer built-in engine whisper.cpp">
+                            <div class="sw-state">
+                                <i class="fas fa-shield-halved sw-state-icon" aria-hidden="true"></i>
+                                <span class="sw-state-text"><strong id="voiceEngineName">Built-in (whisper.cpp)</strong><span class="sw-state-sub">Runs on this computer. Audio never leaves it.</span></span>
                             </div>
-                            <details class="sw-details" id="whisperLogDetails" hidden>
-                                <summary>Show setup log</summary>
-                                <pre class="sw-log" id="whisperLog" tabindex="0" aria-label="Whisper setup log"></pre>
-                            </details>
                         </div>
-                        <div class="sw-row" data-search="whisper model size tiny base small medium large turbo download">
+                        <div class="sw-row sw-row--stack" id="voiceUnavailableRow" hidden>
+                            <div class="sw-state" role="status" aria-live="polite">
+                                <span class="oc-dot" id="voiceUnavailableDot" aria-hidden="true"></span>
+                                <span class="sw-state-text" id="voiceUnavailableText"></span>
+                            </div>
+                        </div>
+                        <div class="sw-row sw-row--auto" id="voiceEngineRow" hidden data-search="engine python whisper advanced built-in whisper.cpp switch keep">
                             <div>
-                                <label class="sw-row-label" for="whisperModel">Model</label>
-                                <p class="sw-row-help" id="whisperModelHelp">Larger models are more accurate but slower. Small is a good start.</p>
+                                <span class="sw-row-label" id="voiceEngineLabel">Engine</span>
+                                <p class="sw-row-help" id="voiceEngineHelp">Built-in needs no Python. Your Python Whisper setup keeps working until you switch.</p>
                             </div>
                             <div class="sw-row-control">
-                                <select class="oc-input" id="whisperModel" data-setting="whisperModel" aria-describedby="whisperModelHelp whisperModelStatus">
-                                    <option value="tiny">Tiny (75 MB, fastest)</option>
-                                    <option value="base">Base (145 MB)</option>
-                                    <option value="small">Small (465 MB)</option>
-                                    <option value="medium">Medium (1.5 GB)</option>
-                                    <option value="large-v3">Large v3 (2.9 GB)</option>
-                                    <option value="turbo">Turbo (1.5 GB)</option>
-                                </select>
-                                <div class="sw-inline" id="whisperModelActions">
-                                    <span class="sw-state-sub" id="whisperModelState"></span>
-                                    <button type="button" class="oc-btn" id="whisperDownload" hidden><i class="fas fa-download" aria-hidden="true"></i><span>Download</span></button>
+                                <div class="sw-segmented" role="radiogroup" aria-labelledby="voiceEngineLabel" aria-describedby="voiceEngineHelp">
+                                    <label><input type="radio" name="voiceEngine" value="whispercpp"><span>Built-in (whisper.cpp)</span></label>
+                                    <label><input type="radio" name="voiceEngine" value="python"><span>Python Whisper (advanced)</span></label>
                                 </div>
-                                <div class="sw-status" id="whisperModelStatus" role="status"></div>
+                                <div class="sw-status" id="voiceEngineStatus" role="status"></div>
                             </div>
                         </div>
-                        <div class="sw-row" data-search="whisper language detect english">
+                        <div class="sw-row sw-row--stack" id="voiceModelRow" data-search="voice model small base download size hindi hinglish recommended faster cancel retry ready">
+                            <div>
+                                <span class="sw-row-label" id="voiceModelLabel">Voice model</span>
+                                <p class="sw-row-help" id="voiceModelHelp">Downloads once, then works offline. Choose a downloaded model to use it.</p>
+                            </div>
+                            <div class="sw-models" id="voiceModelList" role="radiogroup" aria-labelledby="voiceModelLabel" aria-describedby="voiceModelHelp">
+                                <div class="sw-state sw-models-empty" id="voiceModelEmpty" role="status">
+                                    <span class="oc-dot" aria-hidden="true"></span>
+                                    <span class="sw-state-text">Checking voice setup…</span>
+                                </div>
+                            </div>
+                            <div class="sw-status" id="voiceModelStatus" role="status"></div>
+                        </div>
+                        <div class="sw-row" data-search="voice language detect auto english hindi hinglish roman script transcription">
                             <div>
                                 <label class="sw-row-label" for="whisperLanguage">Language</label>
-                                <p class="sw-row-help" id="whisperLanguageHelp"><code>auto</code> to detect it, or a language code such as <code>en</code>, <code>hi</code> or <code>es</code>.</p>
+                                <p class="sw-row-help" id="whisperLanguageHelp">The language you speak. Hinglish writes mixed Hindi and English in Latin letters.</p>
                             </div>
                             <div class="sw-row-control">
-                                <input type="text" class="oc-input oc-input--mono" id="whisperLanguage" data-setting="whisperLanguage" maxlength="32" placeholder="auto" autocomplete="off" spellcheck="false" aria-describedby="whisperLanguageHelp whisperLanguageStatus">
+                                <select class="oc-input" id="whisperLanguage" data-setting="whisperLanguage" aria-describedby="whisperLanguageHelp whisperLanguageStatus">
+                                    <option value="auto">Auto-detect</option>
+                                    <option value="en">English</option>
+                                    <option value="hi">Hindi</option>
+                                    <option value="hinglish">Hinglish (Hindi-English, Roman script)</option>
+                                </select>
                                 <div class="sw-status" id="whisperLanguageStatus" role="status"></div>
                             </div>
                         </div>
@@ -1690,7 +1890,46 @@
                                 <div class="sw-status" id="whisperResponseTargetStatus" role="status"></div>
                             </div>
                         </div>
-                        <div class="sw-row" data-search="compute device gpu cuda cpu nvidia">
+                        <div class="sw-row" data-search="segment length chunk milliseconds ms">
+                            <div>
+                                <label class="sw-row-label" for="whisperSegmentMs">Segment length</label>
+                                <p class="sw-row-help" id="whisperSegmentMsHelp">Audio chunk size for transcription, in milliseconds.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <input type="number" class="oc-input oc-input--mono" id="whisperSegmentMs" data-setting="whisperSegmentMs" min="1000" max="60000" step="500" placeholder="4000" aria-describedby="whisperSegmentMsHelp whisperSegmentMsStatus">
+                                <div class="sw-status" id="whisperSegmentMsStatus" role="status"></div>
+                            </div>
+                        </div>
+
+                        <!-- Python Whisper (advanced): only while that engine is in use -->
+                        <div class="sw-row sw-row--stack" data-engine="python" hidden data-search="python whisper program installed found advanced">
+                            <div class="sw-state" id="whisperProgramState" role="status" aria-live="polite">
+                                <span class="oc-dot" id="whisperProgramDot" aria-hidden="true"></span>
+                                <span class="sw-state-text" id="whisperProgramText">Checking Python Whisper…</span>
+                            </div>
+                        </div>
+                        <div class="sw-row" data-engine="python" hidden data-search="python whisper model size tiny base small medium large turbo download advanced">
+                            <div>
+                                <label class="sw-row-label" for="whisperModel">Python Whisper model</label>
+                                <p class="sw-row-help" id="whisperModelHelp">Larger models are more accurate but slower.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <select class="oc-input" id="whisperModel" data-setting="whisperModel" aria-describedby="whisperModelHelp whisperModelStatus">
+                                    <option value="tiny">Tiny (75 MB, fastest)</option>
+                                    <option value="base">Base (145 MB)</option>
+                                    <option value="small">Small (465 MB)</option>
+                                    <option value="medium">Medium (1.5 GB)</option>
+                                    <option value="large-v3">Large v3 (2.9 GB)</option>
+                                    <option value="turbo">Turbo (1.5 GB)</option>
+                                </select>
+                                <div class="sw-inline" id="whisperModelActions">
+                                    <span class="sw-state-sub" id="whisperModelState"></span>
+                                    <button type="button" class="oc-btn" id="whisperDownload" hidden><i class="fas fa-download" aria-hidden="true"></i><span>Download</span></button>
+                                </div>
+                                <div class="sw-status" id="whisperModelStatus" role="status"></div>
+                            </div>
+                        </div>
+                        <div class="sw-row" data-engine="python" hidden data-search="python compute device gpu cuda cpu nvidia advanced">
                             <div>
                                 <label class="sw-row-label" for="whisperDevice">Compute device</label>
                                 <p class="sw-row-help" id="whisperDeviceHelp">Auto uses an NVIDIA GPU (CUDA) when there is one, otherwise the CPU.</p>
@@ -1704,20 +1943,10 @@
                                 <div class="sw-status" id="whisperDeviceStatus" role="status"></div>
                             </div>
                         </div>
-                        <div class="sw-row" data-search="segment length chunk milliseconds ms">
-                            <div>
-                                <label class="sw-row-label" for="whisperSegmentMs">Segment length</label>
-                                <p class="sw-row-help" id="whisperSegmentMsHelp">Audio chunk size for transcription, in milliseconds.</p>
-                            </div>
-                            <div class="sw-row-control">
-                                <input type="number" class="oc-input oc-input--mono" id="whisperSegmentMs" data-setting="whisperSegmentMs" min="1000" max="60000" step="500" placeholder="4000" aria-describedby="whisperSegmentMsHelp whisperSegmentMsStatus">
-                                <div class="sw-status" id="whisperSegmentMsStatus" role="status"></div>
-                            </div>
-                        </div>
-                        <div class="sw-row" data-search="whisper command path program cli advanced">
+                        <div class="sw-row" data-engine="python" hidden data-search="python whisper command path program cli advanced">
                             <div>
                                 <label class="sw-row-label" for="whisperCommand">Whisper command</label>
-                                <p class="sw-row-help" id="whisperCommandHelp">Leave empty to find Whisper automatically. Otherwise the full path to the program, or <code>python3 -m whisper</code>.</p>
+                                <p class="sw-row-help" id="whisperCommandHelp">The full path to your Python Whisper program, or <code>python3 -m whisper</code>.</p>
                             </div>
                             <div class="sw-row-control">
                                 <input type="text" class="oc-input oc-input--mono" id="whisperCommand" data-setting="whisperCommand" maxlength="1000" placeholder="Found automatically" autocomplete="off" spellcheck="false" aria-describedby="whisperCommandHelp whisperCommandStatus">
@@ -1793,7 +2022,7 @@
                         <ul class="sw-list">
                             <li><i class="fas fa-server" aria-hidden="true"></i><span><strong>No Cuewell server.</strong> No account, telemetry or analytics.</span></li>
                             <li><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i><span><strong>Your AI provider</strong> gets your questions, screenshots and interview context. With Ollama on this computer, nothing leaves it.</span></li>
-                            <li><i class="fas fa-microphone" aria-hidden="true"></i><span><strong>Audio</strong> stays on this computer with local Whisper. With Azure Speech it goes to Microsoft.</span></li>
+                            <li><i class="fas fa-microphone" aria-hidden="true"></i><span><strong>Audio</strong> stays on this computer with local voice. With Azure Speech it goes to Microsoft.</span></li>
                             <li><i class="fas fa-key" aria-hidden="true"></i><span><strong>API keys</strong> are stored in <code>.env</code>, readable only by you on macOS and Linux, and go only to the provider they belong to.</span></li>
                             <li><i class="fas fa-clock-rotate-left" aria-hidden="true"></i><span><strong>Conversation history</strong> is kept in memory only and is cleared when Cuewell quits.</span></li>
                         </ul>
