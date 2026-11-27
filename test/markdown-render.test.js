@@ -132,8 +132,10 @@ describe('renderMarkdown', () => {
 
   // Each case renders in a worker thread so a regression that hangs (marked's
   // own link rule can take minutes) is cut off after HANG_MS instead of
-  // blocking the run.
-  describe('stays fast on pathological input (< 100 ms)', () => {
+  // blocking the run. The limit is 500 ms, not 100 ms: shared CI runners
+  // sometimes take just over 100 ms on a fine build, while the bug this
+  // guards against takes seconds or minutes.
+  describe('stays fast on pathological input (< 500 ms)', () => {
     const cases = [
       ['50,000 "["', '['.repeat(50000)],
       ['20,000 " [["', ' [['.repeat(20000)],
@@ -153,7 +155,7 @@ describe('renderMarkdown', () => {
     for (const [name, input] of cases) {
       it(name, async () => {
         const { ms, length } = await renderInWorker(input);
-        assert.ok(ms < 100, `took ${ms.toFixed(1)} ms`);
+        assert.ok(ms < 500, `took ${ms.toFixed(1)} ms`);
         assert.ok(length > 0);
       });
     }
