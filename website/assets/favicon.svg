@@ -1,9 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>Cuewell</title>
-  <defs><clipPath id="k"><rect width="32" height="32" rx="9"/></clipPath></defs>
-  <g clip-path="url(#k)">
-    <rect width="32" height="32" fill="#c9f26b"/>
-    <rect y="29.4" width="32" height="2.6" fill="#000" fill-opacity=".25"/>
-  </g>
-  <path d="M22.48 10.22A6.7 6.7 0 1 0 22.48 19.18" fill="none" stroke="#141a08" stroke-width="3"/>
+  <path d="M24 5.93C23.95 5.54 23.95 4.3 23.69 3.56C23.44 2.83 23 2.08 22.46 1.54C21.92 1 21.17 0.56 20.44 0.31C19.7 0.05 18.46 0.05 18.07 0L5.93 0C5.54 0.05 4.3 0.05 3.56 0.31C2.83 0.56 2.08 1 1.54 1.54C1 2.08 0.56 2.83 0.31 3.56C0.05 4.3 0.05 5.54 0 5.93L0 18.07C0.05 18.46 0.05 19.7 0.31 20.44C0.56 21.17 1 21.92 1.54 22.46C2.08 23 2.83 23.44 3.56 23.69C4.3 23.95 5.54 23.95 5.93 24L18.07 24C18.46 23.95 19.7 23.95 20.44 23.69C21.17 23.44 21.92 23 22.46 22.46C23 21.92 23.44 21.17 23.69 20.44C23.95 19.7 23.95 18.46 24 18.07Z" fill="#2a2620"/>
+  <rect x="2" y="5" width="20" height="14" rx="1.5" fill="#f9f2e7"/>
+  <path fill="#1e1a15" d="M11 6h5v1h-5ZM9 7h8v1h-8ZM8 8h3v1h-3ZM15 8h2v1h-2ZM7 9h3v1h-3ZM15 9h2v1h-2ZM7 10h3v1h-3ZM7 11h3v1h-3ZM7 12h3v1h-3ZM7 13h3v1h-3ZM7 14h3v1h-3ZM15 14h2v1h-2ZM8 15h3v1h-3ZM15 15h2v1h-2ZM9 16h8v1h-8ZM11 17h5v1h-5Z"/>
 </svg>
