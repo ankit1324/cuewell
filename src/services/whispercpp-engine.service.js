@@ -1163,3 +1163,10 @@ module.exports.sweepWindowsServers = sweepWindowsServers;
 module.exports.parseWindowsProcessInfo = parseWindowsProcessInfo;
 module.exports.inspectWindowsProcess = inspectWindowsProcess;
 module.exports.killWindowsProcess = killWindowsProcess;
+// Tests only: forget that this run already swept, so a test can sweep again
+// (the sweep is once per app run, and earlier tests in the same process may
+// have used it up, as every start on a real Windows runner does).
+module.exports._resetSweepsForTests = () => {
+  staleSwept = false;
+  windowsSweep = null;
+};

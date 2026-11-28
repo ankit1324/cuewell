@@ -25,7 +25,7 @@ process.env.TEMP = TMP;
 
 const WhisperCppEngine = require('../src/services/whispercpp-engine.service');
 const {
-  cleanTranscript, parseNetstatListeners, parseLsofPids, tcpListenerPids,
+  cleanTranscript, _resetSweepsForTests, parseNetstatListeners, parseLsofPids, tcpListenerPids,
 } = require('../src/services/whispercpp-engine.service');
 
 const FAKE_SERVER = path.join(__dirname, 'helpers', 'fake-whisper-server.js');
@@ -576,6 +576,9 @@ describe('WhisperCppEngine on Windows records its server for crash cleanup', () 
     // so that pid can already belong to a live process. A pid above every
     // OS's limit is never alive.
     const deadOwner = 2147480001;
+    // Earlier tests already started servers (on a real Windows runner, each
+    // was a win32 start that used up this run's sweep).
+    _resetSweepsForTests();
     const stalePid = 2147480000;
     const staleDir = fs.mkdtempSync(path.join(TMP, 'cuewell-wcpp-'));
     fs.writeFileSync(path.join(staleDir, 'owner.json'),
