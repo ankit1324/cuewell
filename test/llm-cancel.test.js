@@ -271,14 +271,18 @@ describe('LLMService', { timeout: TEST_TIMEOUT_MS }, () => {
 
     it('drops chunks and the result of a provider that ignores the stop', async () => {
       let finish;
+      let streamStart = 0;
+      let streamEndMs = Infinity; // ms from the stream's start to its own end
       useProvider({
         // Ignores options.signal: keeps sending and then resolves.
         stream: (neutral, model, onDelta) => new Promise((resolve) => {
+          streamStart = Date.now();
           let i = 0;
           const timer = setInterval(() => {
             onDelta(PIECES[i++ % PIECES.length]);
             if (i === 12) {
               clearInterval(timer);
+              streamEndMs = Date.now() - streamStart;
               resolve('everything');
             }
           }, 10);
@@ -291,7 +295,9 @@ describe('LLMService', { timeout: TEST_TIMEOUT_MS }, () => {
       finish();
       assertCancelled(run.error);
       assert.equal(run.deltas.length, run.deltasAtAbort, 'a late chunk got through');
-      assert.ok(run.ms < 100, `settled ${run.ms} ms after starting`);
+      // Settled by the stop, before the provider would have finished on its own
+      // (a fixed ms limit flaked on Windows, whose timers tick in ~15 ms steps).
+      assert.ok(run.ms < streamEndMs, `settled after ${run.ms} ms, the stream ended by itself after ${streamEndMs} ms`);
     });
 
     it('a stopped non-streamed request tries neither method again', async () => {

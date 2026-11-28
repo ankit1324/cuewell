@@ -1,8 +1,53 @@
+const os = require('os');
 const { desktopCapturer, screen } = require('electron');
 const logger = require('../core/logger').createServiceLogger('CAPTURE');
 
 // Longest edge of a screenshot sent to the AI, in pixels (4K width).
 const MAX_CAPTURE_EDGE = 3840;
+
+// Captures that gave nothing to read. On macOS all three usually mean the
+// Screen Recording permission is missing or belongs to an earlier build of
+// the app (error-reporter.js words the message). `code` is set on the error.
+const CAPTURE_FAILURES = Object.freeze({
+  NO_SOURCES: 'No screen sources available for capture',
+  EMPTY_IMAGE: 'Screen capture returned an empty image',
+  BLANK_IMAGE: 'Screen capture returned a blank image',
+});
+
+// A pixel whose red, green and blue are all at most 3 counts as black
+// (colour conversion can leave a 1 or 2 where macOS drew pure black).
+const BLANK_CHANNEL_MASK = 0xFC;
+
+function captureFailure(code) {
+  const error = new Error(CAPTURE_FAILURES[code]);
+  error.code = code;
+  return error;
+}
+
+/**
+ * True when every pixel of a 4-bytes-per-pixel bitmap (NativeImage
+ * toBitmap(): BGRA or RGBA, alpha last) is fully transparent or black,
+ * which is what macOS returns to an app it does not let record the screen.
+ * Stops at the first visible pixel, so a real screenshot is decided within
+ * its first few pixels; only an image that really is blank is read to the end.
+ */
+function isBlankBitmap(bitmap) {
+  if (!bitmap || bitmap.length < 4) return true;
+  const count = Math.floor(bitmap.length / 4);
+  const words = bitmap.byteOffset % 4 === 0
+    ? new Uint32Array(bitmap.buffer, bitmap.byteOffset, count)
+    : new Uint32Array(Uint8Array.prototype.slice.call(bitmap, 0, count * 4).buffer);
+  const c = BLANK_CHANNEL_MASK;
+  const littleEndian = os.endianness() === 'LE';
+  // Bytes [c0, c1, c2, alpha] read as one 32-bit word.
+  const alphaMask = littleEndian ? 0xFF000000 : 0x000000FF;
+  const colorMask = littleEndian ? (c | (c << 8) | (c << 16)) : ((c << 24) | (c << 16) | (c << 8)) >>> 0;
+  for (let i = 0; i < count; i++) {
+    const word = words[i];
+    if ((word & alphaMask) !== 0 && (word & colorMask) !== 0) return false;
+  }
+  return true;
+}
 
 class CaptureService {
   constructor() {
@@ -76,14 +121,13 @@ class CaptureService {
       thumbnailSize
     });
 
-    if (sources.length === 0) {
-      throw new Error('No screen sources available for capture');
-    }
+    if (!sources || sources.length === 0) throw captureFailure('NO_SOURCES');
 
     const source = this._pickSource(sources, targetDisplay, thumbnailSize);
 
     const image = source.thumbnail;
-    if (!image) throw new Error('Failed to capture screen thumbnail');
+    if (!image || image.isEmpty()) throw captureFailure('EMPTY_IMAGE');
+    if (this._isBlankImage(image)) throw captureFailure('BLANK_IMAGE');
 
     logger.debug('Screenshot captured successfully', {
       sourceName: source.name,
@@ -154,6 +198,13 @@ class CaptureService {
     }
   }
 
+  _isBlankImage(image) {
+    const startTime = Date.now();
+    const blank = isBlankBitmap(image.toBitmap());
+    if (blank) logger.warn('Screen capture came back blank', { imageSize: image.getSize(), ms: Date.now() - startTime });
+    return blank;
+  }
+
   _isValidArea(area) {
     return area && Number.isFinite(area.x) && Number.isFinite(area.y) &&
       Number.isFinite(area.width) && Number.isFinite(area.height) &&
@@ -162,3 +213,5 @@ class CaptureService {
 }
 
 module.exports = new CaptureService();
+module.exports.CAPTURE_FAILURES = CAPTURE_FAILURES;
+module.exports.isBlankBitmap = isBlankBitmap;

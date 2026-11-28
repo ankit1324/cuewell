@@ -296,4 +296,43 @@ describe('answers in main.js', () => {
       assert.deepEqual(life().releasedInfo, { scope: 'answer', registered: null, action: SHORTCUT_ACTIONS[STOP] });
     });
   });
+
+  describe('a screenshot macOS blocks (stale Screen Recording permission)', () => {
+    const shot = () => out.scenarios.captureBlocked;
+    const shown = () => shot().events.filter((e) => e.channel === 'display-llm-response');
+
+    it('shows the steps once, as an error, with the settings and copy buttons', () => {
+      assert.equal(shown().length, 1);
+      const { content, metadata } = shown()[0].data;
+      assert.equal(metadata.isError, true);
+      assert.equal(metadata.action, 'screen-recording-settings');
+      assert.equal(metadata.copyText, 'tccutil reset ScreenCapture com.ankitchaudhary.cuewell');
+      assert.match(content, /came back blank/);
+      assert.match(content, /earlier version/);
+      assert.match(content, /Open Screen Recording Settings/);
+      assert.match(content, /`tccutil reset ScreenCapture com\.ankitchaudhary\.cuewell`/);
+    });
+
+    it('starts no answer and sends nothing to the AI', () => {
+      assert.deepEqual(shot().started, []);
+      assert.deepEqual(shot().fetchCalls, []);
+      assert.ok(!shot().events.some((e) => e.channel === 'show-loading'));
+    });
+
+    it('logs the reason and the permission status', () => {
+      assert.equal(shot().captureLogs.length, 1);
+      assert.equal(shot().captureLogs[0].reason, 'BLANK_IMAGE');
+      assert.equal(shot().captureLogs[0].screenAccess, 'granted');
+      assert.equal(shot().captureLogs[0].problem, 'stale-grant');
+    });
+
+    it('opens only the Screen Recording settings, whatever the page passes, and only for the answer window', () => {
+      assert.deepEqual(shot().settingsIpc.fromAnswer, { ok: true, value: true });
+      assert.deepEqual(shot().openedFromAnswer,
+        ['x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture']);
+      assert.equal(shot().settingsIpc.fromChat.ok, false);
+      assert.deepEqual(shot().openedFromChat, []);
+      assert.deepEqual(IPC_ALLOWED_WINDOWS['open-screen-recording-settings'], ['llmResponse']);
+    });
+  });
 });

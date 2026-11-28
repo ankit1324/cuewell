@@ -420,6 +420,51 @@ async function run(root) {
   lifecycle.callsQuit = stopCalls();
   scenarios.stopShortcut = lifecycle;
 
+  // A screenshot macOS blocks: an installed build whose Screen Recording
+  // permission belongs to an earlier version (status granted, image blank).
+  // The answer window gets the steps and the settings button; the button's
+  // channel opens only the fixed System Settings address.
+  reset();
+  useProvider(); // a fresh fetch: it must see no request
+  const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const realCapture = captureService.captureAndProcess;
+  const realScreenAccess = controller.screenAccessStatus;
+  const logStart = logs.length;
+  let opened = [];
+  electron.shell.openExternal = async (url) => { opened.push(String(url)); };
+  try {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    electron.app.isPackaged = true;
+    controller.screenAccessStatus = () => 'granted';
+    captureService.captureAndProcess = async () => {
+      const error = new Error('Screen capture returned a blank image');
+      error.code = 'BLANK_IMAGE';
+      throw error;
+    };
+    await controller.triggerScreenshotOCR();
+    const settingsIpc = {
+      fromAnswer: await ipc('open-screen-recording-settings', 'llmResponse', 'https://evil.example/'),
+    };
+    const openedFromAnswer = opened;
+    opened = [];
+    settingsIpc.fromChat = await ipc('open-screen-recording-settings', 'chat');
+    scenarios.captureBlocked = snapshot({
+      settingsIpc,
+      openedFromAnswer,
+      openedFromChat: opened,
+      captureLogs: logs.slice(logStart).filter((l) => l.message === 'Screenshot OCR process failed').map((l) => l.meta),
+    });
+  } finally {
+    Object.defineProperty(process, 'platform', realPlatform);
+    electron.app.isPackaged = false;
+    controller.screenAccessStatus = realScreenAccess;
+    captureService.captureAndProcess = realCapture;
+    // The failed capture is logged as an error on purpose; the test reads it above.
+    for (let i = logs.length - 1; i >= logStart; i--) {
+      if (logs[i].level === 'error' && logs[i].message === 'Screenshot OCR process failed') logs.splice(i, 1);
+    }
+  }
+
   return {
     scenarios,
     errors: logs.filter((l) => l.level === 'error'),

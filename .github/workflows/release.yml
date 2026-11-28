@@ -2,7 +2,9 @@ name: Build & Release
 
 # Builds Cuewell on each OS's own runner (macOS, Windows, Linux). A pushed
 # version tag (v1.2.3) also publishes a GitHub release with the installers.
-# Builds are not code signed; see the README.
+# macOS builds are signed with Cuewell's own self-signed certificate when the
+# MAC_SELF_SIGN_P12 secret is set, and ad-hoc otherwise. Nothing is notarized
+# or signed with an Apple or Windows certificate; see the README.
 
 on:
   push:
@@ -125,21 +127,138 @@ jobs:
           WHISPER_FORCE: ${{ github.ref_type == 'tag' && '--force' || '' }}
         run: node scripts/fetch-whisper-cpp.js --platform ${{ matrix.whisper_platform }} --all-arches --require-runtime $WHISPER_FORCE
 
+      # macOS keeps an app's Screen Recording and Microphone permissions only
+      # while its designated requirement stays the same. An ad-hoc
+      # signature's requirement is its cdhash, which every build changes, so
+      # each update lost them. Signed with one certificate, the requirement
+      # is `identifier "com.ankitchaudhary.cuewell" and certificate leaf =
+      # H"<SHA-1>"` in every release. scripts/make-self-signed-cert.sh makes
+      # the certificate once; README > Signing macOS builds.
+      #
+      # The secrets reach this step only (not the build, which runs npm
+      # scripts). Secrets cannot be tested in `if:`, so the script checks
+      # them: without MAC_SELF_SIGN_P12 the build stays ad-hoc signed, as
+      # before, and the run shows a warning.
+      - name: Import macOS signing certificate
+        id: mac-sign
+        if: matrix.whisper_platform == 'darwin'
+        shell: bash
+        env:
+          MAC_SELF_SIGN_P12: ${{ secrets.MAC_SELF_SIGN_P12 }}
+          MAC_SELF_SIGN_PASSWORD: ${{ secrets.MAC_SELF_SIGN_PASSWORD }}
+          IDENTITY: Cuewell Self-Signed
+        run: |
+          if [ -z "$MAC_SELF_SIGN_P12" ]; then
+            echo "::warning::MAC_SELF_SIGN_P12 is not set, so the macOS build is ad-hoc signed and users lose the Screen Recording permission with every update. See README > Signing macOS builds."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/cuewell-signing.keychain-db"
+          p12="$RUNNER_TEMP/cuewell-signing.p12"
+          cert="$RUNNER_TEMP/cuewell-signing.cer.pem"
+          keychain_password=$(openssl rand -hex 24)
+          printf '%s' "$MAC_SELF_SIGN_P12" | tr -d '[:space:]' | base64 --decode > "$p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          # No auto-lock while the build runs.
+          security set-keychain-settings "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$p12" -k "$keychain" -P "$MAC_SELF_SIGN_PASSWORD" -T /usr/bin/codesign
+          rm -f "$p12"
+          # Lets codesign use the key without a (headless, so hanging) prompt.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-certificate -c "$IDENTITY" -p "$keychain" > "$cert"
+          sha1=$(security find-certificate -c "$IDENTITY" -Z "$keychain" | awk '/SHA-1 hash:/ { print $3 }')
+          if [ -z "$sha1" ]; then
+            echo "::error::MAC_SELF_SIGN_P12 holds no certificate named \"$IDENTITY\""
+            exit 1
+          fi
+          # electron-builder signs only with an identity that
+          # `security find-identity -v` lists, which a self-signed
+          # certificate needs trust for. Trust it for code signing on this
+          # throwaway runner (the authorizationdb change lets sudo do that
+          # without a dialog). Users never need to trust it: macOS checks
+          # the requirement's certificate hash, not trust.
+          sudo security authorizationdb write com.apple.trust-settings.admin allow
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$cert"
+          # Captured first: under pipefail, `grep -q` exiting at the first match
+          # can SIGPIPE the writer and fail the pipeline although it matched.
+          identities="$(security find-identity -v -p codesigning "$keychain")"
+          if ! grep -qF "\"$IDENTITY\"" <<<"$identities"; then
+            security find-identity -p codesigning "$keychain" || true
+            echo "::error::\"$IDENTITY\" is not a valid code-signing identity on this runner"
+            exit 1
+          fi
+          # CSC_NAME is electron-builder's mac.identity; CSC_KEYCHAIN the keychain it searches.
+          echo "CSC_NAME=$IDENTITY" >> "$GITHUB_ENV"
+          echo "CSC_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "cert_sha1=$sha1" >> "$GITHUB_OUTPUT"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "Signing macOS builds as \"$IDENTITY\" (SHA-1 $sha1)"
+
+      # Hardened runtime stays off (package.json mac.hardenedRuntime): it is
+      # needed only for notarization, which a self-signed build cannot get,
+      # and it would block the microphone without extra entitlements.
       - name: Build
         shell: bash
         env:
           # Intentionally do NOT set CSC_LINK / WIN_CSC_LINK etc.
           # electron-builder treats empty strings as "set but invalid"
           # and tries to resolve them as certificate paths, producing
-          # "Env WIN_CSC_LINK is not correct" errors. Code signing is
-          # opt-in: add the secrets to the repo and wire them in here
-          # only when you have real certificates.
+          # "Env WIN_CSC_LINK is not correct" errors. The macOS identity
+          # comes from the import step above (CSC_NAME, CSC_KEYCHAIN), and
+          # only when the secret is set.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run build:${{ matrix.script }} -- --publish never
+
+      - name: Remove macOS signing keychain
+        if: always() && matrix.whisper_platform == 'darwin'
+        shell: bash
+        run: |
+          keychain="$RUNNER_TEMP/cuewell-signing.keychain-db"
+          if [ -f "$keychain" ]; then security delete-keychain "$keychain" || true; fi
+          rm -f "$RUNNER_TEMP/cuewell-signing.p12" "$RUNNER_TEMP/cuewell-signing.cer.pem"
 
       - name: List build output
         shell: bash
         run: ls -la dist
+
+      # Signed builds: each app and its whisper-server carry the
+      # certificate's requirement and pass a strict check. Ad-hoc builds
+      # (no secret) only get a warning.
+      - name: Verify macOS code signature
+        if: matrix.whisper_platform == 'darwin'
+        shell: bash
+        env:
+          SIGNED: ${{ steps.mac-sign.outputs.signed }}
+          CERT_SHA1: ${{ steps.mac-sign.outputs.cert_sha1 }}
+        run: |
+          sha1=$(printf '%s' "$CERT_SHA1" | tr 'A-F' 'a-f')
+          count=0
+          while IFS= read -r app; do
+            count=$((count + 1))
+            requirement=$(codesign -d -r- "$app" 2>&1 | sed -n 's/^designated => //p')
+            echo "$app: $requirement"
+            if [ "$SIGNED" != "true" ]; then
+              echo "::warning::$app is ad-hoc signed: Screen Recording permission will not survive the next update"
+              continue
+            fi
+            case "$requirement" in
+              "identifier \"com.ankitchaudhary.cuewell\" and certificate leaf = H\"$sha1\""|\
+              "identifier \"com.ankitchaudhary.cuewell\" and certificate root = H\"$sha1\"") ;;
+              *) echo "::error::$app is not signed with the certificate (SHA-1 $sha1)"; exit 1 ;;
+            esac
+            codesign --verify --deep --strict --verbose=2 "$app"
+            server="$app/Contents/Resources/whisper/whisper-server"
+            codesign --verify --strict "$server"
+            server_req="$(codesign -d -r- "$server" 2>&1)"
+            grep -qF "H\"$sha1\"" <<<"$server_req" \
+              || { echo "::error::$server is not signed with the certificate"; exit 1; }
+          done < <(find dist -maxdepth 2 -type d -name Cuewell.app)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No Cuewell.app in dist"
+            exit 1
+          fi
 
       # The packaged app must contain whisper-server under resources/whisper
       # and it must start. Output goes to a file: piping --help into head
@@ -314,10 +433,10 @@ jobs:
           | **Debian, Ubuntu** | `Cuewell-*-linux-amd64.deb` | `sudo apt install ./Cuewell-*-linux-amd64.deb` |
           | **Other Linux (64-bit)** | `Cuewell-*-linux-x86_64.AppImage` | `chmod +x` the file, then run it. |
 
-          These builds are **not code signed**:
+          These builds are **not notarized by Apple or signed with a Windows certificate**:
 
           - **Windows:** SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**.
-          - **macOS:** the first launch is blocked. Open **System Settings > Privacy & Security**, scroll down and choose **Open Anyway** for Cuewell. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Cuewell.app` in Terminal, or run Cuewell from source with `./setup.sh`.
+          - **macOS:** the first launch is blocked. Open **System Settings > Privacy & Security**, scroll down and choose **Open Anyway** for Cuewell. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Cuewell.app` in Terminal, or run Cuewell from source with `./setup.sh`. If screenshots fail after an update, Cuewell shows how to allow Screen Recording again.
           - **Linux:** privacy mode (hiding the windows from screen sharing) is not available.
 
           ## First run

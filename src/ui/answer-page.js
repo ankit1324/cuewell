@@ -49,6 +49,9 @@ const FAILED_REQUEST_MESSAGE = 'The AI request failed. Try asking again.';
 const STOPPED_EMPTY_MESSAGE = 'Stopped before any text arrived.';
 // Longest provider note shown under an answer ("Answered by Claude because ...").
 const MAX_NOTE_LENGTH = 200;
+// The buttons main may ask for under an error (metadata.action).
+const SCREEN_RECORDING_ACTION = 'screen-recording-settings';
+const MAX_COPY_TEXT_LENGTH = 200;
 
 window.addEventListener('error', (event) => {
     console.error('[LLM-RESPONSE] Page error:', event.message, 'at line', event.lineno);
@@ -116,7 +119,9 @@ function initAnswerWindow() {
             showFinal(response, !!metadata.isError, {
                 endsStream,
                 instant: info.appearing,
-                stopped: metadata.stopped === true
+                stopped: metadata.stopped === true,
+                action: metadata.action,
+                copyText: metadata.copyText
             });
             settled = endsStream;
         } catch (err) {
@@ -461,9 +466,10 @@ function renderStreamNow() {
 // Show the final answer or error. Replaces whatever is on screen: the
 // streamed text, "Thinking…" (a request that sent no chunks) or an older
 // answer. A stopped answer (`stopped`) keeps the text received so far and
-// is marked "Stopped" in the header. Returns false when it was already on
-// screen.
-function showFinal(text, isError, { endsStream = true, instant = false, stopped = false } = {}) {
+// is marked "Stopped" in the header. An error may carry an `action` (the
+// buttons under it) and the `copyText` its Copy button copies. Returns false
+// when it was already on screen.
+function showFinal(text, isError, { endsStream = true, instant = false, stopped = false, action = null, copyText = null } = {}) {
     const streamed = !!(stream && !stream.finished && stream.rendered);
     if (endsStream) endStream();
     stopSlowHint();
@@ -474,7 +480,9 @@ function showFinal(text, isError, { endsStream = true, instant = false, stopped 
         isError = !stopped;
     }
     const status = stopped ? 'Stopped' : null;
-    const key = (stopped ? 'stopped:' : isError ? 'error:' : 'answer:') + body;
+    const actions = isError ? errorActions(action, copyText) : null;
+    const key = (stopped ? 'stopped:' : isError ? 'error:' : 'answer:') +
+        (actions ? `${actions.action}:${actions.copyText || ''}:` : '') + body;
     if (key === shownFinalKey && view === 'answer') {
         setStatusLabel(status, { stopped });
         return false;
@@ -482,6 +490,7 @@ function showFinal(text, isError, { endsStream = true, instant = false, stopped 
     shownFinalKey = key;
     // A streamed answer keeps the reader's scroll position; a new one starts at the top.
     renderAnswer(body, { isError, final: true, fresh: !streamed, instant });
+    if (actions) appendErrorActions(actions);
     setView('answer', { instant });
     setStatusLabel(status, { stopped });
     return true;
@@ -584,6 +593,8 @@ function renderAnswerMarkdown(text) {
 function renderAnswer(response, { isError = false, final = true, fresh = false, instant = false, screen = false, codingMode = false } = {}) {
     const responseElement = document.getElementById('response-content');
     if (!responseElement || !response) return;
+    // Buttons belong to the error they were shown with.
+    responseElement.querySelectorAll('.answer-actions').forEach(el => el.remove());
 
     // Measured before the DOM changes.
     const containers = scrollContainers();
@@ -773,15 +784,67 @@ function attachCopy(btn, text) {
     });
 }
 
-function flashButton(btn, label, ok) {
+function flashButton(btn, label, ok, restoreLabel = 'Copy') {
     if (btn._resetTimer) clearTimeout(btn._resetTimer);
     btn.classList.toggle('copied', ok);
     btn.textContent = label;
     btn._resetTimer = setTimeout(() => {
         btn.classList.remove('copied');
-        btn.textContent = 'Copy';
+        btn.textContent = restoreLabel;
         btn._resetTimer = null;
     }, 1200);
+}
+
+// The buttons an error asked for, or null. Only known actions, and only
+// when this window's API has the method behind them.
+function errorActions(action, copyText) {
+    const api = window.electronAPI;
+    if (action !== SCREEN_RECORDING_ACTION || !api || typeof api.openScreenRecordingSettings !== 'function') return null;
+    const copy = typeof copyText === 'string' && copyText.length > 0 && copyText.length <= MAX_COPY_TEXT_LENGTH ? copyText : null;
+    return { action, copyText: copy };
+}
+
+// Screen Recording error: "Open Screen Recording Settings" (main opens the
+// one System Settings page it allows) and, for installed builds, a button
+// that copies the Terminal command from the message.
+function appendErrorActions({ copyText }) {
+    const target = document.getElementById(hasCode ? 'text-content' : 'full-markdown');
+    if (!target) return;
+    const row = document.createElement('div');
+    row.className = 'answer-actions';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'oc-btn oc-btn--primary';
+    open.textContent = 'Open Screen Recording Settings';
+    open.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        let ok = false;
+        try {
+            ok = await window.electronAPI.openScreenRecordingSettings();
+        } catch (err) {
+            console.warn('[LLM-RESPONSE] Could not open Screen Recording settings', err && err.message);
+        }
+        if (!ok) flashButton(open, 'Could not open System Settings', false, 'Open Screen Recording Settings');
+    });
+    row.appendChild(open);
+    if (copyText) {
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'oc-btn';
+        copy.textContent = 'Copy Terminal command';
+        copy.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            let ok = false;
+            try {
+                ok = await window.electronAPI.copyToClipboard(copyText);
+            } catch (_) {
+                ok = false;
+            }
+            flashButton(copy, ok ? 'Copied' : 'Copy failed', ok, 'Copy Terminal command');
+        });
+        row.appendChild(copy);
+    }
+    target.appendChild(row);
 }
 
 function makeCopyButton(text) {
