@@ -184,10 +184,6 @@ function sha256File(file) {
   return hash.digest('hex');
 }
 
-function sha256Buffer(buffer) {
-  return crypto.createHash('sha256').update(buffer).digest('hex');
-}
-
 function formatBytes(bytes) {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;

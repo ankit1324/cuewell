@@ -6,7 +6,6 @@ const recordingIndicator = document.getElementById('recordingIndicator');
 const messageInput = document.getElementById('messageInput');
 const sendButton = document.getElementById('sendButton');
 const micButton = document.getElementById('micButton');
-const chatContainer = document.getElementById('chatContainer');
 const listeningIndicator = document.getElementById('listeningIndicator');
 const listeningDuration = document.getElementById('listeningDuration');
 const interimOverlay = document.getElementById('interimOverlay');
@@ -99,7 +98,7 @@ async function initSpeechAvailability() {
       speechAvailable = await window.electronAPI.getSpeechAvailability();
       applyMicVisibility();
     }
-  } catch (e) {
+  } catch (_) {
     speechAvailable = false;
     applyMicVisibility();
   }
@@ -879,14 +878,14 @@ if (micButton) {
     try {
       if (isRecording) {
         if (whysperAPI) {
-          const result = await whysperAPI.stopSpeechRecognition();
+          await whysperAPI.stopSpeechRecognition();
         }
       } else {
         if (whysperAPI) {
-          const result = await whysperAPI.startSpeechRecognition();
+          await whysperAPI.startSpeechRecognition();
         }
       }
-    } catch (error) {
+    } catch (_) {
       addMessage('Voice input could not start. Check the microphone permission and the speech settings.', 'error');
     }
   });

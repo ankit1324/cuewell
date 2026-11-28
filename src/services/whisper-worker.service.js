@@ -1,5 +1,4 @@
 const fs = require('fs');
-const path = require('path');
 const readline = require('readline');
 const { spawn } = require('child_process');
 const { childProcessEnv } = require('../core/whisper-installer');
@@ -122,7 +121,7 @@ class WhisperWorkerService {
     let message;
     try {
       message = JSON.parse(line);
-    } catch (error) {
+    } catch (_) {
       logger.warn('Ignoring non-JSON worker output', { line: line.substring(0, 500) });
       return;
     }

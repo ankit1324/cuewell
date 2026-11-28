@@ -17,7 +17,7 @@
  * install output instead of a frozen spinner.
  */
 
-const { execFile, spawn } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -234,7 +234,6 @@ class WhisperInstaller {
     if (fromEnv) {
       const parsed = this._parseCommandString(fromEnv);
       if (parsed && parsed.length > 0) {
-        // eslint-disable-next-line no-await-in-loop
         const probe = await this._probe(parsed);
         if (probe.ok) {
           return {
@@ -250,7 +249,6 @@ class WhisperInstaller {
     // 2. Probe a list of likely candidates
     const candidates = this._candidateCommands();
     for (const candidate of candidates) {
-      // eslint-disable-next-line no-await-in-loop
       const probe = await this._probe(candidate);
       if (probe.ok) {
         const joined = candidate.join(' ');
@@ -606,7 +604,6 @@ class WhisperInstaller {
   async _findPython() {
     let tooOld = null;
     for (const candidate of this._pythonCandidates()) {
-      // eslint-disable-next-line no-await-in-loop
       const version = await this._getPythonVersion(candidate.cmd, candidate.args);
       if (!version) continue;
       if (this._isPythonVersionOk(version)) {

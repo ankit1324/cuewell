@@ -28,7 +28,7 @@
         '|\\((?:' + ESC + '|[^()\\\\]){0,1000}\\)))?' +
         SP + '\\)'
     );
-    var BACKSLASH_PUNCT = /\\([!-\/:-@\[-`{-~])/g;
+    var BACKSLASH_PUNCT = /\\([!-/:-@[-`{-~])/g;
 
     function linkTokenizer(src) {
         var cap = LINK_RE.exec(src);
@@ -38,7 +38,7 @@
         var href = cap[3];
         if (href.charAt(0) === '<') href = href.slice(1, -1);
         var title = cap[4] ? cap[4].slice(1, -1).replace(BACKSLASH_PUNCT, '$1') : null;
-        var text = cap[2].replace(/\\([\[\]])/g, '$1');
+        var text = cap[2].replace(/\\([[\]])/g, '$1');
         var lexer = this.lexer;
         lexer.state.inLink = true;
         var token = {

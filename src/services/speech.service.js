@@ -2018,7 +2018,7 @@ class SpeechService extends EventEmitter {
           });
           return null;
         }
-      } catch (e) {
+      } catch (_) {
         // fs.existsSync can throw on invalid paths; treat as missing
         return null;
       }

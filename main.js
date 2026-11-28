@@ -126,7 +126,7 @@ function resolveEnvPath() {
   } catch (_) {
     try {
       return path.join(app.getPath("userData"), ".env");
-    } catch (e2) {
+    } catch (_) {
       if (!app.isPackaged) return path.join(process.cwd(), ".env");
       const dir = path.join(require("os").homedir(), ".Cuewell");
       try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { /* best effort */ }
@@ -871,7 +871,6 @@ class ApplicationController {
         appName: this.appDisplayName,
         updatesConfigured: this.updateChecker.isConfigured(),
         setupNeeded: this.isFirstRun,
-        screenShared: !!windowManager.isScreenBeingShared,
         isShortcutRegistered: (accelerator) => this.isGlobalShortcutWorking(accelerator),
         actions: {
           toggleWindows: () => windowManager.toggleVisibility(),
@@ -1096,11 +1095,6 @@ class ApplicationController {
   }
 
   showUpdateNotification(result) {
-    // Notifications are not hidden from screen sharing like the windows are.
-    if (windowManager.isScreenBeingShared) {
-      logger.info("Update notification skipped while the screen is shared", { latestVersion: result.latestVersion });
-      return;
-    }
     try {
       if (!Notification.isSupported()) {
         logger.info("Update available; notifications are not supported here", { latestVersion: result.latestVersion });
@@ -1465,7 +1459,6 @@ class ApplicationController {
     });
     const chat = windowManager.getWindow("chat");
     if (chat && !chat.isDestroyed() && chat.isVisible()) return;
-    if (windowManager.isScreenBeingShared) return;
     const now = Date.now();
     if (this._lastSpeechError.message === message && now - this._lastSpeechError.at < SPEECH_ERROR_REPEAT_MS) return;
     this._lastSpeechError = { message, at: now };
@@ -1621,7 +1614,7 @@ class ApplicationController {
         try {
           // Match content size to the DOM so no extra transparent area remains
           mainWindow.setContentSize(clampedWidth, clampedHeight);
-        } catch (e) {
+        } catch (_) {
           // Fallback in case setContentSize isn’t available on some platform
           mainWindow.setSize(clampedWidth, clampedHeight);
         }
@@ -2634,7 +2627,7 @@ class ApplicationController {
       }
 
       // Also handle other visible windows
-      windowManager.windows.forEach((window, type) => {
+      windowManager.windows.forEach((window) => {
         if (window.isVisible()) {
           windowManager.showOnCurrentDesktop(window);
         }
@@ -3752,7 +3745,7 @@ class ApplicationController {
         }
       } else {
         // Windows/Linux - update window icons
-        windowManager.windows.forEach((window, type) => {
+        windowManager.windows.forEach((window) => {
           if (window && !window.isDestroyed()) {
             window.setIcon(fullIconPath);
           }
@@ -3816,7 +3809,7 @@ class ApplicationController {
 
       // Update all window titles to match the new app name
       const windows = windowManager.windows;
-      windows.forEach((window, type) => {
+      windows.forEach((window) => {
         if (window && !window.isDestroyed()) {
           // Use stealth name for all windows
           const stealthTitle = appName.trim();

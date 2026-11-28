@@ -75,8 +75,7 @@ function initAnswerWindow() {
     api.onTranscriptionLlmResponseChunk((_event, data) => onStreamChunk(data));
 
     // Final answer and errors tied to the current request. They arrive
-    // before (or, while the screen is shared, instead of) the
-    // display-llm-response below.
+    // before the display-llm-response below.
     api.onTranscriptionLlmResponse((_event, data) => {
         if (!data || !isOpenStream(data.messageId)) return;
         const response = typeof data.response === 'string' ? data.response : '';
