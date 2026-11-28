@@ -84,6 +84,8 @@ describe('answer window (answer-page.js)', () => {
         renderAnswer: (body, options) => calls.render.push({ body, ...options }),
         setView: () => {},
         setStatusLabel: (text, options) => calls.status.push({ text, stopped: !!(options && options.stopped) }),
+        errorActions: () => null,
+        appendErrorActions: () => {},
         shownFinalKey: null,
         view: 'answer',
         EMPTY_ANSWER_MESSAGE,

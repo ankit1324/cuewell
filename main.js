@@ -219,8 +219,8 @@ const {
   UPDATE_REPO, UpdateChecker, isRepoConfigured, isUpdateCheckEnabled, isSafeReleaseUrl, releasesPageUrl,
 } = require("./src/core/update-checker");
 const {
-  friendlySpeechError, friendlyCaptureError, friendlyLlmError, microphoneBlockedMessage,
-  isMediaAccessBlocked, buildProblemReportUrl,
+  friendlySpeechError, describeCaptureError, friendlyLlmError, microphoneBlockedMessage,
+  isMediaAccessBlocked, buildProblemReportUrl, SCREEN_RECORDING_SETTINGS_URL,
 } = require("./src/core/error-reporter");
 const {
   CRASH_RECORD_FILE, createCrashRecorder, createFatalErrorHandler, isRecoverableRecorderError, errorFields,
@@ -498,6 +498,9 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   "copy-to-clipboard": ["chat", "llmResponse"],
   "close-window": ["llmResponse"],
   "resize-llm-window-for-content": ["llmResponse"],
+  // The button under a screen capture error (macOS). Takes no input; main
+  // opens only SCREEN_RECORDING_SETTINGS_URL.
+  "open-screen-recording-settings": ["llmResponse"],
   // Settings (settings.html)
   "close-settings": ["settings"],
   // Ack for flush-before-quit: Settings saved what was pending (see onBeforeQuit)
@@ -2182,6 +2185,9 @@ class ApplicationController {
       return { success: true, profile: { ...this.profile } };
     });
 
+    // Arguments are ignored: the page cannot choose what opens.
+    this.handleIpc("open-screen-recording-settings", () => this.openScreenRecordingSettings());
+
     this.handleIpc("close-window", (event) => {
       const webContents = event.sender;
       windowManager.windows.forEach((win) => {
@@ -2471,23 +2477,33 @@ class ApplicationController {
       });
     } catch (error) {
       if (this.isStoppedAnswer(answer, error)) return;
+      const screenAccess = error.isCaptureError ? this.screenAccessStatus() : undefined;
+      const captureInfo = error.isCaptureError
+        ? describeCaptureError(error.message, {
+          platform: process.platform,
+          screenAccess,
+          reason: error.code,
+          packaged: app.isPackaged,
+        })
+        : null;
       logger.error("Screenshot OCR process failed", {
         error: error.message,
         capture: !!error.isCaptureError,
+        ...(captureInfo ? { reason: error.code || null, screenAccess: screenAccess || null, problem: captureInfo.problem } : {}),
         duration: Date.now() - startTime,
       });
 
-      const message = error.isCaptureError
-        ? friendlyCaptureError(error.message, {
-          platform: process.platform,
-          screenAccess: this.screenAccessStatus(),
-        })
-        : friendlyLlmError(error.message);
+      const message = captureInfo ? captureInfo.message : friendlyLlmError(error.message);
 
       // A capture that is already running will update the response window
       // itself, so a second press must not cover it with an error.
       if (error.message !== "Capture already in progress") {
-        this.showScreenshotError(message, messageId);
+        // A Screen Recording problem gets the answer window's buttons:
+        // open the settings, copy the Terminal command.
+        const action = captureInfo && captureInfo.action
+          ? { action: captureInfo.action, ...(captureInfo.copyText ? { copyText: captureInfo.copyText } : {}) }
+          : {};
+        this.showScreenshotError(message, messageId, action);
       }
       this.broadcastOCRError(message);
       // The answer was already announced (and may be half streamed): end
@@ -2514,13 +2530,29 @@ class ApplicationController {
    * window only listens for display-llm-response, so the message is sent as
    * a regular response. `message` is already user-facing.
    */
-  showScreenshotError(message, messageId = null) {
+  showScreenshotError(message, messageId = null, action = {}) {
     windowManager.showLLMResponse(message || "Screenshot failed.", {
       skill: this.activeSkill,
       isImageAnalysis: true,
       isError: true,
       messageId,
+      ...action,
     });
+  }
+
+  /**
+   * The Screen Recording list in System Settings (macOS only). Opens this
+   * one fixed address and nothing else. True when macOS accepted it.
+   */
+  async openScreenRecordingSettings() {
+    if (process.platform !== "darwin") return false;
+    try {
+      await shell.openExternal(SCREEN_RECORDING_SETTINGS_URL);
+      return true;
+    } catch (e) {
+      logger.warn("Could not open the Screen Recording settings", { error: e.message });
+      return false;
+    }
   }
 
   /** macOS Screen Recording status ('granted', 'denied', ...), or undefined elsewhere. */

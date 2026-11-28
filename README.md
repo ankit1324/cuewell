@@ -138,12 +138,32 @@ The Windows installer installs for the current user only (no admin prompt), lets
 
 On Debian and Ubuntu, install the `.deb` with `sudo apt install ./Cuewell-<version>-linux-amd64.deb`; it adds Cuewell to the app menu and the `cuewell` command. For the AppImage, run `chmod +x Cuewell-<version>-linux-x86_64.AppImage`, then run the file. Some distributions need `libfuse2` for AppImages.
 
-Builds are **not code signed or notarized** today. That means:
+Builds are **not notarized by Apple or signed with a Windows certificate**. Release builds for macOS are signed with Cuewell's own self-signed certificate (see [Signing macOS builds](#signing-macos-builds-maintainers)); builds you make yourself are ad-hoc signed. That means:
 
-- **macOS:** the first launch of a downloaded build is blocked. Open System Settings > Privacy & Security and choose **Open Anyway**. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Cuewell.app`, or run from source with `./setup.sh`.
+- **macOS:** the first launch of a downloaded build is blocked, because Apple has not notarized it. Open System Settings > Privacy & Security and choose **Open Anyway**. If macOS says the app is damaged, run `xattr -dr com.apple.quarantine /Applications/Cuewell.app`, or run from source with `./setup.sh`.
 - **Windows:** SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**, only if you built or trust the file.
 
 No pre-built downloads are linked from this README. The workflow in `.github/workflows/release.yml` builds macOS, Windows and Linux artifacts on each system's own GitHub runner, and publishes them as a GitHub release when a version tag (`v1.2.3`) is pushed.
+
+### Signing macOS builds (maintainers)
+
+macOS keeps an app's Screen Recording and Microphone permissions only while the app's *designated requirement* stays the same. An ad-hoc signature's requirement is the build's own hash (`cdhash H"…"`), so every update looked like a new app: the switch in System Settings stayed on, but screenshots failed until the user removed Cuewell from the list and added it again. Signed with one certificate, every release has the same requirement, and permissions carry over:
+
+```text
+designated => identifier "com.ankitchaudhary.cuewell" and certificate leaf = H"<certificate SHA-1>"
+```
+
+Gatekeeper still warns on the first launch of each download, because the app is not notarized (that needs a paid Apple Developer ID). Users never need to trust the certificate: macOS compares its hash, not its trust.
+
+Set it up once:
+
+1. Run `scripts/make-self-signed-cert.sh` on a Mac. It creates a 10-year code-signing certificate named "Cuewell Self-Signed" in `~/cuewell-self-sign` (it refuses a folder inside the repository), checks that macOS can import it, and prints two values.
+2. Add them as repository secrets (Settings > Secrets and variables > Actions): `MAC_SELF_SIGN_P12` (the base64 of the `.p12`) and `MAC_SELF_SIGN_PASSWORD`.
+3. Keep the folder safe, for example in a password manager, and never commit it. Reuse the same certificate for every release: a new certificate means a new requirement, so every user would have to allow Screen Recording again. Run the script again only shortly before the certificate expires.
+
+The release workflow imports the certificate into a temporary keychain, trusts it for code signing on the runner, and passes it to electron-builder (`CSC_NAME`, the same as `mac.identity`), which signs the app and everything in it, including `whisper-server`. The fuses are flipped before signing. Hardened runtime stays off: it matters only for notarization, and would block the microphone without extra entitlements. A step after the build fails the run unless both apps and their `whisper-server` carry the certificate's requirement. Without the secret the build stays ad-hoc signed, as before, and the run shows a warning.
+
+The first update from an ad-hoc build (1.0.5 or earlier) to a signed one still needs Screen Recording allowed once more; Cuewell shows the steps when a screenshot fails. To check a build: `codesign -d -r- /Applications/Cuewell.app`.
 
 ## Updates
 
@@ -320,11 +340,13 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 **Screenshots fail on macOS, or the app says screen capture failed.**
 Allow Screen Recording under System Settings > Privacy & Security > Screen & System Audio Recording, then restart the app. When you run from source, the permission belongs to the app that launched it, such as your terminal or editor.
 
+If Cuewell is already turned on there but screenshots still fail (often right after an update), the permission belongs to an earlier version. The answer panel then shows the steps and an **Open Screen Recording Settings** button: select Cuewell, remove it with **–**, add it again with **+** (or press Screenshot so macOS asks again), and restart Cuewell. In Terminal, `tccutil reset ScreenCapture com.ankitchaudhary.cuewell` does the same; restart Cuewell afterwards and choose Allow when asked. A screenshot that comes back completely black is treated as this failure too; if your screen was locked or asleep, unlock it and try again.
+
 **Voice does nothing on macOS.**
 Allow Microphone access under System Settings > Privacy & Security > Microphone for Cuewell, or for your terminal or editor when running from source.
 
 **The screenshot answer describes a blank or black screen.**
-A locked screen, a sleeping display or a screen saver gives a blank capture. Unlock the screen and try again.
+A locked screen, a sleeping display or a screen saver gives a blank capture. Unlock the screen and try again. A capture that is completely black or transparent is not sent to the AI provider; Cuewell shows the Screen Recording steps above instead.
 
 **The onboarding wizard opens every time.**
 It opens when the selected provider has no usable key. Finish onboarding, or open Settings (`Cmd/Ctrl + ,`) and enter a key.
@@ -386,7 +408,7 @@ src/services/             Screen capture, LLM, speech, whisper.cpp engine and Py
 src/services/providers/   Claude and OpenAI-compatible provider adapters
 src/ui/                   Renderer scripts for each window
 lib/                      Markdown rendering and HTML sanitizing
-scripts/                  Start script, whisper.cpp fetch script, Python Whisper worker, speech test, installer hook
+scripts/                  Start script, whisper.cpp fetch script, macOS signing certificate script, Python Whisper worker, speech test, installer hook
 assests/                  Icons, fonts and vendored Font Awesome (the folder name is spelled this way)
 vendor/whisper/           whisper.cpp engine per platform, fetched by npm run fetch:whisper (git-ignored)
 website/                  Landing page; not included in app builds

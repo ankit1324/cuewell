@@ -114,6 +114,8 @@ const PAGES = {
     stopAnswer,
     copyToClipboard,
     resizeLlmWindowForContent: (contentMetrics) => ipcRenderer.invoke('resize-llm-window-for-content', contentMetrics),
+    // The button under a Screen Recording error; main decides what opens.
+    openScreenRecordingSettings: () => ipcRenderer.invoke('open-screen-recording-settings'),
     onDisplayLlmResponse: listen('display-llm-response'),
     onShowLoading: listen('show-loading'),
     // Live answer: start/chunk while it streams, then the final text or an

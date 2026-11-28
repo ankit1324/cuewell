@@ -9,3 +9,7 @@ bin/
 *.log
 .playwright-mcp/
 /vendor/
+
+# Code-signing keys (scripts/make-self-signed-cert.sh writes them outside the repo)
+*.p12
+*.p12.base64
