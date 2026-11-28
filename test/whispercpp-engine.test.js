@@ -421,9 +421,11 @@ describe('WhisperCppEngine proves the listener is its own child', { concurrency:
     await warm;
 
     assert.equal(spawns.length, 2, 'one retry');
-    assert.equal(exited(spawns[0].child), true, 'the first child exited on its bind failure');
+    // The exit event and the fake server's event log can land a moment after
+    // the engine moved on to the retry (seen on Windows runners).
+    await waitFor(() => exited(spawns[0].child));
     assert.notEqual(portOf(spawns[1]), portOf(spawns[0]), 'the retry uses a new port');
-    assert.ok(events().some((e) => e.event === 'bind-failed' && e.port === portOf(spawns[0])));
+    await waitFor(() => events().some((e) => e.event === 'bind-failed' && e.port === portOf(spawns[0])));
 
     assert.equal((await engine.transcribe(Buffer.from('audio'))).text, TRANSCRIPT);
     assert.deepEqual(foreign.requests, [], 'nothing, not even /health with the secret path, went to the foreign responder');
