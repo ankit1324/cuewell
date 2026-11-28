@@ -408,7 +408,8 @@ const WHISPER_ENGINES = ["whispercpp", "python"];
 const VOICE_PROGRESS_INTERVAL_MS = 150;
 
 // What each shortcut does, for the Settings shortcuts table. Keys are the
-// accelerators registered in setupGlobalShortcuts / setupFocusShortcuts.
+// accelerators registered in setupGlobalShortcuts / setupFocusShortcuts,
+// and STOP_ANSWER_SHORTCUT.
 const SHORTCUT_ACTIONS = Object.freeze({
   "CommandOrControl+Shift+S": "Capture the screen under the pointer and ask about it",
   "Alt+R": "Start or stop voice input",
@@ -424,6 +425,11 @@ const SHORTCUT_ACTIONS = Object.freeze({
   "CommandOrControl+Left": "Move the windows left when click-through is on",
   "CommandOrControl+Right": "Move the windows right when click-through is on",
 });
+
+// Stops the answer being written. A global shortcut, but registered only
+// while an answer is being written (updateStopShortcut), so other apps keep
+// these keys the rest of the time (VS Code opens Extensions with them).
+const STOP_ANSWER_SHORTCUT = "CommandOrControl+Shift+X";
 
 // Which settings fields each window may save. Anything else in the payload
 // rejects the whole save. The toolbar only saves its language picker.
@@ -1058,6 +1064,7 @@ class ApplicationController {
         this._quitPrepared = true;
         try {
           globalShortcut.unregisterAll();
+          this._stopShortcutRegistered = false;
           windowManager.destroyAllWindows();
         } catch (_) { /* quitting anyway */ }
         app.quit();
@@ -1099,6 +1106,7 @@ class ApplicationController {
         this._quitPreparing = false;
         try {
           globalShortcut.unregisterAll();
+          this._stopShortcutRegistered = false;
           windowManager.destroyAllWindows();
         } catch (error) {
           logger.warn("Could not close the windows before quitting", { error: error.message });
@@ -1516,7 +1524,6 @@ class ApplicationController {
       "CommandOrControl+Shift+I": () => windowManager.toggleInteraction(),
       "CommandOrControl+Shift+C": () => windowManager.switchToWindow("chat"),
       "CommandOrControl+Shift+\\": () => this.clearSessionMemory(),
-      "CommandOrControl+Shift+X": () => this.stopActiveAnswer("user"),
       "Alt+A": () => windowManager.toggleInteraction(),
       "Alt+R": () => this.toggleSpeechRecognition(),
     };
@@ -1547,6 +1554,52 @@ class ApplicationController {
     });
 
     this.setupFocusShortcuts();
+  }
+
+  /**
+   * Register the Stop shortcut while an answer is being written, and release
+   * it once none is. Called whenever an answer begins, ends or is stopped;
+   * cheap when nothing changes. Only a registration this app made is ever
+   * undone: when another app owns the keys, register() fails, that is logged
+   * once, and the Stop buttons still work.
+   */
+  updateStopShortcut() {
+    const current = this.answers.current;
+    const wanted = !this.isQuitting && this.answers.isActive(current);
+    if (wanted) {
+      // Kept from the answer it replaced; tried once per answer otherwise.
+      if (this._stopShortcutRegistered || this._stopShortcutTriedFor === current) return;
+      this._stopShortcutTriedFor = current;
+      let success = false;
+      let error = null;
+      try {
+        success = !!globalShortcut.register(STOP_ANSWER_SHORTCUT, () => this.stopActiveAnswer("user"));
+      } catch (e) {
+        error = e.message;
+      }
+      this._stopShortcutRegistered = success;
+      // Whether the last registration failed; read by getSettingsInfo.
+      this._stopShortcutFailed = !success;
+      if (success) {
+        this._stopShortcutWarned = false;
+      } else if (!this._stopShortcutWarned) {
+        this._stopShortcutWarned = true;
+        logger.warn("Stop shortcut unavailable while an answer is being written", {
+          accelerator: STOP_ANSWER_SHORTCUT,
+          reason: error || "another app owns it, or the system does not allow it",
+        });
+      }
+      return;
+    }
+    this._stopShortcutTriedFor = null;
+    // Never touch keys this app did not register.
+    if (!this._stopShortcutRegistered) return;
+    this._stopShortcutRegistered = false;
+    try {
+      globalShortcut.unregister(STOP_ANSWER_SHORTCUT);
+    } catch (e) {
+      logger.debug("Could not release the Stop shortcut", { error: e.message });
+    }
   }
 
   /**
@@ -2434,7 +2487,7 @@ class ApplicationController {
         }
       });
     } finally {
-      this.answers.finish(answer);
+      this.finishAnswer(answer);
     }
   }
 
@@ -2564,7 +2617,7 @@ class ApplicationController {
 
       this.broadcastLLMError(message, messageId);
     } finally {
-      this.answers.finish(answer);
+      this.finishAnswer(answer);
     }
   }
 
@@ -2802,7 +2855,7 @@ class ApplicationController {
         }
       });
     } finally {
-      this.answers.finish(answer);
+      this.finishAnswer(answer);
     }
   }
 
@@ -2813,13 +2866,21 @@ class ApplicationController {
    */
   beginAnswer(messageId, { source, targets, overlay, programmingLanguage = null }) {
     this.stopActiveAnswer("replaced", null, targets);
-    return this.answers.begin(messageId, {
+    const answer = this.answers.begin(messageId, {
       source,
       targets: Array.isArray(targets) ? targets.slice() : [],
       overlay: !!overlay,
       skill: this.activeSkill,
       programmingLanguage,
     });
+    this.updateStopShortcut();
+    return answer;
+  }
+
+  /** `answer` ended (answered, failed or stopped); null when it never began. */
+  finishAnswer(answer) {
+    this.answers.finish(answer);
+    this.updateStopShortcut();
   }
 
   /**
@@ -2834,6 +2895,11 @@ class ApplicationController {
       return !!this.answers.stop(reason, messageId);
     } finally {
       this._replacingTargets = null;
+      // Released on the next turn, not now: a replaced answer's successor
+      // begins in this same turn, so the Stop shortcut stays registered from
+      // one to the next, and the shortcut's own handler (which lands here)
+      // never unregisters itself while it runs.
+      setImmediate(() => this.updateStopShortcut());
     }
   }
 
@@ -3029,6 +3095,7 @@ class ApplicationController {
       this.tray = null;
     }
     globalShortcut.unregisterAll();
+    this._stopShortcutRegistered = false;
     if (this._speechReinitTimer) {
       clearInterval(this._speechReinitTimer);
       this._speechReinitTimer = null;
@@ -3154,6 +3221,14 @@ class ApplicationController {
       ...Object.keys(global).map((accelerator) => ({
         accelerator, scope: "global", registered: global[accelerator],
       })),
+      // The Stop shortcut is only registered while an answer is being
+      // written: false when registering it failed the last time, otherwise
+      // null, never "not working" just because no answer is running.
+      {
+        accelerator: STOP_ANSWER_SHORTCUT,
+        scope: "answer",
+        registered: this._stopShortcutFailed ? false : null,
+      },
       // Focus shortcuts are only registered while a window has focus: false
       // once registering one failed, otherwise null (not known yet).
       ...focus.map((accelerator) => ({

@@ -214,13 +214,86 @@ describe('answers in main.js', () => {
       assertStoredOnce(s, s.first, 'user');
     });
 
-    it('is registered globally as Cmd/Ctrl+Shift+X and listed everywhere shortcuts are', () => {
+    it('is Cmd/Ctrl+Shift+X and listed everywhere shortcuts are, as working only while an answer is written', () => {
       assert.match(SHORTCUT_ACTIONS['CommandOrControl+Shift+X'], /Stop/);
-      const main = readSource('main.js');
-      assert.match(main, /"CommandOrControl\+Shift\+X": \(\) => this\.stopActiveAnswer\("user"\)/);
+      assert.equal(loadConstant('main.js', 'STOP_ANSWER_SHORTCUT'), 'CommandOrControl+Shift+X');
       // No other action uses X.
       assert.deepEqual(Object.keys(SHORTCUT_ACTIONS).filter((k) => /\+X$/i.test(k)), ['CommandOrControl+Shift+X']);
-      assert.match(readSource('index.html'), /Stop the answer<\/span>[\s\S]*?<span class="oc-kbd">X<\/span>/);
+      assert.match(readSource('index.html'), /Stop the answer being written<\/span>[\s\S]*?<span class="oc-kbd">X<\/span>/);
+      assert.match(readSource('src/ui/settings-window.js'),
+        /s\.scope === 'answer'\)[\s\S]*?'Everywhere, while an answer is being written'/);
+    });
+  });
+
+  describe('Stop shortcut registration', () => {
+    const life = () => out.scenarios.stopShortcut;
+    const STOP = 'CommandOrControl+Shift+X';
+
+    it('is not registered at startup; the other global shortcuts are, unchanged', () => {
+      const { registered } = out.scenarios.startup;
+      assert.deepEqual(registered, ['CommandOrControl+Shift+S', 'CommandOrControl+Shift+V', 'CommandOrControl+Shift+I',
+        'CommandOrControl+Shift+C', 'CommandOrControl+Shift+\\', 'Alt+A', 'Alt+R']);
+      assert.equal(registered.includes(STOP), false);
+      assert.equal(life().idle, false);
+    });
+
+    it('is listed in Settings as on demand, not as failed, while idle', () => {
+      const { shortcuts, stop } = out.scenarios.startup;
+      assert.deepEqual(stop, { scope: 'answer', registered: null, action: SHORTCUT_ACTIONS[STOP] });
+      assert.equal(shortcuts.filter((s) => s.accelerator === STOP).length, 1);
+      assert.deepEqual(shortcuts.filter((s) => s.registered === false), []);
+    });
+
+    it('is registered when an answer starts and released when it finishes', () => {
+      assert.equal(life().firstStreaming, true);
+      assert.equal(life().finished, false);
+      assert.deepEqual(life().callsAfterFinish, ['register', 'unregister']);
+      for (const name of ['typed', 'screenshot', 'userStop', 'shortcut', 'stopEarly', 'voiceChatOnly', 'shortUtterance']) {
+        assert.deepEqual(out.scenarios[name].stopShortcut, ['register', 'unregister'], name);
+        assert.equal(out.scenarios[name].stopShortcutHeld, false, name);
+      }
+    });
+
+    it('stays registered, with no second registration, when a new question replaces the answer', () => {
+      assert.equal(life().replacedStreaming, true);
+      assert.deepEqual(life().callsWhileReplacing, ['register']);
+    });
+
+    it('is released when the answer is stopped by the button or by the shortcut itself', () => {
+      assert.equal(life().nextAnswerStreaming, true, 'not registered again for the next answer');
+      assert.equal(life().afterStopButton, false);
+      assert.deepEqual(life().callsStopButton, ['register', 'unregister']);
+      assert.equal(life().shortcutStopped, true, 'the registered handler did not stop the answer');
+      assert.equal(life().afterShortcut, false);
+      assert.deepEqual(life().callsShortcut, ['register', 'unregister']);
+    });
+
+    it('is released when the answer fails', () => {
+      assert.equal(life().failingStreaming, true);
+      assert.equal(life().afterError, false);
+      assert.deepEqual(life().callsError, ['register', 'unregister']);
+    });
+
+    it('is released on quit, and an answer ending afterwards registers nothing', () => {
+      assert.equal(life().quitError, undefined);
+      assert.equal(life().beforeQuit, true);
+      assert.equal(life().afterQuit, false);
+      assert.equal(life().afterQuitAnswerEnded, false);
+      assert.deepEqual(life().callsQuit, ['register', 'unregisterAll']);
+    });
+
+    it('tolerates another app owning the keys: answers work, one warning, nothing unregistered', () => {
+      assert.equal(life().heldFinals, 2);
+      // One try per answer, and never an unregister of keys Cuewell does not hold.
+      assert.deepEqual(life().heldCalls, ['register', 'register']);
+      assert.equal(life().heldWarnings, 1);
+      assert.deepEqual(life().heldInfo, { scope: 'answer', registered: false, action: SHORTCUT_ACTIONS[STOP] });
+    });
+
+    it('is registered again once the other app lets go, and no longer shown as failed', () => {
+      assert.equal(life().releasedStreaming, true);
+      assert.equal(life().releasedAfter, false);
+      assert.deepEqual(life().releasedInfo, { scope: 'answer', registered: null, action: SHORTCUT_ACTIONS[STOP] });
     });
   });
 });
