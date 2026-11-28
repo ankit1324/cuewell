@@ -90,6 +90,12 @@
 
   /* ---------- Live demo ---------- */
 
+  /* The stage recreates the app's toolbar and answer window. Hooks used here:
+     #demo-stage (gets data-state: idle, listening, thinking, streaming, done),
+     #demo-mic .mic-text, #demo-mode .mode-text, #demo-lang, #demo-heard
+     .heard-label, #demo-question, #demo-status .st-text, #demo-answer,
+     #demo-counter, #demo-play, .demo-tab .tab-bar i, the [data-sizers]
+     cells, and the <template id="sc-N"> scenarios. */
   function initDemo() {
     var stage = $('#demo-stage');
     if (!stage || !('content' in doc.createElement('template'))) return;
@@ -110,7 +116,6 @@
       question: $('#demo-question'),
       status: $('#demo-status'),
       statusText: $('#demo-status .st-text'),
-      progress: $('.panel-progress', stage),
       answer: $('#demo-answer'),
       counter: $('#demo-counter'),
       play: $('#demo-play'),
@@ -118,6 +123,28 @@
       tabs: $$('.demo-tab')
     };
     var tabBars = el.tabs.map(function (t) { return t.querySelector('.tab-bar i'); });
+
+    /* Size the cells whose text changes (mode, language, question) for the
+       widest or tallest value up front, so the toolbar never changes width
+       and the transcript never changes height while the demo runs. Each
+       sizer is a hidden copy of the cell's row (keycap or chevron included)
+       holding one of the values. */
+    function addSizers(kind, values) {
+      var cell = $('[data-sizers="' + kind + '"]', stage);
+      var row = cell && cell.firstElementChild;
+      if (!row) return;
+      values.filter(function (v, i) { return v && values.indexOf(v) === i; }).forEach(function (v) {
+        var s = row.cloneNode(true);
+        $$('[id]', s).forEach(function (n) { n.removeAttribute('id'); });
+        $('[data-sizer-text]', s).textContent = v;
+        s.classList.add('sizer');
+        s.setAttribute('aria-hidden', 'true');
+        cell.appendChild(s);
+      });
+    }
+    addSizers('mode', ['Auto'].concat(scenarios.map(function (sc) { return sc.mode; })));
+    addSizers('lang', scenarios.map(function (sc) { return sc.lang; }));
+    addSizers('q', scenarios.map(function (sc) { return sc.q; }));
 
     /* Pause-aware clock. Time only advances while nothing pauses the demo,
        so hover, focus, scrolling away and the pause button all freeze it. */
@@ -234,15 +261,24 @@
     function setStatus(state, text) {
       el.status.setAttribute('data-state', state);
       el.statusText.textContent = text;
-      el.progress.classList.toggle('is-on', state === 'thinking');
+      // The stage state drives the drafting view, the caret and Copy.
+      stage.setAttribute('data-state', state);
     }
 
+    // The app's empty answer window: blank ruled paper and a hint.
     function idleAnswer() {
       el.answer.innerHTML = '';
-      var p = doc.createElement('p');
-      p.className = 'panel-idle';
-      p.textContent = 'Answers appear here as they stream.';
-      el.answer.appendChild(p);
+      var box = doc.createElement('div');
+      box.className = 'panel-idle';
+      var title = doc.createElement('p');
+      title.className = 'panel-idle-title';
+      title.textContent = 'No answer yet';
+      var hint = doc.createElement('p');
+      hint.className = 'panel-idle-hint';
+      hint.textContent = 'Answers appear here as they stream.';
+      box.appendChild(title);
+      box.appendChild(hint);
+      el.answer.appendChild(box);
       el.answer.scrollTop = 0;
     }
 
@@ -339,8 +375,10 @@
 
     function keepVisible(span) {
       if (readerScrolled) return;
+      // Measure against the scroller: tokens can sit inside positioned
+      // boxes (the code card), where offsetTop would be relative to those.
       var body = el.answer;
-      var bottom = span.offsetTop + span.offsetHeight + 26;
+      var bottom = span.getBoundingClientRect().bottom - body.getBoundingClientRect().top + body.scrollTop + 26;
       if (bottom > body.scrollTop + body.clientHeight) {
         body.scrollTo({ top: bottom - body.clientHeight, behavior: 'smooth' });
       }
@@ -381,28 +419,36 @@
 
       setMic(false);
       setHeard('heard');
-      setStatus('detecting', 'Detecting');
+      // The app drafts with a pencil while Auto mode reads the question.
+      setStatus('thinking', 'Thinking');
       setMode(null, 'detecting');
       await sleep(T.detect, r);
 
       setMode(sc.mode, 'flash');
-      setStatus('thinking', 'Thinking');
       await sleep(T.think, r);
 
       el.answer.innerHTML = '';
       el.answer.scrollTop = 0;
       while (plan.root.firstChild) el.answer.appendChild(plan.root.firstChild);
-      setStatus('streaming', 'Streaming');
+      setStatus('streaming', 'Writing');
 
+      // The red caret sits after the last word written (.tk-last).
+      var lastWord = null;
       for (var t = 0; t < plan.tokens.length; t++) {
         var tok = plan.tokens[t];
         for (var h = 0; h < tok.hide.length; h++) tok.hide[h].classList.remove('blk-off');
         tok.el.className = '';
+        if (!tok.ws) {
+          if (lastWord) lastWord.className = '';
+          tok.el.className = 'tk-last';
+          lastWord = tok.el;
+        }
         if (tok.delay) {
           keepVisible(tok.el);
           await sleep(tok.delay, r);
         }
       }
+      if (lastWord) lastWord.className = '';
 
       setStatus('done', 'Done');
       await sleep(T.hold, r);
