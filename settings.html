@@ -171,6 +171,16 @@
                             </div>
                         </div>
                     </div>
+
+                    <div class="sw-group" data-search="backup fallback failover second other provider fails failed error outage offline rate limit order try">
+                        <div class="sw-group-head">
+                            <h3 class="sw-group-title" id="fallbackTitle">If the provider fails, try</h3>
+                            <span class="sw-group-status" id="llmFallbackStatus" role="status"></span>
+                        </div>
+                        <p class="sw-row-help sw-group-help" id="fallbackHelp"></p>
+                        <ol class="sw-fallback" id="fallbackList" aria-labelledby="fallbackTitle" aria-describedby="fallbackHelp"></ol>
+                        <p class="sw-row-help sw-fallback-empty" id="fallbackEmpty" hidden>No other provider is set up. Add an API key for another provider (or set an Ollama server URL or model) to use it as a backup.</p>
+                    </div>
                 </section>
 
                 <!-- ============ About you ============ -->
@@ -652,6 +662,22 @@
                                     <option value="dark">Dark</option>
                                 </select>
                                 <div class="sw-status" id="themeStatus" role="status"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sw-group" data-search="opacity transparency transparent see-through translucent fade answer chat window appearance">
+                        <div class="sw-row">
+                            <div>
+                                <label class="sw-row-label" for="windowOpacity">Answer and chat window opacity</label>
+                                <p class="sw-row-help" id="windowOpacityHelp">Lets the app behind show through the answer and chat windows. From 40% to 100% (opaque).</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <div class="sw-range">
+                                    <input type="range" class="sw-range-input" id="windowOpacity" min="40" max="100" step="5" value="100" aria-describedby="windowOpacityHelp windowOpacityStatus">
+                                    <output class="sw-range-value" id="windowOpacityValue" for="windowOpacity">100%</output>
+                                </div>
+                                <div class="sw-status" id="windowOpacityStatus" role="status"></div>
                             </div>
                         </div>
                     </div>

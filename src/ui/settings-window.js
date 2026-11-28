@@ -277,7 +277,9 @@
         const pending = settingInputs.filter((input) => input.tagName !== 'SELECT' &&
             input.value.trim() !== (state.saved[input.dataset.setting] ?? '').trim());
         if (modelInput.value.trim() !== (state.saved[modelField()] ?? '').trim()) pending.push(modelInput);
-        return Promise.all(pending.map((input) => (input === modelInput ? saveModel() : saveSettingInput(input))));
+        const saves = pending.map((input) => (input === modelInput ? saveModel() : saveSettingInput(input)));
+        if (opacityTimer) saves.push(saveOpacity());
+        return Promise.all(saves);
     }
 
     // ---------- Render everything from state.settings ----------
@@ -367,6 +369,7 @@
             providerGrid.firstElementChild.tabIndex = 0;
         }
         renderProviderDetail();
+        renderFallback();
     }
 
     function renderProviderDetail() {
@@ -449,6 +452,106 @@
         if (card) selectProvider(card.dataset.provider);
     });
     providerGrid.addEventListener('keydown', (e) => radioKeys(e, providerGrid, '.sw-provider', (card) => selectProvider(card.dataset.provider)));
+
+    // ---------- Backup providers (If the provider fails, try) ----------
+    //
+    // main sends every provider in order ({ id, enabled, available }); the
+    // list shows the ones that are set up, other than the selected one.
+    // Moving a row swaps it with its visible neighbour in the full list,
+    // so the hidden ones keep their places.
+
+    const fallbackList = $('fallbackList');
+    const fallbackItems = () => (state.settings && Array.isArray(state.settings.llmFallback) ? state.settings.llmFallback : []);
+    const shownFallback = () => fallbackItems().filter((item) => item && item.available && item.id !== currentProviderId());
+
+    function renderFallback(focus = null) {
+        const shown = shownFallback();
+        const current = currentProvider();
+        $('fallbackHelp').textContent =
+            `When ${current ? current.label : 'the selected provider'} fails (no connection, timed out, rate limited, ` +
+            'an invalid or expired key, a server error or an unavailable model), Cuewell asks the first provider below that is on, once. ' +
+            'A stopped answer or a refused question is never sent to another provider. ' +
+            'Screenshots go only to providers that read images. The note under the answer says which provider answered.';
+        $('fallbackEmpty').hidden = shown.length > 0;
+        fallbackList.hidden = shown.length === 0;
+        fallbackList.replaceChildren(...shown.map((item, index) => {
+            const p = providers().find((entry) => entry.id === item.id) || { label: item.id, supportsImages: true };
+            const name = `fb-${item.id}`;
+            const choice = (value, text) => el('label', null,
+                el('input', { type: 'radio', name, value, checked: (value === 'on') === !!item.enabled }),
+                el('span', null, text));
+            return el('li', { class: `sw-fallback-item${item.enabled ? '' : ' is-off'}`, 'data-provider': item.id },
+                el('span', { class: 'sw-fallback-rank', 'aria-hidden': 'true' }, String(index + 1)),
+                el('span', { class: 'sw-fallback-name' }, p.label,
+                    p.supportsImages === false ? el('span', { class: 'sw-fallback-meta' }, 'Text only') : null),
+                el('div', { class: 'sw-segmented', role: 'radiogroup', 'aria-label': `Use ${p.label} as a backup` },
+                    choice('on', 'On'), choice('off', 'Off')),
+                el('div', { class: 'sw-fallback-move' },
+                    el('button', {
+                        type: 'button', class: 'oc-btn oc-btn--ghost oc-icon-btn', 'data-act': 'up',
+                        'aria-label': `Move ${p.label} up`, title: 'Move up', disabled: index === 0
+                    }, icon('arrow-up')),
+                    el('button', {
+                        type: 'button', class: 'oc-btn oc-btn--ghost oc-icon-btn sw-fallback-down', 'data-act': 'down',
+                        'aria-label': `Move ${p.label} down`, title: 'Move down', disabled: index === shown.length - 1
+                    }, icon('arrow-up'))));
+        }));
+        // Keyboard focus stays on the control that was used, in the rebuilt row.
+        if (focus) {
+            const row = fallbackList.querySelector(`[data-provider="${focus.id}"]`);
+            if (row && (focus.act === 'on' || focus.act === 'off')) {
+                const radio = row.querySelector(`input[value="${focus.act}"]`);
+                if (radio) radio.focus();
+                return;
+            }
+            let target = row && row.querySelector(`[data-act="${focus.act}"]`);
+            // At the end of the list that button is disabled: use the other one.
+            if (target && target.disabled) target = row.querySelector(`[data-act="${focus.act === 'up' ? 'down' : 'up'}"]`);
+            if (target && !target.disabled) target.focus();
+        }
+    }
+
+    async function saveFallback(next, focus = null) {
+        if (!state.settings) return;
+        const previous = state.settings.llmFallback;
+        state.settings.llmFallback = next;
+        renderFallback(focus);
+        const result = await save({ llmFallback: next.map((item) => ({ id: item.id, enabled: !!item.enabled })) }, {
+            status: $('llmFallbackStatus'),
+            key: 'llmFallback'
+        });
+        if (result.stale) return;
+        if (!result.ok) {
+            state.settings.llmFallback = previous;
+            renderFallback();
+        }
+    }
+
+    function moveFallback(id, act) {
+        const all = fallbackItems().slice();
+        const shown = shownFallback().map((item) => item.id);
+        const at = shown.indexOf(id);
+        const other = shown[act === 'up' ? at - 1 : at + 1];
+        if (at < 0 || !other) return;
+        const i = all.findIndex((item) => item.id === id);
+        const j = all.findIndex((item) => item.id === other);
+        [all[i], all[j]] = [all[j], all[i]];
+        saveFallback(all, { id, act });
+    }
+
+    fallbackList.addEventListener('click', (e) => {
+        const button = e.target.closest('button[data-act]');
+        const row = e.target.closest('.sw-fallback-item');
+        if (button && row && !button.disabled) moveFallback(row.dataset.provider, button.dataset.act);
+    });
+    fallbackList.addEventListener('change', (e) => {
+        const input = e.target.closest('input[type="radio"]');
+        const row = e.target.closest('.sw-fallback-item');
+        if (!input || !row || !input.checked) return;
+        const enabled = input.value === 'on';
+        const next = fallbackItems().map((item) => (item.id === row.dataset.provider ? { ...item, enabled } : item));
+        saveFallback(next, { id: row.dataset.provider, act: input.value });
+    });
 
     /** Arrow/Home/End keys in a radio group: move focus and select. */
     function radioKeys(e, group, selector, onSelect) {
@@ -1766,6 +1869,7 @@
         }
         $('protectionText').textContent = text;
         renderKeyStorage();
+        renderOpacity();
         document.querySelectorAll('[data-platform-row]').forEach((row) => {
             const first = row.firstElementChild;
             const existing = first.querySelector('.sw-here');
@@ -1773,6 +1877,59 @@
             if (row.dataset.platformRow === p) first.append(el('span', { class: 'oc-chip sw-here' }, 'This computer'));
         });
     }
+
+    // ---------- Answer and chat window opacity ----------
+    //
+    // Saved while the slider moves (at most every OPACITY_SAVE_MS), so main
+    // applies it to the windows live. 40% to 100%; main checks it again.
+
+    const OPACITY_SAVE_MS = 120;
+    const opacityInput = $('windowOpacity');
+    let opacityTimer = null;
+
+    function showOpacityValue() {
+        $('windowOpacityValue').textContent = `${opacityInput.value}%`;
+    }
+
+    function renderOpacity() {
+        // main's answer first; the platform until it arrives. Linux ignores window opacity.
+        const supported = state.info ? state.info.windowOpacity !== false : platform() !== 'linux';
+        opacityInput.disabled = !supported;
+        $('windowOpacityHelp').textContent = supported
+            ? 'Lets the app behind show through the answer and chat windows. From 40% to 100% (opaque).'
+            : 'Not available on Linux: the system does not support see-through windows, so they stay opaque.';
+        const saved = state.settings && Number.isFinite(Number(state.settings.windowOpacity))
+            ? Number(state.settings.windowOpacity) : 100;
+        // Never move the slider under the user's pointer or keys.
+        if (!opacityTimer && document.activeElement !== opacityInput) opacityInput.value = String(saved);
+        state.saved.windowOpacity = String(saved);
+        showOpacityValue();
+    }
+
+    async function saveOpacity() {
+        if (opacityTimer) {
+            clearTimeout(opacityTimer);
+            opacityTimer = null;
+        }
+        const value = opacityInput.value;
+        if (value === state.saved.windowOpacity) return;
+        const result = await save({ windowOpacity: Number(value) }, {
+            status: $('windowOpacityStatus'),
+            input: opacityInput,
+            key: 'windowOpacity'
+        });
+        if (result.ok) {
+            state.saved.windowOpacity = value;
+            if (state.settings) state.settings.windowOpacity = Number(value);
+        }
+    }
+
+    opacityInput.addEventListener('input', () => {
+        showOpacityValue();
+        if (opacityTimer) clearTimeout(opacityTimer);
+        opacityTimer = setTimeout(saveOpacity, OPACITY_SAVE_MS);
+    });
+    opacityInput.addEventListener('change', saveOpacity);
 
     // Where API keys are kept: main sends booleans and labels only, never a key.
     function renderKeyStorage() {

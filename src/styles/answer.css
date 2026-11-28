@@ -175,6 +175,21 @@ body {
   transition: opacity var(--t-swap) var(--ease), visibility 0s linear var(--t-swap);
 }
 
+/* Under the answer: which provider answered when the selected one failed
+   (answer-page.js). Fixed height while shown; measured with the header. */
+.answer-note {
+  flex: none;
+  margin: 0;
+  padding: var(--s-2) var(--s-6);
+  font: 400 var(--fs-12) / var(--lh-16) var(--font-ui);
+  color: var(--ink-3);
+  box-shadow: inset 0 1px 0 var(--rule-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.answer-note[hidden] { display: none; }
+
 /* Set for one frame when a view changes behind a hidden window. */
 .answer-view.no-motion,
 .answer-layout.no-motion,

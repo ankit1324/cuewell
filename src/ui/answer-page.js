@@ -47,6 +47,8 @@ const EMPTY_ANSWER_MESSAGE = 'No answer came back from the AI provider. Try aski
 const FAILED_REQUEST_MESSAGE = 'The AI request failed. Try asking again.';
 // A stopped answer keeps its text; this shows when none had arrived yet.
 const STOPPED_EMPTY_MESSAGE = 'Stopped before any text arrived.';
+// Longest provider note shown under an answer ("Answered by Claude because ...").
+const MAX_NOTE_LENGTH = 200;
 
 window.addEventListener('error', (event) => {
     console.error('[LLM-RESPONSE] Page error:', event.message, 'at line', event.lineno);
@@ -69,6 +71,7 @@ function initAnswerWindow() {
         const info = messageInfo(data);
         if (info.appearing) holdAppear();
         resetStreamDisplay();
+        setAnswerNote('');
         showLoadingState({ instant: info.appearing });
         reportDrawn('loading');
     });
@@ -81,10 +84,12 @@ function initAnswerWindow() {
     api.onTranscriptionLlmResponse((_event, data) => {
         if (!data || !isOpenStream(data.messageId)) return;
         const response = typeof data.response === 'string' ? data.response : '';
+        setAnswerNote(providerNoteOf(data.metadata));
         if (showFinal(response, false, { stopped: data.stopped === true })) reportDrawn('final');
     });
     api.onLlmError((_event, data) => {
         if (!data || !isOpenStream(data.messageId)) return;
+        setAnswerNote('');
         if (showFinal(String(data.error || FAILED_REQUEST_MESSAGE), true)) reportDrawn('final');
     });
 
@@ -107,6 +112,7 @@ function initAnswerWindow() {
             // started) the message is shown, but an answer still
             // streaming keeps going and replaces it.
             const endsStream = !!metadata.messageId || !stream || stream.finished;
+            if (endsStream) setAnswerNote(metadata.isError ? '' : providerNoteOf(metadata));
             showFinal(response, !!metadata.isError, {
                 endsStream,
                 instant: info.appearing,
@@ -119,6 +125,23 @@ function initAnswerWindow() {
             reportDrawn('final', { measure: settled });
         }
     });
+}
+
+// The note main adds when a backup provider answered, or ''.
+function providerNoteOf(metadata) {
+    const note = metadata && typeof metadata.providerNote === 'string' ? metadata.providerNote.trim() : '';
+    return note.slice(0, MAX_NOTE_LENGTH);
+}
+
+// Show `text` in the note under the answer, or hide the note when empty.
+// Plain text only (textContent).
+function setAnswerNote(text) {
+    const note = document.getElementById('answer-note');
+    if (!note) return;
+    const value = typeof text === 'string' ? text : '';
+    if (note.textContent !== value) note.textContent = value;
+    note.title = value; // the whole note when it is cut off
+    note.hidden = !value;
 }
 
 // seq and appearing from a show-loading or display-llm-response message.
@@ -312,10 +335,13 @@ function reportDrawn(phase, { measure = phase === 'final' } = {}) {
     }));
 }
 
-// Height of the title bar plus what the visible view needs, in CSS pixels.
+// Height of the title bar, the provider note (when shown) and what the
+// visible view needs, in CSS pixels.
 function neededWindowHeight() {
     const header = document.querySelector('.window-header');
     const headerHeight = header ? header.getBoundingClientRect().height : 40;
+    const note = document.getElementById('answer-note');
+    const noteHeight = note && !note.hidden ? note.getBoundingClientRect().height : 0;
     const measure = (content, scroller) => {
         if (!content || !scroller) return 0;
         const style = getComputedStyle(scroller);
@@ -334,7 +360,7 @@ function neededWindowHeight() {
         const el = document.getElementById(view === 'loading' ? 'loading' : 'empty-state');
         contentHeight = el ? el.scrollHeight : 0;
     }
-    return Math.ceil(headerHeight + contentHeight);
+    return Math.ceil(headerHeight + noteHeight + contentHeight);
 }
 
 // ---------- Streams ----------
@@ -373,6 +399,7 @@ function onStreamStart(data) {
     resetStreamDisplay();
     stream = { id, text: '', rendered: false, finished: false };
     shownFinalKey = null;
+    setAnswerNote('');
     syncStopButton();
 }
 

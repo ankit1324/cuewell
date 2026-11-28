@@ -1,5 +1,5 @@
 const OpenAI = require('openai');
-const { normalizeSdkError, noTextAtLimitError } = require('./errors');
+const { normalizeSdkError, noTextAtLimitError, refusedError } = require('./errors');
 const { resolveIdleTimeoutMs, startIdleTimeout } = require('./idle-timeout');
 const { cancelledError, isAborted, throwIfCancelled, raceCancel, anySignal } = require('../cancellation');
 
@@ -84,6 +84,10 @@ class OpenAICompatibleProvider {
   _finish(text, finishReason, maxTokens) {
     if (!text && finishReason === 'length') {
       throw noTextAtLimitError(this.label, maxTokens);
+    }
+    // Blocked by the provider's content filter: a refusal, not an outage.
+    if (!text && finishReason === 'content_filter') {
+      throw refusedError(`${this.label} declined this request (content filter)`);
     }
     return text;
   }

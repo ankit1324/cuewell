@@ -1422,6 +1422,110 @@ html[data-platform="darwin"] .sw-close {
   white-space: nowrap;
 }
 
+/* ---------- Backup providers (AI provider > If the provider fails, try) ---------- */
+
+.sw-fallback {
+  margin: 0;
+  padding: var(--s-3) 0 0;
+  list-style: none;
+}
+
+.sw-fallback[hidden] {
+  display: none;
+}
+
+.sw-fallback-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.sw-fallback-rank {
+  font: 500 var(--fs-12) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+  text-align: right;
+}
+
+.sw-fallback-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--s-2);
+  min-width: 0;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.sw-fallback-item.is-off .sw-fallback-name {
+  color: var(--ink-3);
+}
+
+.sw-fallback-meta {
+  font-size: var(--fs-11);
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+.sw-fallback-move {
+  display: flex;
+  gap: 2px;
+}
+
+/* One arrow icon, turned for "Move down". */
+.sw-fallback-down .fas {
+  transform: rotate(180deg);
+}
+
+.sw-fallback-empty {
+  padding: var(--s-3) 0 0;
+}
+
+.sw-fallback-empty[hidden] {
+  display: none;
+}
+
+/* ---------- Range (window opacity) ---------- */
+
+.sw-range {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 32px;
+}
+
+.sw-range-input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--ink);
+  cursor: pointer;
+}
+
+.sw-range-input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sw-range-input:focus-visible {
+  outline: none;
+  border-radius: var(--r-1);
+  box-shadow: var(--focus);
+}
+
+.sw-range-value {
+  flex: none;
+  min-width: 4ch;
+  font: 500 var(--fs-12) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  text-align: right;
+}
+
 @media (max-width: 780px) {
   .sw {
     grid-template-columns: 200px minmax(0, 1fr);
