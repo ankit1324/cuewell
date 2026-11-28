@@ -25,6 +25,64 @@ const LENGTH_RULES = {
   detailed: 'detailed. After the first line, a thorough answer with reasoning, examples, edge cases and trade-offs (a behavioral story up to 90 seconds spoken, then likely follow-ups with short answers).'
 };
 
+// Screen Help: the sections of a screenshot answer, by answer length. Each
+// is a "#### <heading>" line in the answer, which the answer window and the
+// chat style as a section label (normalizeSectionHeadings in
+// src/ui/answer-page.js and src/ui/chat-page.js). The line to say first
+// opens every answer; the code (or, for design, an optional diagram) ends it.
+const ALL_LENGTHS = ['short', 'standard', 'detailed'];
+const SCREEN_HELP = Object.freeze({
+  coding: Object.freeze({
+    title: 'Coding or DSA problem',
+    intro: 'When the screenshot shows a coding or DSA problem, teach the solution in small steps the candidate can follow and say while coding. Write exactly these parts, in this order:',
+    first: 'Line 1, with no heading or label: the one sentence to say first, naming the approach.',
+    sections: [
+      { heading: 'Problem', lengths: ['standard', 'detailed'], text: () => 'what is asked, in plain words, in 1-2 short lines: the input, the output and the key constraint.' },
+      {
+        heading: 'Approach', lengths: ['standard', 'detailed'],
+        text: (length) => `the named pattern (for example "binary search on a rotated array") and why it works, in ${length === 'detailed' ? '2-3 lines, including the key invariant' : '1-2 lines'}. Then two bullets, one line each with its complexity: "**Brute force:** ..." and "**Optimal:** ...".`
+      },
+      {
+        heading: 'Steps', lengths: ALL_LENGTHS,
+        text: (length) => `a numbered list of ${{ short: '3-5', standard: '3-6', detailed: '3-7' }[length]} steps, each one short line the candidate can say while typing the code.`
+      },
+      { heading: 'Dry run', lengths: ['standard', 'detailed'], text: (length) => `${length === 'detailed' ? '2-4' : '2-3'} short bullets tracing the example shown on screen (or a tiny one if none is shown), with values in \`inline code\`.` },
+      { heading: 'Complexity', lengths: ['standard', 'detailed'], text: () => 'two bullets, one line each: "**Time:** O(...), <reason>" and "**Space:** O(...), <reason>".' },
+      { heading: 'Edge cases', lengths: ['standard', 'detailed'], text: () => '2-5 short bullets: the inputs the code must handle (empty, one element, duplicates, overflow, ...).' }
+    ],
+    last: 'The complete solution in one fenced code block, last, with no heading before it. Clean code; comment only the lines whose purpose is not obvious.',
+    rules: [
+      '- Use a code fence only for the solution code; the dry run and complexity stay in plain lines.',
+      '- If a code template or function signature is shown, the code completes it with the same names.'
+    ]
+  }),
+  design: Object.freeze({
+    title: 'System design question',
+    intro: 'When the screenshot shows a system design question or diagram, use this lighter format. Write exactly these parts, in this order:',
+    first: 'Line 1, with no heading or label: the one sentence to say first, naming the core design.',
+    sections: [
+      { heading: 'Problem', lengths: ['standard', 'detailed'], text: (length) => `what is being built and at what scale, in 1-2 lines (assume sensible numbers and say so${length === 'detailed' ? ', with rough traffic and storage estimates' : ''}).` },
+      { heading: 'Steps', lengths: ALL_LENGTHS, text: () => 'a numbered list of 4-7 steps: the high-level design as the request flow from client to storage, one short line each.' },
+      { heading: 'Components', lengths: ['standard', 'detailed'], text: () => '3-6 bullets, "**Name:** its job", one line each.' },
+      { heading: 'Data model', lengths: ['detailed'], text: () => '2-4 bullets: the main entities and keys, and SQL or NoSQL with a reason.' },
+      { heading: 'Scaling', lengths: ['detailed'], text: () => '2-4 bullets: caching, sharding, replication, queues or hot spots.' },
+      { heading: 'Trade-offs', lengths: ['standard', 'detailed'], text: () => '2-3 bullets: the biggest decisions, what they gain and what they give up.' }
+    ],
+    last: 'Optionally, last, a small ASCII diagram of the flow in one ```text block, with no heading before it.',
+    lastLengths: ['standard', 'detailed'],
+    rules: []
+  })
+});
+// Interview modes that get each Screen Help format for a screenshot.
+const SCREEN_HELP_MODES = Object.freeze({
+  auto: ['coding', 'design'],
+  dsa: ['coding'],
+  technical: ['coding'],
+  'system-design': ['design']
+});
+// What to read on a screenshot, and what to ignore around it.
+const SCREEN_IGNORE = 'browser tabs, the address bar, bookmarks, menus, toolbars, sidebars, timers, buttons, ads, notifications, the dock or taskbar and other windows';
+
 // Interview context (profile.json) fields as they appear in the prompt.
 const PROFILE_PROMPT_FIELDS = [
   { key: 'role', label: 'Target role', block: false },
@@ -147,7 +205,7 @@ STRICT REQUIREMENTS:
 - Respond ONLY in ${languageTitle}. Do not include any snippets or alternatives in other languages.
 - All code blocks must use triple backticks with the exact language tag: \`\`\`${fenceTag}\`\`\`.
 - Aim for the best possible time and space complexity; prefer optimal algorithms and data structures.
-- Provide: brief approach, then final ${languageTitle} implementation, followed by time/space complexity.
+- Provide: the approach, its time/space complexity and the final ${languageTitle} implementation, in the order the answer format asks for.
 - If the user's input is a problem statement (and does not include code), produce a complete, runnable ${languageTitle} solution without asking for clarification.
 - Avoid unnecessary verbosity; focus on correctness, clarity, and efficiency.`;
         break;
@@ -614,7 +672,12 @@ ${styleRule}
 - Greetings, small talk and statements that are not questions: reply with one short, natural line the candidate can say (for filler or noise, something like "Sure, go ahead."). Never a refusal.`);
     } else if (channel === 'image') {
       sections.push(`## SCREENSHOT INPUT (internal, never mention it)
-- The question comes from a screenshot. Read it carefully, including any code template, constraints or examples shown, and answer it.`);
+- The question comes from a screenshot of the candidate's screen. Find the problem or question on it and answer that: its title, statement, examples, constraints, and any code template, function signature or diagram.
+- Ignore everything around it: ${SCREEN_IGNORE}. Never describe the screen or the page.
+- When a code template or function signature is shown, use it exactly: the same names, parameters and return type.
+- When part of the question is cut off, answer what is visible and state the assumption in one short line.`);
+      const screenHelp = this.formatScreenHelp(modeId, length);
+      if (screenHelp) sections.push(screenHelp);
     }
 
     const context = this.formatProfile(profile);
@@ -625,25 +688,55 @@ ${styleRule}
     return sections.join('\n\n');
   }
 
+  /**
+   * Screen Help format for a screenshot answer in `modeId` at the resolved
+   * answer `length` ('short' | 'standard' | 'detailed'): the sections each
+   * question type gets, under the exact "####" headings the answer window
+   * and chat style. '' for modes without one (Behavioral, HR).
+   */
+  formatScreenHelp(modeId, length) {
+    const kinds = SCREEN_HELP_MODES[modeId];
+    if (!kinds) return '';
+    const size = ALL_LENGTHS.includes(length) ? length : 'standard';
+    const parts = kinds.map((kind) => {
+      const format = SCREEN_HELP[kind];
+      const items = [format.first];
+      for (const section of format.sections) {
+        if (section.lengths.includes(size)) items.push(`"#### ${section.heading}": ${section.text(size)}`);
+      }
+      if (!format.lastLengths || format.lastLengths.includes(size)) items.push(format.last);
+      const list = items.map((item, index) => `${index + 1}. ${item}`).join('\n');
+      return [`### ${format.title}`, format.intro, list, ...format.rules].join('\n');
+    });
+    return `## SCREEN HELP FORMAT (internal, never mention it; the "####" headings below are part of the answer)
+- Write each "####" heading exactly as shown, on its own line, followed by its content. Leave out every part not listed; add no other headings, no intro and nothing after the last part.
+- Keep every line short and plain, so the candidate can read it at a glance. This format replaces the word counts of the answer size above.
+- Other question types keep the format their type calls for.
+
+${parts.join('\n\n')}`;
+  }
+
   /** The user-turn instruction sent with a screenshot, for the given mode. */
   getImageInstruction(mode, programmingLanguage = null) {
     const modeId = this.normalizeSkillName(mode);
     const langNote = programmingLanguage && this.requiresProgrammingLanguage(modeId)
       ? ` Use only ${String(programmingLanguage).toUpperCase()} for any code.`
       : '';
+    // "Solve screen": the question on the page, not the screen around it.
+    const focus = ' Ignore browser tabs, the address bar, menus, sidebars, timers, buttons, notifications and other windows around it.';
     switch (modeId) {
       case 'dsa':
-        return `This screenshot shows a coding interview question. Extract the problem concisely and give the best possible solution: the one-line direct answer first, then the approach, the final code and its complexity.${langNote}`;
+        return `This screenshot shows a coding interview problem. Read only the problem: its title, statement, examples, constraints and any code template.${focus} Solve it in the answer format from your instructions: the one-line direct answer first, then the sections, with the code last.${langNote}`;
       case 'technical':
-        return 'This screenshot shows a technical interview question. Answer it with the one-line direct answer first, then a crisp definition, the key points or differences, a tiny example and when to use which.';
+        return `This screenshot shows a technical interview question. Answer it with the one-line direct answer first, then a crisp definition, the key points or differences, a tiny example and when to use which. If it is a coding problem, use the coding format from your instructions.${focus}`;
       case 'system-design':
-        return 'This screenshot shows a system design question or diagram. Answer it with the one-line direct answer first, then requirements, high-level design, components, data model, scaling and trade-offs.';
+        return `This screenshot shows a system design question or diagram. Answer it in the system design format from your instructions, starting with the one-line direct answer.${focus}`;
       case 'behavioral':
-        return 'This screenshot shows a behavioral interview question. Answer it as a first-person STAR story the candidate can say aloud, starting with the one-line direct answer.';
+        return `This screenshot shows a behavioral interview question. Answer it as a first-person STAR story the candidate can say aloud, starting with the one-line direct answer.${focus}`;
       case 'hr':
-        return 'This screenshot shows an HR interview question. Answer it in the first person, naturally and positively, starting with the one-line direct answer the candidate can say.';
+        return `This screenshot shows an HR interview question. Answer it in the first person, naturally and positively, starting with the one-line direct answer the candidate can say.${focus}`;
       default:
-        return `This screenshot shows an interview question. Work out its type (coding, technical theory, system design, behavioral, HR, situational, puzzle or case) and answer it in the format for that type, starting with the one-line direct answer the candidate can say.${langNote}`;
+        return `This screenshot shows an interview question. Work out its type (coding, technical theory, system design, behavioral, HR, situational, puzzle or case) and answer it in the format for that type, starting with the one-line direct answer the candidate can say.${focus}${langNote}`;
     }
   }
 

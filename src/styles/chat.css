@@ -243,6 +243,28 @@ body {
 .chat-messages .message.assistant .message-text > :is(ul, ol) li > :is(p, ul, ol) { margin: 0; }
 .chat-messages .message.assistant .message-text > :is(ul, ol) :is(ul, ol) { padding-left: var(--s-5); }
 
+/* Screen Help section labels (Problem, Steps, Complexity, ...): small caps
+   after a short pencil dash, as on the answer card. normalizeSectionHeadings
+   in chat-page.js turns the labels a model writes into these h4s. */
+.chat-messages .message.assistant .message-text > h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-4) 0 var(--s-1);
+  font: 700 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.chat-messages .message.assistant .message-text > h4::before {
+  content: '';
+  flex: none;
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--graphite);
+}
+
 /* Streaming caret: a red-pencil bar after the last word. No width, shorter
    than the line, so it never moves text. */
 .message.streaming > .message-text > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,

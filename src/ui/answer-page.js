@@ -32,7 +32,7 @@ let lastHighlightAt = 0;
 // that changed are replaced; Prism and the copy buttons wait for the final
 // answer.
 const STREAM_RENDER_INTERVAL_MS = 80;
-let stream = null;            // { id, text, rendered, finished }
+let stream = null;            // { id, text, rendered, finished, source, skill }
 let streamRenderTimer = null;
 let lastStreamRenderAt = 0;
 // What the last final render showed. The final answer (or error) arrives
@@ -397,7 +397,10 @@ function onStreamStart(data) {
     const id = data && typeof data.messageId === 'string' ? data.messageId : '';
     if (!id) return;
     resetStreamDisplay();
-    stream = { id, text: '', rendered: false, finished: false };
+    // source ('screenshot', ...) and skill (the mode) shape the streaming layout.
+    const source = typeof data.source === 'string' ? data.source : '';
+    const skill = typeof data.skill === 'string' ? data.skill : '';
+    stream = { id, text: '', rendered: false, finished: false, source, skill };
     shownFinalKey = null;
     setAnswerNote('');
     syncStopButton();
@@ -412,7 +415,7 @@ function onStreamChunk(data) {
     const id = typeof data.messageId === 'string' ? data.messageId : '';
     // No start seen (e.g. the page loaded mid-answer): follow this stream.
     if (!stream && id) {
-        stream = { id, text: '', rendered: false, finished: false };
+        stream = { id, text: '', rendered: false, finished: false, source: '', skill: '' };
         syncStopButton();
     }
     if (!isOpenStream(id)) return;
@@ -441,7 +444,13 @@ function renderStreamNow() {
     const first = !stream.rendered;
     stream.rendered = true;
     // The first text replaces "Thinking…" and starts at the top.
-    renderAnswer(stream.text, { isError: false, final: false, fresh: first });
+    renderAnswer(stream.text, {
+        isError: false,
+        final: false,
+        fresh: first,
+        screen: stream.source === 'screenshot',
+        codingMode: stream.skill === 'dsa'
+    });
     if (first) {
         stopSlowHint();
         setView('answer');
@@ -554,10 +563,11 @@ function languageLabel(lang) {
 }
 
 // Not named renderMarkdown: a top-level function here would replace
-// window.renderMarkdown from markdown-render.js.
+// window.renderMarkdown from markdown-render.js. Screen Help section labels
+// are normalized first (normalizeSectionHeadings).
 function renderAnswerMarkdown(text) {
     if (typeof window.renderMarkdown === 'function') {
-        return window.renderMarkdown(text);
+        return window.renderMarkdown(normalizeSectionHeadings(text));
     }
     return escapeHtml(text).replace(/\n/g, '<br>');
 }
@@ -566,8 +576,12 @@ function renderAnswerMarkdown(text) {
 // when there is no code. While streaming (final false) code is plain text;
 // the final render adds copy buttons and Prism highlighting. `fresh` (a new
 // answer) scrolls the panels back to the top before drawing; `instant`
-// switches the layout without a cross-fade.
-function renderAnswer(response, { isError = false, final = true, fresh = false, instant = false } = {}) {
+// switches the layout without a cross-fade. A screenshot answer (`screen`)
+// to a coding question writes its code last; while it streams, the split
+// layout opens early with a pending code card (from the first text in
+// Coding mode, `codingMode`, otherwise once expectsCodePanel sees a coding
+// section), so the text does not re-wrap into the left panel at the end.
+function renderAnswer(response, { isError = false, final = true, fresh = false, instant = false, screen = false, codingMode = false } = {}) {
     const responseElement = document.getElementById('response-content');
     if (!responseElement || !response) return;
 
@@ -585,18 +599,20 @@ function renderAnswer(response, { isError = false, final = true, fresh = false, 
     // is still open (mid-stream) runs to the end of the text.
     const { text: prose, blocks: codeBlocks } = splitCodeBlocks(response);
     hasCode = codeBlocks.length > 0;
+    const codePending = screen && !final && !hasCode && (codingMode || expectsCodePanel(prose));
+    const split = hasCode || codePending;
 
-    if (hasCode) {
-        renderSplitLayout(prose, codeBlocks, final);
+    if (split) {
+        renderSplitLayout(prose, codeBlocks, final, { pending: codePending });
     } else {
         renderFullLayout(prose, final);
     }
     // The first code fence of a streamed answer switches to the split
     // layout with a short cross-fade; behind "Thinking…" it is instant.
-    setLayout(hasCode ? 'split' : 'full', { instant: instant || view !== 'answer' });
+    setLayout(split ? 'split' : 'full', { instant: instant || view !== 'answer' });
 
     // Errors (e.g. screen capture failures) render as a callout.
-    const errorTarget = document.getElementById(hasCode ? 'text-content' : 'full-markdown');
+    const errorTarget = document.getElementById(split ? 'text-content' : 'full-markdown');
     ['text-content', 'full-markdown'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -672,6 +688,71 @@ function splitCodeBlocks(text) {
     return { text: prose.join('\n').replace(/\n\s*\n\s*\n/g, '\n\n').trim(), blocks };
 }
 
+// Screen Help sections. The prompt asks for "#### <Heading>" lines (Problem,
+// Approach, Steps, Dry run, Complexity, Edge cases; for design Steps,
+// Components, Trade-offs, ...), which answer.css styles as section labels.
+// Models also write them as other heading levels, "**Steps:**" on its own
+// line or with numbers ("### 3. Steps"); those become "#### Steps" too. A
+// "Say this" label is dropped (the card shows it already) and so is a
+// "Code" heading (the code panel has its own). Other lines, and lines
+// inside fences or indented code, are kept as written.
+// Keep in sync with normalizeSectionHeadings in src/ui/chat-page.js.
+function normalizeSectionHeadings(text) {
+    const SECTION = /^(?:(?:the )?problem(?: in plain words| statement| restated)?|understanding the problem|approach|(?:key )?idea|intuition|steps|step[- ]by[- ]step(?: breakdown)?|algorithm|dry[- ]run(?: on the example)?|(?:example )?walkthrough|(?:time (?:and|&) space )?complexity(?: analysis)?|edge cases?|corner cases?|follow[- ]ups?|requirements|estimates|(?:high[- ]level )?design|components|data model|api|scaling|reliability|trade[- ]?offs)$/i;
+    const CODE = /^(?:(?:final|solution|the) )?code(?: \([^)]*\)| in [\w+#]+)?$/i;
+    const SAY = /^say this(?: first)?$/i;
+    // "**Say this:**", "**Say this**" or "Say this:" in front of the first line.
+    const SAY_PREFIX = /^[ \t]*(?:(?:\*\*|__)say this[ \t]*:?[ \t]*(?:\*\*|__)[ \t]*:?|say this[ \t]*:)[ \t]*(?=\S)/i;
+    const label = (raw) => raw
+        .replace(/^(\*\*|__)(.*)\1$/, '$2')
+        .trim()
+        .replace(/:$/, '')
+        .replace(/^(?:step[ \t]+)?\d+[ \t]*[.):]?[ \t]+/i, '')
+        .trim();
+    const out = [];
+    let fence = null;
+    let started = false;
+    String(text || '').split(/\r\n?|\n/).forEach(line => {
+        const marker = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/);
+        if (fence) {
+            if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+            out.push(line);
+            return;
+        }
+        if (marker) {
+            fence = marker[1];
+            started = true;
+            out.push(line);
+            return;
+        }
+        const heading = line.match(/^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/);
+        const bold = heading ? null : line.match(/^ {0,3}(\*\*|__)(.+?)\1[ \t]*:?[ \t]*$/);
+        const name = heading ? label(heading[1]) : bold ? label(bold[2]) : '';
+        const first = !started && line.trim() !== '';
+        if (line.trim()) started = true;
+        if (name && name.length <= 40) {
+            if (CODE.test(name) || (first && SAY.test(name))) {
+                if (first) started = false;
+                return;
+            }
+            if (SECTION.test(name)) {
+                out.push('#### ' + name);
+                return;
+            }
+        }
+        out.push(first ? line.replace(SAY_PREFIX, '') : line);
+    });
+    return out.join('\n');
+}
+
+// True when streamed prose has a section only a coding Screen Help answer
+// has (Approach, Dry run, Complexity, Edge cases), so its code is still to
+// come. Design answers (Problem, Steps, Components, ...) never match.
+function expectsCodePanel(prose) {
+    return /^#### (?:approach|dry[- ]run|(?:time (?:and|&) space )?complexity|edge cases?|corner cases?)\b/im
+        .test(normalizeSectionHeadings(prose));
+}
+
 function attachCopy(btn, text) {
     btn.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -726,14 +807,22 @@ function codeBlocksHtml(codeBlocks) {
     ).join('');
 }
 
-function renderSplitLayout(textContent, codeBlocks, final) {
+// Stands in the code panel while a coding answer's code is still to come.
+// The same 40 px bar as a code card, so the real card replaces it in place.
+const PENDING_CODE_HTML =
+    '<div class="code-block code-block--pending" aria-hidden="true">' +
+        '<div class="code-header"><span class="oc-label">Code</span></div>' +
+        '<div class="code-content"><pre><code>The code follows the steps\u2026</code></pre></div>' +
+    '</div>';
+
+function renderSplitLayout(textContent, codeBlocks, final, { pending = false } = {}) {
     const textEl = document.getElementById('text-content');
     const codeEl = document.getElementById('code-content');
     if (!textEl || !codeEl) return;
 
     // The prose from splitCodeBlocks, fences already removed.
     patchChildren(textEl, sanitizeHtml(renderAnswerMarkdown(textContent)), { math: true });
-    patchChildren(codeEl, codeBlocksHtml(codeBlocks));
+    patchChildren(codeEl, pending ? PENDING_CODE_HTML : codeBlocksHtml(codeBlocks));
 
     if (!final) return;
     // Copy buttons only on the final answer: mid-stream the code is still

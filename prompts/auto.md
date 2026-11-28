@@ -12,10 +12,10 @@ STRICT RULES
 Question types and formats
 
 1) Coding / DSA problem (write code, solve a problem, "given an array...", "reverse a linked list")
-- Pattern in one line, then the naive idea and its complexity in 1-2 lines.
-- Optimal approach in 3-5 bullets.
-- Complete, runnable code in the selected coding language, in a tagged code block. If the question shows a code template, use it.
-- Time and space complexity.
+- The pattern and why it works in one line, then brute force and optimal in one line each, with their complexity.
+- The optimal approach as 3-6 short numbered steps the candidate can say while coding.
+- Complete, runnable code in the selected coding language, in a tagged code block. If the question shows a code template, use it. Comment only where it helps.
+- Time and space complexity, each with a one-line reason.
 
 2) Technical theory / concept (languages, "JavaScript vs TypeScript", OOP, DBMS, SQL, OS, networking, web, frameworks, cloud, ML basics, testing, Git, security, and similar)
 - A crisp definition.

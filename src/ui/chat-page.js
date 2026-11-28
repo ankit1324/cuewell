@@ -209,7 +209,7 @@ function buildMessage(text, type, rise) {
 // Markdown formatter (src/ui/markdown-render.js, backed by marked)
 function formatMarkdown(text) {
   if (!text) return '';
-  if (typeof window.renderMarkdown === 'function') return window.renderMarkdown(text);
+  if (typeof window.renderMarkdown === 'function') return window.renderMarkdown(normalizeSectionHeadings(text));
   console.warn('Markdown renderer not loaded, showing plain text');
   return escapeHtml(text).replace(/\n/g, '<br>');
 }
@@ -740,6 +740,63 @@ function splitCodeBlocks(text) {
   });
   if (fence) endBlock();
   return { text: prose.join('\n').replace(/\n\s*\n\s*\n/g, '\n\n').trim(), blocks };
+}
+
+// Screen Help sections. The prompt asks for "#### <Heading>" lines (Problem,
+// Approach, Steps, Dry run, Complexity, Edge cases; for design Steps,
+// Components, Trade-offs, ...), which chat.css styles as section labels.
+// Models also write them as other heading levels, "**Steps:**" on its own
+// line or with numbers ("### 3. Steps"); those become "#### Steps" too. A
+// "Say this" label is dropped (the answer card shows it) and so is a
+// "Code" heading (the code goes in its own card). Other lines, and lines
+// inside fences or indented code, are kept as written.
+// Keep in sync with normalizeSectionHeadings in src/ui/answer-page.js.
+function normalizeSectionHeadings(text) {
+  const SECTION = /^(?:(?:the )?problem(?: in plain words| statement| restated)?|understanding the problem|approach|(?:key )?idea|intuition|steps|step[- ]by[- ]step(?: breakdown)?|algorithm|dry[- ]run(?: on the example)?|(?:example )?walkthrough|(?:time (?:and|&) space )?complexity(?: analysis)?|edge cases?|corner cases?|follow[- ]ups?|requirements|estimates|(?:high[- ]level )?design|components|data model|api|scaling|reliability|trade[- ]?offs)$/i;
+  const CODE = /^(?:(?:final|solution|the) )?code(?: \([^)]*\)| in [\w+#]+)?$/i;
+  const SAY = /^say this(?: first)?$/i;
+  // "**Say this:**", "**Say this**" or "Say this:" in front of the first line.
+  const SAY_PREFIX = /^[ \t]*(?:(?:\*\*|__)say this[ \t]*:?[ \t]*(?:\*\*|__)[ \t]*:?|say this[ \t]*:)[ \t]*(?=\S)/i;
+  const label = (raw) => raw
+    .replace(/^(\*\*|__)(.*)\1$/, '$2')
+    .trim()
+    .replace(/:$/, '')
+    .replace(/^(?:step[ \t]+)?\d+[ \t]*[.):]?[ \t]+/i, '')
+    .trim();
+  const out = [];
+  let fence = null;
+  let started = false;
+  String(text || '').split(/\r\n?|\n/).forEach(line => {
+    const marker = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+      out.push(line);
+      return;
+    }
+    if (marker) {
+      fence = marker[1];
+      started = true;
+      out.push(line);
+      return;
+    }
+    const heading = line.match(/^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/);
+    const bold = heading ? null : line.match(/^ {0,3}(\*\*|__)(.+?)\1[ \t]*:?[ \t]*$/);
+    const name = heading ? label(heading[1]) : bold ? label(bold[2]) : '';
+    const first = !started && line.trim() !== '';
+    if (line.trim()) started = true;
+    if (name && name.length <= 40) {
+      if (CODE.test(name) || (first && SAY.test(name))) {
+        if (first) started = false;
+        return;
+      }
+      if (SECTION.test(name)) {
+        out.push('#### ' + name);
+        return;
+      }
+    }
+    out.push(first ? line.replace(SAY_PREFIX, '') : line);
+  });
+  return out.join('\n');
 }
 function escapeHtml(str) {
   const div = document.createElement('div');
