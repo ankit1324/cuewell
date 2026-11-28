@@ -246,6 +246,7 @@ process.on("unhandledRejection", (reason) => {
 const captureService = require("./src/services/capture.service");
 const speechService = require("./src/services/speech.service");
 const whisperModels = require("./src/core/whisper-models");
+const { createElectronHttpGet } = require("./src/core/electron-http-get");
 // A relative WHISPER_MODEL_DIR (setup.sh writes `.whisper-models`) is
 // resolved against the folder of the .env loaded above.
 speechService.setEnvPath(ENV_PATH);
@@ -2931,6 +2932,10 @@ class ApplicationController {
         modelDir,
         signal: controller.signal,
         onProgress: (received, total) => send(received, total, received >= total),
+        // Electron's net, not Node's https: it uses the system proxy settings.
+        // Redirects come back unfollowed, so every hop is checked against the
+        // download host allowlist.
+        httpGet: createElectronHttpGet({ net, session: session.defaultSession }),
       });
       send(model.bytes, model.bytes, true);
       logger.info("Voice model downloaded", { id, ms: Date.now() - startedAt });

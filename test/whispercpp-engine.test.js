@@ -11,7 +11,7 @@ const os = require('node:os');
 const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { once } = require('node:events');
 
 // The engine sweeps os.tmpdir() for socket folders left by a crashed run.
@@ -549,6 +549,72 @@ describe('WhisperCppEngine proves the listener is its own child', { concurrency:
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+});
+
+describe('WhisperCppEngine on Windows records its server for crash cleanup', () => {
+  // platform: 'win32' with injected process tools, so this runs on any OS.
+  const WIN_EXE = 'C:\\Users\\me\\AppData\\Local\\Programs\\Cuewell\\resources\\whisper\\win32-x64\\whisper-server.exe';
+  const CREATED = '2025-02-03T04:05:06.7000000Z';
+
+  function records() {
+    return fs.readdirSync(TMP)
+      .filter((name) => name.startsWith('cuewell-wcpp-'))
+      .map((name) => {
+        const dir = path.join(TMP, name);
+        try {
+          return { dir, ...JSON.parse(fs.readFileSync(path.join(dir, 'owner.json'), 'utf8')) };
+        } catch (_) {
+          return { dir };
+        }
+      });
+  }
+
+  it('sweeps an earlier crashed run\'s server at the first start, and records the new one until it stops', async (t) => {
+    // A record from a crashed run: its Cuewell (an exited process) is gone.
+    const deadOwner = spawnSync(process.execPath, ['-e', '']).pid;
+    const stalePid = 2147480000;
+    const staleDir = fs.mkdtempSync(path.join(TMP, 'cuewell-wcpp-'));
+    fs.writeFileSync(path.join(staleDir, 'owner.json'),
+      JSON.stringify({ owner: deadOwner, server: stalePid, path: WIN_EXE, created: CREATED }));
+
+    const inspected = [];
+    const killed = [];
+    const { engine, spawns } = setup(t, {
+      engineOptions: {
+        platform: 'win32',
+        inspectProcessFn: async (pid) => {
+          inspected.push(pid);
+          return { path: WIN_EXE, created: CREATED };
+        },
+        killProcessFn: async (pid) => {
+          killed.push(pid);
+          return true;
+        },
+      },
+    });
+    await engine.warmup();
+    await engine._sweepWindows(); // runs beside the start
+    assert.deepEqual(killed, [stalePid], 'the leftover server was stopped');
+    assert.equal(fs.existsSync(staleDir), false, 'and its record removed');
+
+    const childPid = spawns[0].child.pid;
+    assert.ok(inspected.includes(childPid), 'the new server was inspected right after it started');
+    let mine;
+    await waitFor(() => {
+      mine = records().find((r) => r.server === childPid && r.created);
+      return Boolean(mine);
+    });
+    assert.equal(mine.owner, process.pid);
+    assert.equal(mine.path, WIN_EXE);
+    assert.equal(mine.created, CREATED);
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(path.join(mine.dir, 'owner.json')).mode & 0o077, 0, 'owner-only');
+    }
+
+    await engine.unload();
+    await waitFor(() => !fs.existsSync(mine.dir));
+    assert.deepEqual(killed, [stalePid], 'the sweep runs once per app run');
   });
 });
 
