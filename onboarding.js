@@ -8,12 +8,11 @@
  *
  *   1. Welcome
  *   2. AI provider choice, key / model / Ollama URL + Test connection
- *   3. Speech provider choice (Whisper / Azure / Skip)
- *   4. Whisper detect + (optional) install (Whisper only)
- *   5. Whisper model download (Whisper only)
- *   6. Summary
+ *   3. Speech provider choice (local voice / Azure / Skip)
+ *   4. Local voice model download (local voice only)
+ *   5. Summary
  *
- * The Whisper path has 6 steps; the others have 4.
+ * The local voice path has 5 steps; the others have 4.
  */
 
 (function () {
@@ -22,18 +21,6 @@
   // ── DOM refs ──────────────────────────────────────────────────────
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
-
-  // Quote the executable portion of a command string if it contains spaces.
-  // This keeps Windows user profile paths (e.g. C:\Users\CANDAN SINGH\...) intact.
-  function quoteCommandIfNeeded(cmd) {
-    if (!cmd) return cmd;
-    const firstSpace = cmd.indexOf(' ');
-    if (firstSpace === -1) return cmd;
-    const exe = cmd.slice(0, firstSpace);
-    const rest = cmd.slice(firstSpace + 1);
-    if (exe.startsWith('"') || rest.startsWith('"')) return cmd;
-    return `"${exe}" ${rest}`;
-  }
 
   const screens = $$('.screen');
   const stepper = $('#stepper');
@@ -55,16 +42,19 @@
     geminiConfigured: false,
     testing: false,
     testedSignature: null, // inputs of the last successful test
-    speechProvider: null, // 'whisper' | 'azure' | 'skip'
+    speechProvider: null, // 'whisper' (local voice) | 'azure' | 'skip'
     azureKey: '',
     azureRegion: '',
-    whisperCmd: null,
-    whisperDetected: false,
-    skippingWhisper: false,
-    modelDownloadChoice: null, // 'now' | 'later'
-    modelDownloading: false,
-    modelDownloaded: false,
-    modelDownloadFailed: false,
+    // Local voice: main's get-voice-status answer, cleaned.
+    voiceStatus: null,
+    voiceChecking: false,
+    voiceError: '',
+    voiceChoice: null, // a model id, or 'python' to keep Python Whisper
+    // id -> { phase: 'downloading' | 'cancelling' | 'cancelled' | 'failed', received, total, error }
+    downloads: {},
+    activeDownload: null, // the one model downloading, if any
+    voiceSaving: false,
+    voiceSaved: null, // { engine, model } once main has it
     finished: false,
   };
 
@@ -104,16 +94,14 @@
     }
     refreshStepper();
     backBtn.style.visibility = state.step === 0 ? 'hidden' : 'visible';
-    // Reset next button state unless we're actively downloading a model
-    if (name !== 'model-download' || !state.modelDownloading) {
-      nextBtn.disabled = false;
-      nextBtn.classList.remove('oc-btn--success');
-      nextBtn.classList.add('oc-btn--primary');
-    }
+    backBtn.disabled = false;
+    nextBtn.disabled = false;
+    nextBtn.classList.remove('oc-btn--success');
+    nextBtn.classList.add('oc-btn--primary');
     // The primary action label changes by step
     if (name === 'welcome') nextBtn.innerHTML = 'Get started <i class="fas fa-arrow-right"></i>';
     else if (name === 'finish') nextBtn.innerHTML = 'Finish <i class="fas fa-check"></i>';
-    else if (name === 'model-download') refreshModelDownloadButton();
+    else if (name === 'voice-model') refreshVoiceButton();
     else nextBtn.innerHTML = 'Continue <i class="fas fa-arrow-right"></i>';
     // Continue on the AI step waits for a passing test of the current inputs.
     if (name === 'provider') nextBtn.disabled = !providerTestPassed();
@@ -133,11 +121,10 @@
     return active ? active.dataset.screen : 'welcome';
   }
 
-  // Order depends on choices — e.g. whisper path inserts the install screen.
+  // Order depends on choices: local voice adds the model screen.
   function computeScreenOrder() {
     const out = ['welcome', 'provider', 'speech'];
-    if (state.speechProvider === 'whisper') out.push('whisper');
-    if (state.speechProvider === 'whisper') out.push('model-download');
+    if (state.speechProvider === 'whisper') out.push('voice-model');
     out.push('finish');
     return out;
   }
@@ -160,11 +147,8 @@
           return !!state.azureKey.trim() && !!state.azureRegion.trim();
         }
         return !!state.speechProvider;
-      case 'whisper':
-        // Allow advancing whether whisper is detected OR user skipped
-        return state.whisperDetected || state.skippingWhisper;
-      case 'model-download':
-        return !!state.modelDownloadChoice && !state.modelDownloading;
+      case 'voice-model':
+        return !state.activeDownload && !state.voiceSaving;
       case 'finish':
         return true;
       default:
@@ -253,8 +237,14 @@
   }
 
   function setTestResult(kind, text) {
-    testResult.className = `test-result ${kind}`;
-    testResult.textContent = '';
+    setResult(testResult, kind, text);
+  }
+
+  // A status line (.test-result): kind is idle | testing | success | error.
+  function setResult(node, kind, text) {
+    node.className = node.className.replace(/\s*\b(idle|testing|success|error)\b/g, '');
+    node.classList.add(kind || 'idle');
+    node.textContent = '';
     if (!text) return;
     const icon = document.createElement('i');
     icon.setAttribute('aria-hidden', 'true');
@@ -265,7 +255,7 @@
     }[kind] || 'fas fa-circle-info';
     const span = document.createElement('span');
     span.textContent = text;
-    testResult.append(icon, span);
+    node.append(icon, span);
   }
 
   // Any change to the inputs voids an earlier passing test.
@@ -421,7 +411,7 @@
         state.azureKey = '';
         state.azureRegion = '';
       }
-      // The choice sets the path length (Whisper adds two screens).
+      // The choice sets the path length (local voice adds the model screen).
       refreshStepper();
     });
   });
@@ -429,241 +419,515 @@
   $('#azureKey').addEventListener('input', (e) => { state.azureKey = e.target.value.trim(); });
   $('#azureRegion').addEventListener('input', (e) => { state.azureRegion = e.target.value.trim(); });
 
-  // ── Wire up: Whisper screen ───────────────────────────────────────
-  const installLog = $('#installLog');
-  const detectCmd = $('#detectCmd');
-  const detectStatus = $('#detectStatus');
-  const installList = $('#installList');
-  const installCardTitle = $('#installCardTitle');
+  // ── Wire up: Local voice model screen ─────────────────────────────
+  // Built-in whisper.cpp: pick a model, download it once (with progress,
+  // Cancel and Retry), and Continue saves the choice through main.
+  const RELEASES_URL = 'https://github.com/ankit1324/cuewell/releases/latest';
+  const OFFLINE_TEXT = 'You are offline. Connect to the internet, then retry.';
+  const OLD_BUILD_TEXT = 'This version of Cuewell cannot set up local voice.';
+  // How the built-in models read here; main's label covers any other id.
+  const MODEL_TEXT = {
+    'small-q5_1': { name: 'Small', tag: 'Recommended', note: 'Best for Hindi and Hinglish' },
+    'base-q5_1': { name: 'Base', tag: '', note: 'Faster, smaller' },
+  };
+  // A Cancel this soon after Download is a double click, not a choice.
+  const CANCEL_GRACE_MS = 600;
+  // A cancel main never confirms gives the Cancel button back.
+  const CANCEL_STUCK_MS = 10000;
 
-  function appendLog(line) {
-    installLog.textContent += (installLog.textContent ? '\n' : '') + line;
-    installLog.scrollTop = installLog.scrollHeight;
+  const voiceList = $('#voiceModelChoices');
+  const voiceProblem = $('#voiceProblem');
+  const voiceStatusLine = $('#voiceModelStatus');
+
+  const hasApi = (name) => !!(window.electronAPI && typeof window.electronAPI[name] === 'function');
+  const voiceModels = () => (state.voiceStatus ? state.voiceStatus.models : []);
+  const findVoiceModel = (id) => voiceModels().find((m) => m.id === id) || null;
+  const voiceModelName = (m) => (m && MODEL_TEXT[m.id] ? MODEL_TEXT[m.id].name : (m && m.label) || 'the model');
+  const builtInRuns = () => !!state.voiceStatus && state.voiceStatus.platformSupported && state.voiceStatus.binaryAvailable;
+  const pythonOffered = () => !!state.voiceStatus && state.voiceStatus.pythonConfigured;
+
+  /** Bytes as decimal megabytes: 190085487 -> "190 MB", or "190.1 MB" with digits 1. */
+  function formatMB(bytes, digits = 0) {
+    return `${(Math.max(0, Number(bytes) || 0) / 1e6).toFixed(digits)} MB`;
   }
 
-  function setDetectStatus(state_, text) {
-    detectStatus.className = `oc-chip status-pill ${state_}`;
-    const icon = detectStatus.querySelector('i');
-    if (state_ === 'success') icon.className = 'fas fa-check-circle';
-    else if (state_ === 'error') icon.className = 'fas fa-circle-xmark';
-    else if (state_ === 'idle') icon.className = 'fas fa-circle-info';
-    else icon.className = 'fas fa-circle-notch fa-spin';
-    detectStatus.querySelector('.text').textContent = text;
+  function progressPercent(received, total) {
+    if (!(total > 0)) return 0;
+    return Math.max(0, Math.min(100, Math.floor((received / total) * 100)));
   }
 
-  async function runWhisperDetect() {
-    detectCmd.textContent = 'scanning…';
-    setDetectStatus('testing', 'Probing');
-    try {
-      const r = await window.electronAPI.detectWhisper();
-      if (r.found) {
-        state.whisperDetected = true;
-        state.whisperCmd = r.command;
-        detectCmd.textContent = r.command;
-        setDetectStatus('success', `Found v${r.version || '?'}`);
-        appendLog(`✓ Detected Whisper CLI: ${r.command}`);
-      } else {
-        detectCmd.textContent = 'not found';
-        setDetectStatus('error', 'Not installed');
-        appendLog('✗ No Whisper CLI detected on PATH or in known venvs');
-      }
-    } catch (e) {
-      setDetectStatus('error', 'Probe failed');
-      appendLog(`! Detection error: ${e.message || e}`);
-    }
+  /** "45.2 MB of 190.1 MB · 23%", or "45.2 MB" while the size is unknown. */
+  function progressText(received, total) {
+    if (!(total > 0)) return formatMB(received, 1);
+    return `${formatMB(received, 1)} of ${formatMB(total, 1)} · ${progressPercent(received, total)}%`;
   }
 
-  async function runWhisperInstall() {
-    const btn = document.getElementById('installWhisperBtn');
-    installLog.textContent = '';
-    setDetectStatus('testing', 'Installing');
-    appendLog('Starting install…');
-
-    // Lock the button while installing so the user can't double-click
-    // and spawn parallel installs. Change the label to "Installing…"
-    // with a spinner so they see real progress.
-    if (btn) {
-      btn.disabled = true;
-      btn.dataset.originalHtml = btn.dataset.originalHtml || btn.innerHTML;
-      btn.innerHTML = '<span class="spinner"></span> Installing…';
-    }
-
-    // Subscribe to streamed progress lines from the main process.
-    // `installWhisper()` only returns once install completes; live
-    // output comes through `onInstallProgress` events.
-    let stopProgress = null;
-    if (window.electronAPI && window.electronAPI.onInstallProgress) {
-      stopProgress = window.electronAPI.onInstallProgress((line) => appendLog(line));
-    }
-
-    try {
-      const r = await window.electronAPI.installWhisper();
-      if (r.ok) {
-        state.whisperDetected = true;
-        state.whisperCmd = r.command;
-        detectCmd.textContent = r.command;
-        setDetectStatus('success', 'Installed');
-        appendLog(`\n✓ ${r.message}`);
-        if (btn) {
-          // Keep button disabled — install is done. Show a checkmark
-          // so the user sees the final state at a glance.
-          btn.innerHTML = '<i class="fas fa-check-circle"></i> Installed';
-          btn.classList.remove('oc-btn--primary');
-          btn.classList.add('oc-btn--success');
-        }
-      } else {
-        setDetectStatus('error', 'Install failed');
-        appendLog(`\n✗ ${r.message}`);
-        // Restore the button so the user can retry.
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = btn.dataset.originalHtml || '<i class="fas fa-download"></i> Install Whisper now';
-        }
-      }
-    } catch (e) {
-      setDetectStatus('error', 'Install error');
-      appendLog(`\n! ${e.message || e}`);
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = btn.dataset.originalHtml || '<i class="fas fa-download"></i> Install Whisper now';
-      }
-    } finally {
-      if (typeof stopProgress === 'function') {
-        try { stopProgress(); } catch (_) { /* ignore */ }
-      }
-    }
+  function lastLine(text) {
+    const line = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop() || '';
+    return line.length > 200 ? `${line.slice(0, 200)}…` : line;
   }
 
-  // Whisper screen logic
-  let whisperInitialized = false;
-  function enterWhisperScreen() {
-    if (whisperInitialized) return;
-    whisperInitialized = true;
-    // The venv goes in Cuewell's app data folder (Electron userData), where
-    // main.js points the Whisper installer; never in the app's own folder.
-    const hints = {
-      win32: {
-        title: 'Cuewell installs Whisper in its own Python environment',
-        steps: [
-          'Needs Python 3.10 or newer (3.12 recommended), from python.org or <code>winget install Python.Python.3.12</code>.',
-          'Creates a <code>.venv-whisper</code> folder in the Cuewell app data folder (under <code>%APPDATA%</code>).',
-          'Installs Whisper there with pip. No admin rights needed. Uses about 3 to 5 GB of disk.',
-          'Then downloads the <code>small</code> model (about 461 MB), now or on first use.',
-        ],
-      },
-      darwin: {
-        title: 'Cuewell installs Whisper in its own Python environment',
-        steps: [
-          'Needs Python 3.10 or newer (3.12 recommended), from python.org or <code>brew install python@3.12</code>.',
-          'Creates a <code>.venv-whisper</code> folder in the Cuewell app data folder (under <code>~/Library/Application Support</code>).',
-          'Installs Whisper there with pip. No <code>sudo</code> needed. Uses about 3 to 5 GB of disk.',
-          'Then downloads the <code>small</code> model (about 461 MB), now or on first use.',
-        ],
-      },
-      other: {
-        title: 'Cuewell installs Whisper in its own Python environment',
-        steps: [
-          'Needs Python 3.10 or newer with venv. On Debian and Ubuntu: <code>sudo apt install python3-venv</code>.',
-          'Creates a <code>.venv-whisper</code> folder in the Cuewell app data folder (under <code>~/.config</code>).',
-          'Installs Whisper there with pip. No <code>sudo</code> needed. Uses about 3 to 5 GB of disk.',
-          'Recording needs <code>arecord</code> (alsa-utils) or <code>sox</code>.',
-          'Then downloads the <code>small</code> model (about 461 MB), now or on first use.',
-        ],
-      },
+  /** Keep only well-formed fields from main's answer. */
+  function cleanVoiceStatus(raw) {
+    const models = Array.isArray(raw.models) ? raw.models
+      .filter((m) => m && typeof m.id === 'string' && m.id && typeof m.label === 'string')
+      .map((m) => ({ id: m.id, label: m.label, bytes: Number(m.bytes) || 0, downloaded: !!m.downloaded }))
+      : [];
+    return {
+      engine: raw.engine === 'python' ? 'python' : 'whispercpp',
+      binaryAvailable: !!raw.binaryAvailable,
+      platformSupported: raw.platformSupported !== false,
+      models,
+      selectedModel: typeof raw.selectedModel === 'string' ? raw.selectedModel : '',
+      pythonConfigured: !!raw.pythonConfigured,
     };
-    // html[data-platform] comes from preload.js; navigator is the fallback.
-    const platformName = document.documentElement.dataset.platform ||
-      (navigator.platform.toLowerCase().includes('win') ? 'win32'
-        : navigator.platform.toLowerCase().includes('mac') ? 'darwin' : 'linux');
-    const plat = platformName === 'win32' || platformName === 'darwin' ? platformName : 'other';
-    const h = hints[plat];
-    installCardTitle.textContent = h.title;
-    installList.innerHTML = h.steps.map((s) => `<li>${s}</li>`).join('');
-    runWhisperDetect();
   }
 
-  // ── Wire up: Model Download screen ───────────────────────────────
-  const modelDownloadLog = $('#modelDownloadLog');
-  const modelDownloadChoices = $('#modelDownloadChoices');
-
-  function appendModelLog(line) {
-    modelDownloadLog.textContent += (modelDownloadLog.textContent ? '\n' : '') + line;
-    modelDownloadLog.scrollTop = modelDownloadLog.scrollHeight;
+  /** True when Continue can save the current choice as it is. */
+  function voiceChoiceReady() {
+    if (state.voiceChoice === 'python') return pythonOffered();
+    const m = findVoiceModel(state.voiceChoice);
+    return !!m && m.downloaded && builtInRuns();
   }
 
-  // Selecting a card only records the choice; arrow keys move the radio
-  // selection, so a download must not start on selection. With "now"
-  // chosen, Continue starts the download, then moves on once it is done.
-  function refreshModelDownloadButton() {
-    if (state.modelDownloading) {
-      nextBtn.disabled = true;
-      nextBtn.innerHTML = '<span class="spinner"></span> Downloading…';
+  /** The chosen model when it still has to be downloaded, else null. */
+  function choiceNeedingDownload() {
+    const m = findVoiceModel(state.voiceChoice);
+    return m && !m.downloaded && builtInRuns() ? m : null;
+  }
+
+  function defaultVoiceChoice(status) {
+    if (status.engine === 'python' && status.pythonConfigured) return 'python';
+    if (!(status.platformSupported && status.binaryAvailable)) return status.pythonConfigured ? 'python' : null;
+    const ids = status.models.map((m) => m.id);
+    if (ids.includes(status.selectedModel)) return status.selectedModel;
+    return ids[0] || null;
+  }
+
+  let voiceCheckToken = 0;
+  async function loadVoiceStatus() {
+    if (!hasApi('getVoiceStatus')) {
+      renderVoiceScreen();
       return;
     }
+    const token = ++voiceCheckToken;
+    state.voiceChecking = true;
+    renderVoiceScreen();
+    let status = null;
+    try {
+      const raw = await window.electronAPI.getVoiceStatus();
+      if (raw && typeof raw === 'object') status = cleanVoiceStatus(raw);
+    } catch (_) { /* reported below */ }
+    if (token !== voiceCheckToken) return;
+    state.voiceChecking = false;
+    if (status) {
+      state.voiceStatus = status;
+      state.voiceError = '';
+      const known = state.voiceChoice === 'python' ? status.pythonConfigured : status.models.some((m) => m.id === state.voiceChoice);
+      if (!known) state.voiceChoice = defaultVoiceChoice(status);
+    } else if (!state.voiceStatus) {
+      state.voiceError = 'Cuewell could not check local voice.';
+    }
+    renderVoiceScreen();
+  }
+
+  function enterVoiceScreen() {
+    if (!state.voiceStatus && !state.voiceChecking) loadVoiceStatus();
+    else renderVoiceScreen();
+  }
+
+  function externalLink(text, url) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noreferrer';
+    a.textContent = text;
+    return a;
+  }
+
+  /** Why built-in voice cannot run here: { parts, retry }, or null. */
+  function voiceProblemInfo() {
+    const s = state.voiceStatus;
+    const later = pythonOffered()
+      ? ' You can keep your Python Whisper setup below.'
+      : ' Go back to choose Azure Speech, or set it up later in Settings.';
+    if (!hasApi('getVoiceStatus')) return { parts: [`${OLD_BUILD_TEXT} Go back to choose Azure Speech, or set it up later in Settings.`] };
+    if (!s) return state.voiceError ? { parts: [`${state.voiceError} Check your setup and try again.`], retry: true } : null;
+    if (!s.platformSupported) return { parts: [`Built-in voice does not run on this system.${later}`] };
+    if (!s.binaryAvailable) {
+      return { parts: ['Voice is not available in this build. To use it, install Cuewell from ', externalLink('the release download', RELEASES_URL), `.${later}`] };
+    }
+    return null;
+  }
+
+  function renderVoiceProblem() {
+    const info = voiceProblemInfo();
+    voiceProblem.hidden = !info;
+    voiceProblem.textContent = '';
+    if (!info) return;
+    const icon = document.createElement('i');
+    icon.className = 'fas fa-circle-xmark';
+    icon.setAttribute('aria-hidden', 'true');
+    const span = document.createElement('span');
+    info.parts.forEach((part) => span.append(part));
+    voiceProblem.append(icon, span);
+    if (info.retry) {
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'oc-btn';
+      retry.textContent = 'Try again';
+      retry.addEventListener('click', () => {
+        state.voiceError = '';
+        loadVoiceStatus();
+      });
+      voiceProblem.append(retry);
+    }
+  }
+
+  function elem(tag, className, text) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text) el.textContent = text;
+    return el;
+  }
+
+  function faIcon(name) {
+    const i = elem('i', `fas fa-${name}`);
+    i.setAttribute('aria-hidden', 'true');
+    return i;
+  }
+
+  // One card per model, plus "Keep Python Whisper" for setups that have it.
+  function buildVoiceCard(entry, index) {
+    const card = elem('div', 'model-card oc-card');
+    card.dataset.choice = entry.id;
+    const radioId = `voiceChoice${index}`;
+    const pick = elem('label', 'model-pick');
+    pick.htmlFor = radioId;
+    const radio = elem('input', 'sr-only');
+    radio.type = 'radio';
+    radio.name = 'voiceModel';
+    radio.id = radioId;
+    radio.value = entry.id;
+    radio.setAttribute('aria-describedby', `${radioId}State`);
+    const iconBox = elem('div', 'choice-icon');
+    iconBox.append(faIcon(entry.python ? 'terminal' : 'microphone-lines'));
+    const textBox = elem('div', 'choice-text');
+    const title = elem('div', 'choice-title', entry.name);
+    if (entry.tag) title.append(elem('span', 'oc-chip oc-chip--accent tag', entry.tag));
+    textBox.append(title, elem('div', 'choice-desc', entry.desc));
+    const ring = elem('div', 'choice-radio');
+    ring.setAttribute('aria-hidden', 'true');
+    pick.append(radio, ring, iconBox, textBox);
+
+    const side = elem('div', 'model-side');
+    const stateText = elem('span', 'model-state');
+    stateText.id = `${radioId}State`;
+    side.append(stateText);
+    card.append(pick, side);
+    if (!entry.python) {
+      const button = elem('button', 'oc-btn');
+      button.type = 'button';
+      button.dataset.act = 'download';
+      side.append(button);
+      const progress = elem('div', 'model-progress');
+      progress.hidden = true;
+      const meter = elem('div', 'meter');
+      meter.setAttribute('role', 'progressbar');
+      meter.setAttribute('aria-valuemin', '0');
+      meter.setAttribute('aria-valuemax', '100');
+      meter.setAttribute('aria-label', `Downloading ${entry.name}`);
+      meter.append(elem('span'));
+      const progressLabel = elem('span', 'model-progress-text');
+      progressLabel.setAttribute('aria-hidden', 'true');
+      progress.append(meter, progressLabel);
+      const msg = elem('div', 'model-msg');
+      msg.setAttribute('role', 'status');
+      card.append(progress, msg);
+    }
+    return card;
+  }
+
+  function voiceEntries() {
+    const entries = builtInRuns() ? voiceModels().map((m) => {
+      const text = MODEL_TEXT[m.id] || { name: m.label, tag: '', note: '' };
+      return { id: m.id, name: text.name, tag: text.tag, desc: [text.note, m.bytes ? formatMB(m.bytes) : ''].filter(Boolean).join(' · ') };
+    }) : [];
+    if (pythonOffered()) {
+      entries.push({ id: 'python', python: true, name: 'Keep Python Whisper (advanced)', tag: '', desc: 'Use the Python Whisper setup you already have.' });
+    }
+    return entries;
+  }
+
+  function setActionButton(button, act, html, disabled) {
+    button.hidden = !act;
+    if (!act) return;
+    // Same button, new action: keyboard focus stays on it.
+    if (button.dataset.act !== act || button.dataset.html !== html) {
+      button.dataset.act = act;
+      button.dataset.html = html;
+      button.innerHTML = html;
+    }
+    button.disabled = !!disabled;
+  }
+
+  function paintProgress(card, d) {
+    const box = card.querySelector('.model-progress');
+    if (!box) return;
+    box.hidden = !d;
+    if (!d) return;
+    const percent = progressPercent(d.received, d.total);
+    const text = progressText(d.received, d.total);
+    const meter = box.querySelector('.meter');
+    meter.setAttribute('aria-valuenow', String(percent));
+    meter.setAttribute('aria-valuetext', text);
+    meter.firstElementChild.style.width = `${percent}%`;
+    box.querySelector('.model-progress-text').textContent = text;
+  }
+
+  function updateVoiceCard(card) {
+    const id = card.dataset.choice;
+    const radio = card.querySelector('input[name="voiceModel"]');
+    radio.checked = state.voiceChoice === id;
+    const stateText = card.querySelector('.model-state');
+    if (id === 'python') {
+      stateText.className = 'model-state ok';
+      stateText.replaceChildren(faIcon('circle-check'), document.createTextNode('Set up'));
+      return;
+    }
+    const m = findVoiceModel(id);
+    if (!m) return;
+    const d = state.downloads[id] || null;
+    const phase = d ? d.phase : '';
+    const running = phase === 'downloading' || phase === 'cancelling';
+    stateText.className = `model-state${m.downloaded ? ' ok' : ''}`;
+    if (m.downloaded) stateText.replaceChildren(faIcon('circle-check'), document.createTextNode('Ready'));
+    else stateText.textContent = running ? 'Downloading' : 'Not downloaded';
+
+    const button = card.querySelector('button[data-act]');
+    const busyElsewhere = !!state.activeDownload && state.activeDownload !== id;
+    if (m.downloaded) setActionButton(button, null);
+    else if (phase === 'downloading') setActionButton(button, 'cancel', '<i class="fas fa-xmark" aria-hidden="true"></i> Cancel');
+    else if (phase === 'cancelling') setActionButton(button, 'cancel', '<span class="spinner"></span> Cancelling…', true);
+    else if (phase === 'failed') setActionButton(button, 'retry', '<i class="fas fa-rotate-right" aria-hidden="true"></i> Retry', busyElsewhere || state.voiceSaving);
+    else setActionButton(button, 'download', '<i class="fas fa-download" aria-hidden="true"></i> Download', busyElsewhere || state.voiceSaving);
+
+    const msg = card.querySelector('.model-msg');
+    const text = phase === 'failed' ? d.error : phase === 'cancelled' ? 'Download cancelled.' : '';
+    if (msg.dataset.text !== text) {
+      msg.dataset.text = text;
+      msg.className = `model-msg${phase === 'failed' ? ' error' : ' info'}`;
+      msg.textContent = text;
+    }
+    paintProgress(card, running ? d : null);
+  }
+
+  function renderVoiceScreen() {
+    renderVoiceProblem();
+    const entries = voiceEntries();
+    const key = entries.map((e) => e.id).join('|');
+    if (voiceList.dataset.key !== key) {
+      voiceList.dataset.key = key;
+      voiceList.querySelectorAll('.model-card').forEach((card) => card.remove());
+      entries.forEach((entry, i) => voiceList.append(buildVoiceCard(entry, i)));
+    }
+    voiceList.hidden = entries.length === 0;
+    voiceList.querySelectorAll('.model-card').forEach(updateVoiceCard);
+    if (state.voiceChecking && !state.voiceStatus) setResult(voiceStatusLine, 'testing', 'Checking voice setup…');
+    else if (voiceStatusLine.classList.contains('testing')) setResult(voiceStatusLine, 'idle', '');
+    $('#voiceLanguageHint').hidden = !builtInRuns();
+    refreshVoiceButton();
+  }
+
+  // Continue on this screen: Download (the chosen model still needs it),
+  // Continue (ready to save), or plain Continue (nothing to set up here).
+  function refreshVoiceButton() {
+    if (currentScreenName() !== 'voice-model') return;
     nextBtn.classList.remove('oc-btn--success');
     nextBtn.classList.add('oc-btn--primary');
-    if (state.modelDownloaded) {
+    const busy = !!state.activeDownload || state.voiceSaving;
+    backBtn.disabled = busy;
+    if (state.activeDownload) {
+      nextBtn.disabled = true;
+      nextBtn.innerHTML = '<span class="spinner"></span> Downloading…';
+    } else if (state.voiceSaving) {
+      nextBtn.disabled = true;
+      nextBtn.innerHTML = '<span class="spinner"></span> Saving…';
+    } else if (choiceNeedingDownload()) {
+      nextBtn.disabled = false;
+      const failed = state.downloads[state.voiceChoice] && state.downloads[state.voiceChoice].phase === 'failed';
+      nextBtn.innerHTML = failed
+        ? '<i class="fas fa-rotate-right"></i> Retry download'
+        : '<i class="fas fa-download"></i> Download';
+    } else if (voiceChoiceReady()) {
+      nextBtn.disabled = false;
       nextBtn.classList.remove('oc-btn--primary');
       nextBtn.classList.add('oc-btn--success');
       nextBtn.innerHTML = '<i class="fas fa-check-circle"></i> Continue';
-    } else if (state.modelDownloadChoice === 'now' && !state.modelDownloadFailed) {
-      nextBtn.innerHTML = '<i class="fas fa-download"></i> Download';
     } else {
+      nextBtn.disabled = state.voiceChecking && !state.voiceStatus;
       nextBtn.innerHTML = 'Continue <i class="fas fa-arrow-right"></i>';
     }
-    nextBtn.disabled = !state.modelDownloadChoice;
+    refreshSkipVisibility();
   }
 
-  $$('#modelDownloadChoices input[name="modelDownload"]').forEach((input) => {
-    input.addEventListener('change', () => {
-      if (!input.checked || state.modelDownloading) return;
-      state.modelDownloadChoice = input.value;
-      refreshModelDownloadButton();
-    });
+  voiceList.addEventListener('change', (e) => {
+    const radio = e.target.closest('input[name="voiceModel"]');
+    if (!radio || !radio.checked) return;
+    state.voiceChoice = radio.value;
+    setResult(voiceStatusLine, 'idle', '');
+    renderVoiceScreen();
   });
 
-  function enterModelDownloadScreen() {
-    $$('#modelDownloadChoices input[name="modelDownload"]').forEach((input) => {
-      input.checked = input.value === state.modelDownloadChoice;
+  voiceList.addEventListener('click', (e) => {
+    const button = e.target.closest('button[data-act]');
+    const card = button && button.closest('.model-card');
+    if (!card || button.disabled) return;
+    if (button.dataset.act === 'cancel') cancelVoiceDownload(card.dataset.choice);
+    else startVoiceDownload(card.dataset.choice);
+  });
+
+  if (hasApi('onVoiceModelProgress')) {
+    window.electronAPI.onVoiceModelProgress((data) => {
+      if (!data || typeof data.id !== 'string') return;
+      const d = state.downloads[data.id];
+      if (!d || (d.phase !== 'downloading' && d.phase !== 'cancelling')) return;
+      const received = Number(data.received);
+      const total = Number(data.total);
+      if (Number.isFinite(received) && received >= 0) d.received = received;
+      if (Number.isFinite(total) && total > 0) d.total = total;
+      // At most one repaint per frame, however often main reports.
+      if (d.frame) return;
+      d.frame = requestAnimationFrame(() => {
+        d.frame = 0;
+        const card = Array.from(voiceList.querySelectorAll('.model-card')).find((c) => c.dataset.choice === data.id);
+        if (card && state.downloads[data.id] === d) paintProgress(card, d);
+      });
     });
-    refreshModelDownloadButton();
   }
 
-  async function startModelDownload() {
-    state.modelDownloading = true;
-    state.modelDownloadFailed = false;
-    nextBtn.disabled = true;
-    nextBtn.innerHTML = '<span class="spinner"></span> Downloading…';
-    $$('#modelDownloadChoices input').forEach((input) => { input.disabled = true; });
+  // Low-level network and disk errors, in plain words.
+  const NETWORK_ERROR = /\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|socket hang up|network)\b/i;
+  const DISK_FULL_ERROR = /\b(ENOSPC|EDQUOT)\b/;
 
-    appendModelLog('Starting model download…');
+  function downloadError(raw) {
+    if (navigator.onLine === false) return OFFLINE_TEXT;
+    const text = lastLine(raw);
+    if (DISK_FULL_ERROR.test(text)) return 'There is not enough free disk space. Free up some space, then retry.';
+    if (!text || NETWORK_ERROR.test(text)) return 'Could not reach the download server. Check your internet connection, then retry.';
+    return text;
+  }
 
-    let stopProgress = null;
-    if (window.electronAPI && window.electronAPI.onInstallProgress) {
-      stopProgress = window.electronAPI.onInstallProgress((line) => appendModelLog(line));
+  /** The focused button went away or was disabled: put focus back on its card. */
+  function refocusCard(id) {
+    const card = Array.from(voiceList.querySelectorAll('.model-card')).find((c) => c.dataset.choice === id);
+    if (!card) return;
+    // Chromium moves focus off a hidden or disabled button a frame later.
+    const active = document.activeElement;
+    const lost = !active || active === document.body ||
+      (card.contains(active) && (active.hidden || active.disabled));
+    if (!lost) return;
+    const target = card.querySelector('button[data-act]:not([hidden]):not(:disabled)') || card.querySelector('input');
+    if (target) target.focus({ preventScroll: true });
+  }
+
+  /**
+   * Download one model. With thenContinue (Continue started it), move on
+   * once it is ready, unless the user picked something else meanwhile.
+   */
+  async function startVoiceDownload(id, { thenContinue = false } = {}) {
+    const m = findVoiceModel(id);
+    if (!m || m.downloaded || state.activeDownload || state.voiceSaving) return;
+    setResult(voiceStatusLine, 'idle', '');
+    if (!hasApi('downloadVoiceModel')) {
+      state.downloads[id] = { phase: 'failed', error: `${OLD_BUILD_TEXT} Set it up later in Settings.` };
+      renderVoiceScreen();
+      return;
     }
-
+    if (navigator.onLine === false) {
+      state.downloads[id] = { phase: 'failed', error: OFFLINE_TEXT };
+      renderVoiceScreen();
+      return;
+    }
+    const d = { phase: 'downloading', received: 0, total: m.bytes, startedAt: Date.now(), frame: 0 };
+    state.downloads[id] = d;
+    state.activeDownload = id;
+    renderVoiceScreen();
+    let result;
     try {
-      const r = await window.electronAPI.downloadWhisperModel('small');
-      if (r.ok) {
-        state.modelDownloaded = true;
-        appendModelLog(`\n✓ Model downloaded successfully: ${r.path}`);
-      } else {
-        // Let the user continue anyway; the model downloads on first use.
-        state.modelDownloadFailed = true;
-        appendModelLog(`\n✗ Download failed: ${r.message}`);
-      }
-    } catch (e) {
-      state.modelDownloadFailed = true;
-      appendModelLog(`\n! Error: ${e.message || e}`);
-    } finally {
-      state.modelDownloading = false;
-      $$('#modelDownloadChoices input').forEach((input) => { input.disabled = false; });
-      if (typeof stopProgress === 'function') {
-        try { stopProgress(); } catch (_) { /* ignore */ }
-      }
-      if (currentScreenName() === 'model-download') refreshModelDownloadButton();
+      result = await window.electronAPI.downloadVoiceModel(id);
+    } catch (_) {
+      result = { success: false, error: '' };
     }
+    state.activeDownload = null;
+    if (d.frame) cancelAnimationFrame(d.frame);
+    let ready = false;
+    if (result && result.success) {
+      delete state.downloads[id];
+      const current = findVoiceModel(id);
+      if (current) current.downloaded = true;
+      ready = true;
+      // A finished model becomes the choice unless another ready one is.
+      if (!voiceChoiceReady()) state.voiceChoice = id;
+      setResult(voiceStatusLine, 'success', `${voiceModelName(m)} is ready.`);
+    } else if (d.phase === 'cancelling') {
+      state.downloads[id] = { phase: 'cancelled' };
+    } else {
+      state.downloads[id] = { phase: 'failed', error: downloadError(result && result.error) };
+    }
+    renderVoiceScreen();
+    refocusCard(id);
+    if (ready && thenContinue && currentScreenName() === 'voice-model' && state.voiceChoice === id && !nextBtn.disabled) {
+      nextBtn.click();
+    }
+  }
+
+  async function cancelVoiceDownload(id) {
+    const d = state.downloads[id];
+    if (!d || d.phase !== 'downloading' || Date.now() - d.startedAt < CANCEL_GRACE_MS) return;
+    if (!hasApi('cancelVoiceModelDownload')) {
+      setResult(voiceStatusLine, 'error', 'This version of Cuewell cannot cancel the download. It keeps going.');
+      return;
+    }
+    d.phase = 'cancelling';
+    renderVoiceScreen();
+    setTimeout(() => {
+      if (state.downloads[id] === d && d.phase === 'cancelling') {
+        d.phase = 'downloading';
+        renderVoiceScreen();
+      }
+    }, CANCEL_STUCK_MS);
+    try {
+      await window.electronAPI.cancelVoiceModelDownload(id);
+    } catch (_) { /* the download's own result reports */ }
+  }
+
+  /** Save the ready choice through main. Resolves true to move on. */
+  async function saveVoiceChoice() {
+    // Nothing usable chosen (for example no voice in this build): move on.
+    if (!voiceChoiceReady()) return true;
+    if (!hasApi('setVoiceEngine')) {
+      setResult(voiceStatusLine, 'error', `${OLD_BUILD_TEXT} Choose Set up later, then use Settings > Voice.`);
+      return false;
+    }
+    const engine = state.voiceChoice === 'python' ? 'python' : 'whispercpp';
+    const model = engine === 'whispercpp' ? state.voiceChoice : undefined;
+    state.voiceSaving = true;
+    renderVoiceScreen();
+    let result;
+    try {
+      result = await window.electronAPI.setVoiceEngine(engine, model);
+    } catch (e) {
+      result = { success: false, error: e && e.message };
+    }
+    state.voiceSaving = false;
+    renderVoiceScreen();
+    if (result && result.success) {
+      state.voiceSaved = { engine, model };
+      return true;
+    }
+    setResult(voiceStatusLine, 'error', (result && result.error) || 'Could not save your voice choice. Try again, or choose Set up later.');
+    return false;
   }
 
   // ── Wire up: Finish screen ────────────────────────────────────────
@@ -678,12 +942,11 @@
       cls: state.testedSignature !== null ? 'ok' : 'skip',
     });
     if (state.speechProvider === 'whisper') {
-      rows.push({
-        icon: 'fa-microphone',
-        label: 'Speech',
-        value: state.whisperDetected ? `Whisper (${state.whisperCmd || 'cli'})` : 'Whisper (not installed)',
-        cls: state.whisperDetected ? 'ok' : 'skip',
-      });
+      const saved = state.voiceSaved;
+      let value = 'Local voice (set up later in Settings)';
+      if (saved && saved.engine === 'python') value = 'Python Whisper';
+      else if (saved) value = `Local voice · ${voiceModelName(findVoiceModel(saved.model))}`;
+      rows.push({ icon: 'fa-microphone', label: 'Speech', value, cls: saved ? 'ok' : 'skip' });
     } else if (state.speechProvider === 'azure') {
       rows.push({ icon: 'fa-cloud', label: 'Speech', value: 'Azure', cls: 'ok' });
     } else {
@@ -749,9 +1012,6 @@
           payload.azureKey = state.azureKey;
           payload.azureRegion = state.azureRegion;
         }
-        if (state.speechProvider === 'whisper' && state.whisperCmd) {
-          payload.whisperCommand = quoteCommandIfNeeded(state.whisperCmd);
-        }
         const r = await window.electronAPI.saveSettings(payload);
         // Main rejected a value the user typed: show it on that field and stay.
         const rejected = r && r.success === false && Array.isArray(r.errors)
@@ -769,40 +1029,15 @@
       } catch (_) { /* surfaced elsewhere */ }
     }
 
-    // Whisper screen: kick off detection on entry
-    if (name === 'speech' && state.speechProvider === 'whisper') {
-      // (deferred: will run via enterWhisperScreen)
-    }
-
-    // Whisper screen "Continue" — if user wants to skip install, mark and proceed
-    if (name === 'whisper') {
-      // Persist whatever whisper command we found (could be empty if skipped)
-      if (window.electronAPI && state.whisperCmd) {
-        try {
-          const r = await window.electronAPI.saveSettings({ whisperCommand: quoteCommandIfNeeded(state.whisperCmd) });
-          if (r && r.success === false) {
-            setDetectStatus('error', 'Not saved');
-            appendLog(`\n✗ ${r.error || 'Could not save the Whisper command'}`);
-            return;
-          }
-        } catch (_) { /* ignore */ }
+    // Local voice: Continue downloads the chosen model first if it needs
+    // it (moving on once it is ready), then saves the choice.
+    if (name === 'voice-model') {
+      if (choiceNeedingDownload()) {
+        await startVoiceDownload(state.voiceChoice, { thenContinue: true });
+        return;
       }
-    }
-
-    // Model download screen: "Download now" downloads first, then continues.
-    if (name === 'model-download' && state.modelDownloadChoice === 'now' &&
-        !state.modelDownloaded && !state.modelDownloadFailed) {
-      await startModelDownload();
-      // Failed: the log says why and Continue now moves on. Also stay put if
-      // the user went Back while it downloaded.
-      if (!state.modelDownloaded || currentScreenName() !== 'model-download') return;
-    }
-    if (name === 'model-download') {
-      if (window.electronAPI && state.modelDownloadChoice) {
-        try {
-          await window.electronAPI.saveSettings({ whisperModelDownload: state.modelDownloadChoice });
-        } catch (_) { /* ignore */ }
-      }
+      const saved = await saveVoiceChoice();
+      if (!saved || currentScreenName() !== 'voice-model') return;
     }
 
     // Finish: close onboarding
@@ -817,7 +1052,7 @@
       return;
     }
 
-    // Move forward, with whisper-screen insertion handled by order logic
+    // Move forward along the path for the current choices
     const order = computeScreenOrder();
     const idx = order.indexOf(name);
     const nextName = order[idx + 1];
@@ -826,8 +1061,7 @@
     // Compute new step index
     state.step = orderScreenToStep(nextName);
     showScreen(nextName);
-    if (nextName === 'whisper') enterWhisperScreen();
-    if (nextName === 'model-download') enterModelDownloadScreen();
+    if (nextName === 'voice-model') enterVoiceScreen();
     if (nextName === 'finish') populateSummary();
 
     // Re-render stepper with new total
@@ -835,6 +1069,7 @@
   });
 
   backBtn.addEventListener('click', () => {
+    if (backBtn.disabled) return;
     const name = currentScreenName();
     const order = computeScreenOrder();
     const idx = order.indexOf(name);
@@ -842,14 +1077,15 @@
     if (!prevName) return;
     state.step = orderScreenToStep(prevName);
     showScreen(prevName);
+    if (prevName === 'voice-model') enterVoiceScreen();
   });
 
-  // Skip button: only shown on the whisper screen, lets user skip install
-  // even if the CLI isn't present (they can configure later).
+  // "Set up later": on the voice screen while the chosen model still needs
+  // a download, so a slow or failed download never blocks the wizard.
   function refreshSkipVisibility() {
-    skipBtn.style.display = currentScreenName() === 'whisper' && !state.whisperDetected
-      ? 'inline-flex'
-      : 'none';
+    const show = currentScreenName() === 'voice-model' && !state.activeDownload &&
+      !state.voiceSaving && !!choiceNeedingDownload();
+    skipBtn.style.display = show ? 'inline-flex' : 'none';
   }
 
   // Hook into showScreen to keep skip visibility in sync
@@ -861,34 +1097,14 @@
   };
 
   skipBtn.addEventListener('click', () => {
-    state.skippingWhisper = true;
-    // Jump to finish without installing
+    if (state.activeDownload || state.voiceSaving) return;
+    // Jump to finish; voice can be set up later in Settings.
     const order = computeScreenOrder();
     const finishName = order[order.length - 1];
     state.step = orderScreenToStep(finishName);
     showScreen(finishName);
     populateSummary();
   });
-
-  // ── Manual install button (added dynamically) ─────────────────────
-  function addManualInstallButton() {
-    if (document.getElementById('installWhisperBtn')) return;
-    const btn = document.createElement('button');
-    btn.id = 'installWhisperBtn';
-    btn.type = 'button';
-    btn.className = 'oc-btn oc-btn--primary';
-    btn.style.marginTop = '12px';
-    btn.innerHTML = '<i class="fas fa-download"></i> Install Whisper now';
-    btn.addEventListener('click', runWhisperInstall);
-    document.querySelector('[data-screen="whisper"]').appendChild(btn);
-  }
-
-  // Show install button after detection runs and finds nothing
-  const _origDetect = runWhisperDetect;
-  runWhisperDetect = async function () {
-    await _origDetect();
-    if (!state.whisperDetected) addManualInstallButton();
-  };
 
   // ── Boot ──────────────────────────────────────────────────────────
   showScreen('welcome');

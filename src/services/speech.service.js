@@ -489,7 +489,27 @@ const { EventEmitter } = require('events');
 const logger = require('../core/logger').createServiceLogger('SPEECH');
 const config = require('../core/config');
 const WhisperWorkerService = require('./whisper-worker.service');
+const WhisperCppEngine = require('./whispercpp-engine.service');
+const whisperModels = require('../core/whisper-models');
+const { resolveWhisperServer, isPlatformSupported } = require('../core/whisper-binary');
 const { childProcessEnv } = require('../core/whisper-installer');
+
+// Local Whisper engines: the bundled whisper.cpp server (default) or the
+// Python openai-whisper install (kept for existing setups).
+const WHISPER_ENGINES = ['whispercpp', 'python'];
+// WHISPER_LANGUAGE=hinglish: English decoding with a Roman-script initial
+// prompt. Decoding as English keeps Hindi words in Latin letters and handles
+// plain English sentences without temperature fallback; decoding as Hindi
+// (even with this prompt) can return Devanagari, loop, and take seconds.
+const HINGLISH_PROMPT = 'Haan, main is approach ko explain karta hoon. Time complexity O(n log n) hai.';
+// Why the built-in engine is not in use, as shown to the user.
+const WHISPER_CPP_PROBLEMS = {
+  unsupported: 'The built-in voice engine does not run on this system. Use Azure Speech or Python Whisper instead.',
+  'no-binary': 'The built-in voice engine is missing from this copy of Cuewell. Reinstall Cuewell, or use Azure Speech.',
+  'no-model': 'Download a voice model in Settings to use local voice.',
+  'no-model-dir': 'Cuewell could not find its voice model folder.',
+};
+const PYTHON_WHISPER_MISSING = 'Python Whisper was not found. Switch to the built-in voice engine in Settings, or set up Python Whisper again.';
 
 let sdk = null;
 try {
@@ -545,6 +565,18 @@ class SpeechService extends EventEmitter {
     this.whisperCommand = null;
     this.envDir = null;
     this.whisperWorker = new WhisperWorkerService();
+    // whisper.cpp engine (WhisperCppEngine) when it is the active engine.
+    this.whisperCpp = null;
+    // Active local engine ('whispercpp' | 'python'), null when none works.
+    this.whisperEngine = null;
+    // Engine the settings ask for (explicit, or the default for this setup).
+    this.whisperEngineChoice = 'whispercpp';
+    // Why the built-in engine is not active: a WHISPER_CPP_PROBLEMS key or ''.
+    this.whisperCppProblem = '';
+    // Result of the last Python Whisper probe (null: not probed).
+    this._pythonWhisperFound = null;
+    // Command findPythonWhisper() found, used once by the next init.
+    this._pythonCommandCache = null;
     this.isProcessingAudio = false;
     this.manualStopRequested = false;
     this._resetVadState();
@@ -558,6 +590,8 @@ class SpeechService extends EventEmitter {
     this.available = false;
     this.speechConfig = null;
     this.whisperCommand = null;
+    this._teardownWhisperCpp();
+    this.whisperEngine = null;
 
     const provider = this._getConfiguredProvider();
     this.provider = provider;
@@ -631,19 +665,82 @@ class SpeechService extends EventEmitter {
     }
   }
 
+  /**
+   * Pick the local engine and get it ready:
+   *   - WHISPER_ENGINE=python: the Python Whisper command (probes as before).
+   *   - WHISPER_ENGINE=whispercpp: the bundled whisper-server with the
+   *     selected ggml model. When it is not ready (no model yet, no binary,
+   *     unsupported system) and a configured Python Whisper works, that is
+   *     used so voice keeps working.
+   *   - Unset: Python when WHISPER_COMMAND (or the app's Whisper venv) points
+   *     at a working Python Whisper, so existing setups keep it; otherwise
+   *     whisper.cpp.
+   */
   _initializeWhisperClient() {
+    const cachedPython = this._pythonCommandCache;
+    this._pythonCommandCache = null;
     try {
-      this.whisperCommand = this._resolveWhisperCommand();
-      if (!this.whisperCommand) {
-        const reason = 'Local Whisper unavailable. Install the Whisper CLI or set WHISPER_COMMAND.';
-        logger.warn(reason);
-        this.emit('status', reason);
-        return;
+      const explicit = this._getConfiguredWhisperEngine();
+      let probedLegacy = false;
+      let choice = explicit;
+      if (!choice) {
+        choice = 'whispercpp';
+        if (this._hasLegacyPythonWhisperConfig()) {
+          probedLegacy = true;
+          this.whisperCommand = this._resolveWhisperCommand({ systemCandidates: false });
+          this._pythonWhisperFound = !!this.whisperCommand;
+          if (this.whisperCommand) choice = 'python';
+        }
+      }
+      this.whisperEngineChoice = choice;
+
+      if (choice === 'whispercpp') {
+        this.whisperCppProblem = this._configureWhisperCpp();
+        if (!this.whisperCppProblem) {
+          this.whisperEngine = 'whispercpp';
+          this.available = true;
+          logger.info('Local Whisper service initialized successfully', {
+            engine: 'whispercpp',
+            model: this.getWhisperCppModelId(),
+            language: this._getWhisperLanguage()
+          });
+          this.emit('status', 'Local Whisper ready');
+          return;
+        }
+        if (!probedLegacy && this._hasLegacyPythonWhisperConfig()) {
+          this.whisperCommand = this._resolveWhisperCommand({ systemCandidates: false });
+          this._pythonWhisperFound = !!this.whisperCommand;
+        }
+        if (!this.whisperCommand) {
+          const reason = WHISPER_CPP_PROBLEMS[this.whisperCppProblem] || 'Local Whisper unavailable.';
+          logger.warn('Built-in Whisper engine not ready', { problem: this.whisperCppProblem });
+          this.emit('status', reason);
+          return;
+        }
+        logger.warn('Built-in Whisper engine not ready; using the configured Python Whisper', {
+          problem: this.whisperCppProblem
+        });
+      } else {
+        this.whisperCppProblem = '';
+        if (!this.whisperCommand && cachedPython) {
+          this.whisperCommand = cachedPython;
+        }
+        if (!this.whisperCommand) {
+          this.whisperCommand = this._resolveWhisperCommand();
+          this._pythonWhisperFound = !!this.whisperCommand;
+        }
+        if (!this.whisperCommand) {
+          logger.warn('Local Whisper unavailable: no working Python Whisper command');
+          this.emit('status', PYTHON_WHISPER_MISSING);
+          return;
+        }
       }
 
+      this.whisperEngine = 'python';
       this.available = true;
       this._configureWhisperWorker();
       logger.info('Local Whisper service initialized successfully', {
+        engine: 'python',
         command: [this.whisperCommand.command, ...this.whisperCommand.baseArgs].join(' '),
         model: this._getWhisperModel(),
         language: this._getWhisperLanguage()
@@ -655,14 +752,180 @@ class SpeechService extends EventEmitter {
         stack: error.stack
       });
       this.available = false;
+      this.whisperEngine = null;
       this.emit('status', 'Local Whisper unavailable');
     }
+  }
+
+  /**
+   * Set up the whisper.cpp engine for the selected model. Returns '' when it
+   * is ready, else a WHISPER_CPP_PROBLEMS key.
+   */
+  _configureWhisperCpp() {
+    const { problem, server, modelDir, modelId } = this._checkWhisperCpp();
+    if (problem) return problem;
+    this.whisperCpp = new WhisperCppEngine({
+      serverPath: server.path,
+      serverDir: server.dir,
+      modelPath: whisperModels.modelPath(modelId, modelDir),
+      idleUnloadMs: this._getWhisperIdleUnloadMs(),
+      logger: require('../core/logger').createServiceLogger('WHISPER-CPP'),
+      isBusy: () => this.isRecording || this.isProcessingAudio,
+      verifyModel: () => this._verifyWhisperCppModel(modelId, modelDir)
+    });
+    return '';
+  }
+
+  /**
+   * What the built-in engine needs, from files only: { problem, server,
+   * modelDir, modelId, binaryAvailable }. `problem` is '' when it can run.
+   */
+  _checkWhisperCpp() {
+    const modelId = this.getWhisperCppModelId();
+    const result = { problem: '', server: null, modelDir: '', modelId, binaryAvailable: false };
+    if (!isPlatformSupported()) {
+      result.problem = 'unsupported';
+      return result;
+    }
+    try {
+      result.server = resolveWhisperServer();
+    } catch (_) {
+      result.server = null;
+    }
+    result.binaryAvailable = !!result.server;
+    if (!result.server) {
+      result.problem = 'no-binary';
+      return result;
+    }
+    result.modelDir = this._getWhisperModelDir();
+    if (!result.modelDir || !path.isAbsolute(result.modelDir)) {
+      result.problem = 'no-model-dir';
+      return result;
+    }
+    if (!whisperModels.isModelDownloaded(modelId, result.modelDir)) {
+      result.problem = 'no-model';
+    }
+    return result;
+  }
+
+  /**
+   * After a failed model load: check the file's SHA-256. A damaged file is
+   * deleted and local voice reports "download a model", so Settings offers
+   * the download again. Returns whether the file is intact.
+   */
+  async _verifyWhisperCppModel(modelId, modelDir) {
+    const intact = await whisperModels.verifyModel(modelId, modelDir);
+    if (!intact) {
+      logger.warn('Voice model failed its checksum; removing it', { model: modelId });
+      whisperModels.removeModel(modelId, modelDir);
+      if (this.whisperEngine === 'whispercpp') {
+        this.available = false;
+        this.whisperCppProblem = 'no-model';
+        this.emit('status', WHISPER_CPP_PROBLEMS['no-model']);
+      }
+    }
+    return intact;
+  }
+
+  _teardownWhisperCpp() {
+    if (!this.whisperCpp) return;
+    const engine = this.whisperCpp;
+    this.whisperCpp = null;
+    engine.close().catch((error) => {
+      logger.warn('Could not stop the whisper.cpp server', { error: error.message });
+    });
+  }
+
+  /** WHISPER_ENGINE when it names an engine, else null (choose automatically). */
+  _getConfiguredWhisperEngine() {
+    const value = String(this._getSetting('whisperEngine') || process.env.WHISPER_ENGINE || '').trim().toLowerCase();
+    return WHISPER_ENGINES.includes(value) ? value : null;
+  }
+
+  /** The selected whisper.cpp model id (WHISPER_CPP_MODEL), or the default. */
+  getWhisperCppModelId() {
+    const value = String(this._getSetting('whisperCppModel') || process.env.WHISPER_CPP_MODEL || '').trim();
+    return whisperModels.isModelId(value) ? value : whisperModels.DEFAULT_MODEL_ID;
+  }
+
+  /** Whether WHISPER_COMMAND or the app's own Whisper venv point at a Python Whisper setup. */
+  _hasLegacyPythonWhisperConfig() {
+    const configured = String(this._getSetting('whisperCommand') || process.env.WHISPER_COMMAND || '').trim();
+    return Boolean(configured) || Boolean(this._getUserDataWhisperCandidate());
+  }
+
+  /**
+   * Probe for a working Python Whisper (configured command, the app venv,
+   * then PATH). Slow: up to several seconds. Returns true when one works.
+   */
+  findPythonWhisper() {
+    const found = this._resolveWhisperCommand();
+    this._pythonWhisperFound = !!found;
+    // The next initializeClient() uses this instead of probing again.
+    this._pythonCommandCache = found || null;
+    return !!found;
+  }
+
+  /** Cheap guess, without probing, whether a Python Whisper is set up. */
+  hasPythonWhisper() {
+    if (this.whisperEngine === 'python' && this.whisperCommand) return true;
+    if (this._pythonWhisperFound !== null) return this._pythonWhisperFound;
+    if (this._getUserDataWhisperCandidate()) return true;
+    const parsed = this._parseCommand(this._getSetting('whisperCommand') || process.env.WHISPER_COMMAND || '');
+    if (!parsed || !path.isAbsolute(parsed.command)) return false;
+    try {
+      return fs.statSync(parsed.command).isFile();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
+   * Local engine state for Settings and onboarding. Reads files only; never
+   * starts a process.
+   */
+  getWhisperEngineState() {
+    const check = this._checkWhisperCpp();
+    // With local Whisper on, the choice made at init; otherwise what init
+    // would choose (a cheap guess for the Python case, without probing).
+    let choice = this.whisperEngineChoice;
+    if (this.provider !== 'whisper') {
+      choice = this._getConfiguredWhisperEngine() ||
+        (this._hasLegacyPythonWhisperConfig() && this.hasPythonWhisper() ? 'python' : 'whispercpp');
+    }
+    return {
+      choice,
+      active: this.provider === 'whisper' ? this.whisperEngine : null,
+      problem: check.problem,
+      problemMessage: WHISPER_CPP_PROBLEMS[check.problem] || '',
+      binaryAvailable: check.binaryAvailable,
+      platformSupported: isPlatformSupported(),
+      selectedModel: check.modelId,
+      modelDir: check.modelDir || this._getWhisperModelDir()
+    };
+  }
+
+  _getWhisperIdleUnloadMs() {
+    return Math.max(10000, Number(process.env.WHISPER_GPU_IDLE_MS || 60000) || 60000);
+  }
+
+  /** Why local voice is unavailable, in words for the user, or ''. */
+  getUnavailableReason() {
+    if (this.provider !== 'whisper' || this.isAvailable()) return '';
+    if (this.whisperEngineChoice === 'python') return PYTHON_WHISPER_MISSING;
+    return WHISPER_CPP_PROBLEMS[this.whisperCppProblem] || '';
+  }
+
+  /** User-facing text for a failed local transcription. */
+  _whisperErrorMessage(error) {
+    if (error && error.userFacing && error.message) return error.message;
+    return `Whisper transcription failed: ${error && error.message ? error.message : 'unknown error'}`;
   }
 
   startRecording() {
     try {
       if (!this.available) {
-        const errorMsg = `Speech provider "${this.provider}" is not available`;
+        const errorMsg = this.getUnavailableReason() || `Speech provider "${this.provider}" is not available`;
         logger.error(errorMsg);
         this.emit('error', errorMsg);
         return;
@@ -818,7 +1081,22 @@ class SpeechService extends EventEmitter {
     this.emit('recording-started');
     this.emit('status', 'Local Whisper recording started');
 
-    if (this.whisperWorker.isConfigured()) {
+    if (this.whisperEngine === 'whispercpp' && this.whisperCpp) {
+      // Start the server and load the model while the user speaks.
+      this.whisperCpp.warmup().then((result) => {
+        logger.info('whisper.cpp warmup completed while recording', { startMs: result.startMs });
+      }).catch((error) => {
+        logger.warn('whisper.cpp warmup failed', { code: error.code, error: error.message });
+        if (this.isRecording && error.code !== 'CANCELLED') {
+          // Stop without transcribing what was captured: it would fail the
+          // same way and show the error twice.
+          this.emit('error', this._whisperErrorMessage(error));
+          this.segmentBuffers = [];
+          this.segmentBytes = 0;
+          this.stopRecording();
+        }
+      });
+    } else if (this.whisperWorker.isConfigured()) {
       this.whisperWorker.warmup({
         model: this._getWhisperModel(),
         modelDir: this._getWhisperModelDir(),
@@ -1078,6 +1356,7 @@ class SpeechService extends EventEmitter {
     this.vadPreRollMs = 0;
     this._flushWhisperSegment({ final: false }).catch((error) => {
       logger.error('Whisper segment transcription failed', { error: error.message });
+      this.emit('error', this._whisperErrorMessage(error));
     });
   }
 
@@ -1146,11 +1425,14 @@ class SpeechService extends EventEmitter {
       await this._flushWhisperSegment({ final: true });
     } catch (error) {
       logger.error('Final Whisper transcription failed', { error: error.message });
-      this.emit('error', `Whisper transcription failed: ${error.message}`);
+      this.emit('error', this._whisperErrorMessage(error));
     } finally {
       this._cleanup();
       this.isProcessingAudio = false;
       this.whisperWorker.releaseWhenIdle();
+      if (this.whisperCpp) {
+        this.whisperCpp.releaseWhenIdle();
+      }
       if (!captureAlreadyStopped) {
         this.emit('recording-stopped');
       }
@@ -1278,8 +1560,19 @@ class SpeechService extends EventEmitter {
     }
 
     if (this.provider === 'whisper') {
+      if (this.whisperEngine === 'whispercpp' && this.whisperCpp) {
+        try {
+          await this.whisperCpp.warmup();
+          return { success: true, message: 'The built-in voice engine works.' };
+        } catch (error) {
+          return { success: false, message: error.message };
+        }
+      }
       if (!this.whisperCommand) {
-        return { success: false, message: 'Local Whisper CLI not found' };
+        return {
+          success: false,
+          message: WHISPER_CPP_PROBLEMS[this.whisperCppProblem] || 'Local Whisper CLI not found'
+        };
       }
       // Actually probe the executable to confirm it works
       const probe = spawnSync(
@@ -1308,7 +1601,7 @@ class SpeechService extends EventEmitter {
       provider: this.provider,
       isRecording: this.isRecording,
       isProcessingAudio: this.isProcessingAudio,
-      isInitialized: this.provider === 'azure' ? !!this.speechConfig : !!this.whisperCommand,
+      isInitialized: this.provider === 'azure' ? !!this.speechConfig : !!this.whisperEngine,
       sessionDuration: this.sessionStartTime ? Date.now() - this.sessionStartTime : 0,
       retryCount: this.retryCount,
       effectiveSettings: {
@@ -1316,6 +1609,8 @@ class SpeechService extends EventEmitter {
         azureKey: this._getSetting('azureKey') || '',
         azureRegion: this._getSetting('azureRegion') || process.env.AZURE_SPEECH_REGION || '',
         whisperCommand: this._getSetting('whisperCommand') || process.env.WHISPER_COMMAND || '',
+        whisperEngine: this.whisperEngineChoice,
+        whisperCppModel: this.getWhisperCppModelId(),
         whisperModelDir: this._getWhisperModelDir(),
         whisperModel: this._getWhisperModel(),
         whisperLanguage: this._getWhisperLanguage(),
@@ -1337,7 +1632,8 @@ class SpeechService extends EventEmitter {
     }
 
     if (this.provider === 'whisper') {
-      return !!this.whisperCommand && !!this.available;
+      if (!this.available) return false;
+      return this.whisperEngine === 'whispercpp' ? !!this.whisperCpp : !!this.whisperCommand;
     }
 
     return false;
@@ -1352,10 +1648,11 @@ class SpeechService extends EventEmitter {
     this.isProcessingAudio = false;
     this._cleanup();
     this.whisperWorker.close();
+    this._teardownWhisperCpp();
   }
 
   updateSettings(settings = {}) {
-    const speechKeys = ['speechProvider', 'azureKey', 'azureRegion', 'whisperCommand', 'whisperModelDir', 'whisperModel', 'whisperLanguage', 'whisperCaptureMode', 'whisperDevice', 'whisperSegmentMs'];
+    const speechKeys = ['speechProvider', 'azureKey', 'azureRegion', 'whisperCommand', 'whisperModelDir', 'whisperModel', 'whisperLanguage', 'whisperCaptureMode', 'whisperDevice', 'whisperSegmentMs', 'whisperEngine', 'whisperCppModel'];
     let changed = false;
 
     for (const key of speechKeys) {
@@ -1437,6 +1734,30 @@ class SpeechService extends EventEmitter {
 
   _getWhisperLanguage() {
     return this._getSetting('whisperLanguage') || process.env.WHISPER_LANGUAGE || config.get('speech.whisper.language') || 'auto';
+  }
+
+  /**
+   * Language and initial prompt for the engines (whisper.cpp and Python share
+   * it). 'hinglish' is English decoding with the Roman-script prompt, so Hindi
+   * words stay in Latin letters; 'detect' is 'auto'; other values pass through.
+   */
+  _getWhisperDecodeOptions() {
+    const value = String(this._getWhisperLanguage() || 'auto').trim();
+    const lower = value.toLowerCase();
+    if (lower === 'hinglish') {
+      return { language: 'en', prompt: HINGLISH_PROMPT };
+    }
+    if (!value || lower === 'auto' || lower === 'detect') {
+      return { language: 'auto', prompt: '' };
+    }
+    // As saved: the Python CLI also takes names such as "English".
+    return { language: value, prompt: '' };
+  }
+
+  /** Language for whisper.cpp, which only takes codes such as "en" (or "auto"). */
+  _getWhisperCppDecodeOptions() {
+    const decode = this._getWhisperDecodeOptions();
+    return { ...decode, language: decode.language.toLowerCase() };
   }
 
   _getWhisperSegmentMs() {
@@ -1592,7 +1913,12 @@ class SpeechService extends EventEmitter {
     return null;
   }
 
-  _resolveWhisperCommand() {
+  /**
+   * Find a working Python Whisper command. `systemCandidates: false` only
+   * tries WHISPER_COMMAND and the app's own venv (no PATH scan), for the
+   * whisper.cpp default where Python is only a fallback.
+   */
+  _resolveWhisperCommand({ systemCandidates = true } = {}) {
     const configured = this._getSetting('whisperCommand') || process.env.WHISPER_COMMAND;
     const candidates = [];
 
@@ -1607,13 +1933,15 @@ class SpeechService extends EventEmitter {
     }
 
     // Platform-aware fallback candidates (higher priority = tried first)
-    candidates.push({ command: 'whisper', baseArgs: [], source: 'system PATH' });
-    if (process.platform === 'win32') {
-      candidates.push({ command: 'whisper.exe', baseArgs: [], source: 'system PATH (exe)' });
-      candidates.push({ command: 'py', baseArgs: ['-3', '-m', 'whisper'], source: 'py launcher' });
+    if (systemCandidates) {
+      candidates.push({ command: 'whisper', baseArgs: [], source: 'system PATH' });
+      if (process.platform === 'win32') {
+        candidates.push({ command: 'whisper.exe', baseArgs: [], source: 'system PATH (exe)' });
+        candidates.push({ command: 'py', baseArgs: ['-3', '-m', 'whisper'], source: 'py launcher' });
+      }
+      candidates.push({ command: 'python3', baseArgs: ['-m', 'whisper'], source: 'python3 module' });
+      candidates.push({ command: 'python', baseArgs: ['-m', 'whisper'], source: 'python module' });
     }
-    candidates.push({ command: 'python3', baseArgs: ['-m', 'whisper'], source: 'python3 module' });
-    candidates.push({ command: 'python', baseArgs: ['-m', 'whisper'], source: 'python module' });
 
     for (const candidate of candidates) {
       if (!candidate || !candidate.command) {
@@ -2011,7 +2339,7 @@ class SpeechService extends EventEmitter {
       if (clean && !this._isHallucinatedTranscript(clean)) {
         this.emit('transcription', clean);
       } else if (clean) {
-        logger.debug('Dropped likely Whisper silence hallucination', { transcript: clean });
+        logger.debug('Dropped likely Whisper silence hallucination', { characters: clean.length });
       }
     } finally {
       this.transcriptionInFlight = false;
@@ -2056,6 +2384,10 @@ class SpeechService extends EventEmitter {
   }
 
   async _transcribeWhisperBuffer(audioBuffer) {
+    if (this.whisperEngine === 'whispercpp' && this.whisperCpp) {
+      // Sent from memory: no temp file.
+      return this._transcribeWhisperCpp(this._createWavBuffer(audioBuffer));
+    }
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuewell-whisper-'));
     const audioFilePath = path.join(tempDir, 'segment.wav');
 
@@ -2067,17 +2399,29 @@ class SpeechService extends EventEmitter {
     }
   }
 
+  async _transcribeWhisperCpp(input) {
+    const { language, prompt } = this._getWhisperCppDecodeOptions();
+    const result = await this.whisperCpp.transcribe(input, { language, prompt });
+    return result.text || '';
+  }
+
   async _transcribeWhisperFile(audioFilePath) {
-    if (!this.whisperCommand) {
-      throw new Error('Local Whisper CLI not configured');
+    if (this.whisperEngine === 'whispercpp' && this.whisperCpp) {
+      return this._transcribeWhisperCpp(audioFilePath);
     }
 
+    if (!this.whisperCommand) {
+      throw new Error(WHISPER_CPP_PROBLEMS[this.whisperCppProblem] || 'Local Whisper CLI not configured');
+    }
+
+    const decode = this._getWhisperDecodeOptions();
     if (this.whisperWorker.isConfigured()) {
       const startedAt = Date.now();
       try {
         const result = await this.whisperWorker.transcribe(audioFilePath, {
           model: this._getWhisperModel(),
-          language: this._getWhisperLanguage(),
+          language: decode.language,
+          prompt: decode.prompt,
           modelDir: this._getWhisperModelDir(),
           device: this._getWhisperDevice()
         });
@@ -2109,9 +2453,11 @@ class SpeechService extends EventEmitter {
       '--fp16', 'False'
     ];
 
-    const language = this._getWhisperLanguage();
-    if (language && language !== 'auto' && language !== 'detect') {
-      args.push('--language', language);
+    if (decode.language && decode.language !== 'auto') {
+      args.push('--language', decode.language);
+    }
+    if (decode.prompt) {
+      args.push('--initial_prompt', decode.prompt);
     }
 
     if (this._getWhisperModelDir()) {

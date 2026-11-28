@@ -45,6 +45,10 @@ const TONE_RULES = {
 };
 const ownValue = (map, key) => (typeof key === 'string' && Object.prototype.hasOwnProperty.call(map, key) ? map[key] : '');
 
+// About you > Answer in "Hinglish (Roman script)": how Indian candidates
+// mix Hindi and English in interviews, written in Latin letters only.
+const HINGLISH_RULE = '- Language: write every answer in natural Hinglish, the mix of Hindi and English that Indian candidates speak in interviews, including the first line, even when the question is in another language. Write it only in Roman (Latin) script, never in Devanagari or any other script, for example: "Haan, main is approach ko explain karta hoon. Time complexity O(n log n) hai." Keep technical terms, names, identifiers and complexity notation such as O(n log n) in English. Code blocks stay exactly as they would in an English answer, comments included.';
+
 class PromptLoader {
   constructor() {
     this.prompts = new Map();
@@ -553,7 +557,9 @@ ${rules.join('\n')}`;
   /**
    * Answer style (tone and answer language from About you) as a prompt
    * section, or '' when neither is set. English is the default language and
-   * adds nothing.
+   * adds nothing. Any value naming Hinglish ("Hinglish (Roman script)", the
+   * Settings suggestion) gets its own rule: Hindi-English in Roman script
+   * only, never Devanagari, with technical terms and code in English.
    */
   formatAnswerStyle(profile) {
     if (!profile || typeof profile !== 'object') return '';
@@ -561,7 +567,9 @@ ${rules.join('\n')}`;
     const tone = ownValue(TONE_RULES, profile.tone);
     if (tone) rules.push(`- Tone: ${tone}`);
     const language = typeof profile.answerLanguage === 'string' ? profile.answerLanguage.replace(/\s+/g, ' ').trim() : '';
-    if (language && !/^english$/i.test(language)) {
+    if (/\bhinglish\b/i.test(language)) {
+      rules.push(HINGLISH_RULE);
+    } else if (language && !/^english$/i.test(language)) {
       rules.push(`- Language: write every answer in ${language}, including the first line, even when the question is in another language. Keep code, identifiers and standard technical terms as they are usually written.`);
     }
     if (rules.length === 0) return '';

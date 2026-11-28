@@ -336,6 +336,42 @@ describe('answer style', () => {
     }
   });
 
+  it('answers in Hinglish written only in Roman script', () => {
+    for (const value of ['Hinglish (Roman script)', 'hinglish', '  HINGLISH  ', 'Hinglish (Roman)']) {
+      const style = loader.formatAnswerStyle({ answerLanguage: value });
+      assert.match(style, /^## ANSWER STYLE \(internal, never mention it\)\n/, value);
+      assert.match(style, /- Language: write every answer in natural Hinglish, the mix of Hindi and English/, value);
+      assert.match(style, /including the first line/, value);
+      assert.match(style, /only in Roman \(Latin\) script, never in Devanagari/, value);
+      assert.match(style, /Time complexity O\(n log n\) hai\./, value);
+      assert.match(style, /Keep technical terms, names, identifiers and complexity notation such as O\(n log n\) in English\./, value);
+      assert.match(style, /Code blocks stay exactly as they would in an English answer, comments included\./, value);
+      // Never the generic rule, which would ask for "Hinglish" with no script.
+      assert.doesNotMatch(style, /write every answer in Hinglish/i, value);
+      // The prompt itself is plain ASCII: no Devanagari slips into it.
+      assert.doesNotMatch(style, /[\u0900-\u097F]/, value);
+    }
+  });
+
+  it('keeps other languages that only mention Hindi on the generic rule', () => {
+    for (const value of ['Hindi', 'Hindi and English', 'Roman Urdu']) {
+      const style = loader.formatAnswerStyle({ answerLanguage: value });
+      assert.match(style, new RegExp(`- Language: write every answer in ${value}, including the first line`), value);
+      assert.doesNotMatch(style, /Devanagari/, value);
+    }
+  });
+
+  it('puts the Hinglish rule in the system prompt for every mode and channel', () => {
+    for (const mode of MODE_IDS) {
+      for (const channel of CHANNELS) {
+        const prompt = build({ mode, channel, profile: { answerLanguage: 'Hinglish (Roman script)', tone: 'friendly' } });
+        assert.match(prompt, /Tone: friendly\./, `${mode}/${channel}`);
+        assert.match(prompt, /natural Hinglish/, `${mode}/${channel}`);
+        assert.match(prompt, /never in Devanagari/, `${mode}/${channel}`);
+      }
+    }
+  });
+
   it('ignores unknown tones and values that are not text', () => {
     for (const profile of [{ tone: 'loud' }, { tone: 'constructor' }, { tone: 1 }, { answerLanguage: 5 }, null, 'x']) {
       assert.equal(loader.formatAnswerStyle(profile), '', JSON.stringify(profile));

@@ -9,12 +9,19 @@
     "start": "node scripts/start.js",
     "dev": "node scripts/start.js --disable-gpu",
     "test-speech": "node scripts/test-speech.js",
+    "fetch:whisper": "node scripts/fetch-whisper-cpp.js",
+    "prebuild": "node scripts/fetch-whisper-cpp.js --all-arches",
     "build": "electron-builder",
+    "prebuild:mac": "node scripts/fetch-whisper-cpp.js --platform darwin --all-arches",
     "build:mac": "electron-builder --mac",
+    "prebuild:win": "node scripts/fetch-whisper-cpp.js --platform win32",
     "build:win": "electron-builder --win",
+    "prebuild:linux": "node scripts/fetch-whisper-cpp.js --platform linux",
     "build:linux": "electron-builder --linux",
+    "prebuild:all": "npm run prebuild:mac && npm run prebuild:win && npm run prebuild:linux",
     "build:all": "electron-builder --mac --win --linux",
     "dist": "npm run build",
+    "prepack": "node scripts/fetch-whisper-cpp.js",
     "pack": "electron-builder --dir",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "rebuild": "npm run clean && npm run build",
@@ -65,11 +72,13 @@
       "!.venv-whisper/**/*",
       "!.whisper-models/**/*",
       "!bin/**/*",
+      "!vendor/**/*",
       "!setup.sh",
       "!setup.ps1",
       "!tailwind.config.js",
       "!scripts/start.js",
       "!scripts/test-speech.js",
+      "!scripts/fetch-whisper-cpp.js",
       "!scripts/*.nsh",
       "!scripts/__pycache__/**/*",
       "!**/*.pyc",
@@ -83,6 +92,7 @@
       "prompts/**/*",
       "scripts/whisper_worker.py"
     ],
+    "beforePack": "./scripts/fetch-whisper-cpp.js",
     "electronFuses": {
       "runAsNode": false,
       "enableNodeOptionsEnvironmentVariable": false,
@@ -111,6 +121,15 @@
           ]
         }
       ],
+      "extraResources": [
+        {
+          "from": "vendor/whisper/darwin-${arch}",
+          "to": "whisper",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ],
       "darkModeSupport": true,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
@@ -135,6 +154,15 @@
             "x64"
           ]
         }
+      ],
+      "extraResources": [
+        {
+          "from": "vendor/whisper/win32-${arch}",
+          "to": "whisper",
+          "filter": [
+            "**/*"
+          ]
+        }
       ]
     },
     "linux": {
@@ -149,6 +177,15 @@
           "target": "deb",
           "arch": [
             "x64"
+          ]
+        }
+      ],
+      "extraResources": [
+        {
+          "from": "vendor/whisper/linux-${arch}",
+          "to": "whisper",
+          "filter": [
+            "**/*"
           ]
         }
       ],
