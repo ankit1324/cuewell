@@ -57,6 +57,8 @@ const STOP_GRACE_MS = 2000;
 // One start, plus one retry on a new port after a bind failure.
 const MAX_START_ATTEMPTS = 2;
 const STDERR_LINES_KEPT = 20;
+// How long a start waits, after the server exited, for the rest of its stderr.
+const STDERR_DRAIN_MS = 1000;
 const LISTENER_CHECK_TIMEOUT_MS = 5000;
 // Listener checks that may fail in a row (netstat timed out) before a start fails.
 const LISTENER_CHECK_ATTEMPTS = 2;
@@ -810,7 +812,15 @@ class WhisperCppEngine {
     let ready = false;
     let bindFailed = false;
     let partial = '';
+    // Ends when stderr is closed. 'exit' can come before the last stderr
+    // data (Node does not order them), so a start failure is classified
+    // only after this, or the bind failure line could be missed.
+    let stderrClosed = Promise.resolve();
     if (child.stderr) {
+      stderrClosed = new Promise((resolve) => {
+        child.stderr.once('close', resolve);
+        child.stderr.once('error', resolve);
+      });
       child.stderr.on('data', (chunk) => {
         if (ready) return; // drained, never kept: it may describe requests
         partial += chunk.toString();
@@ -923,6 +933,18 @@ class WhisperCppEngine {
     // The process ended before it was ready.
     if (this.generation !== generation) {
       throw engineError('CANCELLED', 'The speech engine was stopped while it started.');
+    }
+    // A grandchild holding stderr open must not stall the start.
+    let stderrTimer;
+    await Promise.race([
+      stderrClosed,
+      new Promise((r) => { stderrTimer = setTimeout(r, STDERR_DRAIN_MS); }),
+    ]);
+    clearTimeout(stderrTimer);
+    if (partial.trim()) {
+      if (BIND_FAILED_RE.test(partial)) bindFailed = true;
+      stderrLines.push(partial.slice(0, 300));
+      partial = '';
     }
     const tail = stderrLines.slice(-8).join('\n');
     if (exited.error) {

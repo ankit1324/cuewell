@@ -12,7 +12,8 @@ const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { once } = require('node:events');
+const { once, EventEmitter } = require('node:events');
+const { PassThrough } = require('node:stream');
 
 // The engine sweeps os.tmpdir() for socket folders left by a crashed run.
 // Point it at a private folder so the test never touches the real one.
@@ -160,6 +161,25 @@ function setup(t, { modelContent = 'ggml', engineOptions = {}, env = {}, spawnEn
 
 function exited(child) {
   return child.exitCode !== null || child.signalCode !== null;
+}
+
+/**
+ * Resolve once `child` has exited, from its 'exit' event (not by polling).
+ * The engine stops a child with a 2 s grace, then sends SIGKILL and moves on
+ * without waiting, so on a busy runner the exit can land after the engine
+ * has already started the next child. `ms` only turns a hang into a failure.
+ */
+async function waitForExit(child, ms = 10000) {
+  if (exited(child)) return;
+  let timer;
+  try {
+    await Promise.race([
+      once(child, 'exit'),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Timed out waiting for the child to exit')), ms); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function waitFor(check, ms = 3000) {
@@ -335,7 +355,7 @@ describe('WhisperCppEngine server lifecycle', { concurrency: true }, () => {
     await waitFor(() => spawns.length === 1);
     await engine.unload();
     await assert.rejects(warm, { code: 'CANCELLED' });
-    await waitFor(() => exited(spawns[0].child));
+    await waitForExit(spawns[0].child);
   });
 });
 
@@ -381,6 +401,32 @@ describe('WhisperCppEngine start errors', { concurrency: true }, () => {
     assert.equal(damaged.engine.isRunning(), false);
   });
 
+  it('a bind failure line that arrives after the exit event still counts as a bind failure', async (t) => {
+    // Node does not order 'exit' and the last stderr data; on Windows the
+    // exit often comes first.
+    const fakes = [];
+    const { engine } = setup(t, {
+      engineOptions: {
+        spawnFn: () => {
+          const child = new EventEmitter();
+          child.exitCode = null;
+          child.signalCode = null;
+          child.stderr = new PassThrough();
+          child.kill = () => false;
+          fakes.push(child);
+          setTimeout(() => {
+            child.exitCode = 1;
+            child.emit('exit', 1, null);
+            setTimeout(() => child.stderr.end("\ncouldn't bind to server socket: hostname=127.0.0.1 port=1\n"), 50);
+          }, 20);
+          return child;
+        },
+      },
+    });
+    await assert.rejects(engine.warmup(), { code: 'BIND_FAILED', userFacing: true });
+    assert.equal(fakes.length, 2, 'retried on a new port');
+  });
+
   it('a program that cannot be spawned gives a user-facing error', async (t) => {
     const { engine } = setup(t, {
       engineOptions: {
@@ -421,11 +467,13 @@ describe('WhisperCppEngine proves the listener is its own child', { concurrency:
     await warm;
 
     assert.equal(spawns.length, 2, 'one retry');
-    // The exit event and the fake server's event log can land a moment after
-    // the engine moved on to the retry (seen on Windows runners).
-    await waitFor(() => exited(spawns[0].child));
+    // The first child's exit can land after the engine moved on to the
+    // retry (see waitForExit). Its bind-failed event is already in the log:
+    // the fake server writes it before the stderr line the engine reacts to.
+    await waitForExit(spawns[0].child);
     assert.notEqual(portOf(spawns[1]), portOf(spawns[0]), 'the retry uses a new port');
-    await waitFor(() => events().some((e) => e.event === 'bind-failed' && e.port === portOf(spawns[0])));
+    assert.ok(events().some((e) => e.event === 'bind-failed' && e.port === portOf(spawns[0])),
+      'the first child failed to bind the port the foreign responder held');
 
     assert.equal((await engine.transcribe(Buffer.from('audio'))).text, TRANSCRIPT);
     assert.deepEqual(foreign.requests, [], 'nothing, not even /health with the secret path, went to the foreign responder');
@@ -451,7 +499,7 @@ describe('WhisperCppEngine proves the listener is its own child', { concurrency:
     await warm;
 
     assert.equal(spawns.length, 2, 'stopped and retried');
-    await waitFor(() => exited(spawns[0].child));
+    await waitForExit(spawns[0].child);
     assert.ok(logs.some((l) => /Another program is listening/.test(l.message)));
     assert.equal((await engine.transcribe(Buffer.from('audio'))).text, TRANSCRIPT);
     assert.deepEqual(foreign.requests, [], 'no request at all to the foreign responder');
@@ -513,7 +561,7 @@ describe('WhisperCppEngine proves the listener is its own child', { concurrency:
     assert.equal(checks, 2, 'one more try after a failed check');
     assert.deepEqual(urls, []);
     assert.equal(spawns.length, 1);
-    await waitFor(() => exited(spawns[0].child));
+    await waitForExit(spawns[0].child);
     assert.equal(engine.isRunning(), false);
   });
 
