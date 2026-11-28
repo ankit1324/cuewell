@@ -1,0 +1,683 @@
+/*
+ * Answer window (llm-response.html): an index card.
+ *
+ * The header carries the brand keycap, the "Answer" label and the live state
+ * (pencil while drafting, red dot while writing) over a double header rule.
+ * An answer opens with a red tick and SAY THIS, then the line to say first in
+ * Fraunces; lists sit on ruled lines (28 px pitch); code is a dark card held
+ * by a paperclip. Errors are a red-pencil margin note.
+ *
+ * answer-page.js measures .window-header plus the visible view's content and
+ * scroller padding to size the window, so everything drawn here sits inside
+ * those boxes (pseudo-elements included), and nothing that changes while an
+ * answer streams changes a height.
+ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+  -webkit-app-region: no-drag;
+}
+
+/* ---------- Window surface ---------- */
+
+.main-container {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header: the drag region. Its bottom edge is the card's double rule. */
+.window-header.oc-titlebar {
+  gap: var(--s-2);
+  height: 44px;
+  padding: 0 var(--s-2) 4px var(--s-6);
+  border-bottom: 0;
+  box-shadow:
+    inset 0 -1px 0 var(--rule-2),
+    inset 0 -3px 0 var(--paper),
+    inset 0 -4px 0 var(--rule-2);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.window-header .oc-mark {
+  --s: 20px;
+}
+
+.window-title.oc-title {
+  font: 600 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  pointer-events: none;
+  user-select: none;
+}
+
+.window-header .answer-spacer { flex: 1; }
+
+/* Live state: "Thinking" (pencil) while loading, "Writing" (red dot) while
+   the answer streams; faded out otherwise. answer-page.js sets the text. */
+.answer-status.oc-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 var(--fs-12) / var(--lh-16) var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--red-ink);
+  pointer-events: none;
+  transition: opacity var(--t-swap) var(--ease);
+}
+
+.answer-status::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 3px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: answer-live var(--t-pulse) var(--ease) infinite;
+}
+
+@keyframes answer-live {
+  0% { box-shadow: 0 0 0 0 rgba(212, 64, 42, 0.45); }
+  70%, 100% { box-shadow: 0 0 0 5px rgba(212, 64, 42, 0); }
+}
+
+.main-container:has(#loading:not(.is-off)) .answer-status.oc-label {
+  color: var(--ink-3);
+}
+
+.main-container:has(#loading:not(.is-off)) .answer-status::before {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  border-radius: 0;
+  background-color: var(--ink-3);
+  -webkit-mask: var(--icon-pencil) center / contain no-repeat;
+  mask: var(--icon-pencil) center / contain no-repeat;
+  animation: none;
+}
+
+.answer-status.is-off { opacity: 0; }
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  -webkit-app-region: no-drag;
+}
+
+.window-controls svg { display: block; }
+
+/* ---------- Views ----------
+   The empty, loading and answer views (and, inside the answer, the split
+   and full layouts) share one grid cell, so switching between them never
+   moves anything. The one being left fades out while the next fades in;
+   visibility drops it from focus and screen readers once the fade ends. */
+
+.answer-body,
+.content-area {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.answer-view,
+.answer-layout {
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 0;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--t-swap) var(--ease), visibility 0s linear 0s;
+}
+
+.answer-view.is-off,
+.answer-layout.is-off {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--t-swap) var(--ease), visibility 0s linear var(--t-swap);
+}
+
+/* Set for one frame when a view changes behind a hidden window. */
+.answer-view.no-motion,
+.answer-layout.no-motion,
+.answer-status.no-motion { transition: none !important; }
+
+/* ---------- Ruled lines ----------
+   One rule every 28 px, 5 px under the baseline of 14 px text on a 28 px
+   line, so lines written while streaming land on a rule already there. */
+
+.answer-empty,
+.draft-rules,
+.answer-body .markdown-content > ul,
+.answer-body .markdown-content > ol,
+.answer-body .markdown-content.answer-error {
+  background-image: linear-gradient(to bottom, transparent 23px, var(--rule) 23px, var(--rule) 24px, transparent 24px);
+  background-size: 100% var(--lh-rule);
+  background-repeat: repeat-y;
+}
+
+/* ---------- Empty and loading ---------- */
+
+.answer-empty {
+  box-sizing: border-box;
+  min-height: calc(var(--s-4) + 4 * var(--lh-rule));
+  padding: var(--s-4) var(--s-6) 0;
+  background-position: 0 var(--s-4);
+}
+
+.answer-empty-title {
+  margin: 0;
+  font: italic 500 var(--fs-20) / var(--lh-rule) var(--font-display);
+  color: var(--ink-2);
+}
+
+.answer-empty-hint {
+  margin: 0;
+  font-size: var(--fs-14);
+  line-height: var(--lh-rule);
+  color: var(--ink-2);
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  padding: var(--s-4) var(--s-6) var(--s-2);
+}
+
+/* SAY THIS, still in pencil grey while the answer is drafted. */
+.answer-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 var(--s-2);
+  font: 700 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.answer-label::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  background-color: currentColor;
+  -webkit-mask: var(--icon-pencil) center / contain no-repeat;
+  mask: var(--icon-pencil) center / contain no-repeat;
+}
+
+/* Pencil lines drawing where the first line will go. */
+.draft {
+  container-type: inline-size;
+  margin-bottom: var(--s-3);
+}
+
+.draft-line {
+  position: relative;
+  height: var(--lh-32);
+}
+
+.draft-svg {
+  display: block;
+  width: 568px;
+  max-width: 100%;
+  height: 32px;
+  overflow: visible;
+}
+
+.draft-path {
+  fill: none;
+  stroke: var(--graphite);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  vector-effect: non-scaling-stroke;
+  animation: answer-draw var(--t-draw) var(--ease-draw) infinite;
+}
+
+.draft-line--short .draft-path {
+  animation-delay: 260ms;
+}
+
+/* The pencil tip follows the first line (drawn at its full 568 px). */
+.draft-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink);
+  offset-path: path('M2 25C64 23.5 118 26.5 182 24.8S302 23 366 25.2 480 26.4 548 24.4');
+  offset-rotate: 0deg;
+  animation: answer-tip var(--t-draw) var(--ease-draw) infinite;
+}
+
+@container (max-width: 567px) {
+  .draft-tip { display: none; }
+}
+
+@keyframes answer-draw {
+  0% { stroke-dashoffset: 100; opacity: 1; }
+  70% { stroke-dashoffset: 0; opacity: 1; }
+  88% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@keyframes answer-tip {
+  0% { offset-distance: 0%; opacity: 1; }
+  70% { offset-distance: 100%; opacity: 1; }
+  80%, 100% { offset-distance: 100%; opacity: 0; }
+}
+
+.draft-rules {
+  height: calc(2 * var(--lh-rule));
+  margin: 0 calc(-1 * var(--s-6));
+}
+
+/* "Thinking…" as the card's foot line; the pencil is the motion. */
+.loading-text {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
+}
+
+.loading-text .oc-shimmer {
+  color: var(--ink-2);
+  background: none;
+  animation: none;
+}
+
+.loading-hint {
+  margin: 0;
+  padding: 0 0 var(--s-2);
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
+  color: var(--ink-3);
+  transition: opacity var(--t-swap) var(--ease);
+}
+
+.loading-hint.is-off { opacity: 0; }
+
+/* ---------- Content ---------- */
+
+.content-area {
+  -webkit-app-region: no-drag;
+}
+
+.split-layout {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.text-panel,
+.code-panel {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.code-panel {
+  background: var(--paper-2);
+  border-left: 1px solid var(--rule);
+}
+
+.panel-content,
+.full-content-inner {
+  height: 100%;
+  box-sizing: border-box;
+  overflow: auto;
+  outline: none;
+}
+
+.text-panel .panel-content { padding: var(--s-4) var(--s-6) var(--s-5); }
+.code-panel .panel-content { padding: var(--s-4) var(--s-4) var(--s-5); }
+
+.full-content {
+  position: relative;
+  overflow: hidden;
+}
+
+.full-content-inner { padding: var(--s-4) var(--s-6) var(--s-5); }
+
+/* Prose keeps an 80ch measure; lists span the card so their rules reach
+   both edges, with the same measure inside. */
+#full-markdown > :not(ul, ol, pre, table) { max-width: 80ch; }
+
+#full-markdown > ul,
+#full-markdown > ol {
+  padding-right: max(var(--s-6), calc(100% - 80ch));
+}
+
+/* Each panel scrolls on its own; theme.css draws the thin scrollbars. */
+
+.panel-content:focus-visible,
+.full-content-inner:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
+.interactive-scrolling .panel-content,
+.interactive-scrolling .full-content-inner { cursor: grab; }
+.interactive-scrolling .panel-content:active,
+.interactive-scrolling .full-content-inner:active { cursor: grabbing; }
+
+/* ---------- The answer ---------- */
+
+/* SAY THIS with a red-pencil tick, above the first line. A pseudo-element,
+   so it is part of the measured content and needs no script. Not shown for
+   errors or an empty prose panel (a code-only answer). */
+.markdown-content:not(.answer-error):not(:empty)::before {
+  content: 'Say this';
+  display: block;
+  margin: 0 0 var(--s-2);
+  padding-left: 20px;
+  font: 700 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--red-ink);
+  background: var(--icon-tick) left 0 top 0 / 14px 14px no-repeat;
+}
+
+/* The line to say first. */
+.markdown-content:not(.answer-error) > :is(p, h1, h2, h3):first-child {
+  margin: 0 0 var(--s-3);
+  font: 450 var(--fs-24) / var(--lh-32) var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.012em;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+
+.markdown-content:not(.answer-error) > :is(p, h1, h2, h3):first-child strong {
+  font-weight: 600;
+}
+
+/* Details: lists on ruled lines, the rules running to the card's edges. */
+.answer-body .markdown-content > ul,
+.answer-body .markdown-content > ol {
+  margin: 0 calc(-1 * var(--s-6)) var(--s-3);
+  padding: 0 var(--s-6) 0 calc(2 * var(--s-6));
+  line-height: var(--lh-rule);
+}
+
+.answer-body .markdown-content li {
+  margin: 0;
+  padding-left: 0;
+}
+
+.answer-body .markdown-content li > p,
+.answer-body .markdown-content li > ul,
+.answer-body .markdown-content li > ol {
+  margin: 0;
+}
+
+.answer-body .markdown-content ol > li::marker {
+  content: counter(list-item) '\00a0\00a0\00a0';
+  font: italic 500 var(--fs-15) / var(--lh-rule) var(--font-display);
+  color: var(--ink-2);
+}
+
+.answer-body .markdown-content ul > li::marker {
+  content: '\2013\00a0\00a0';
+  color: var(--ink-2);
+}
+
+.answer-body .markdown-content li strong {
+  font-weight: 600;
+}
+
+/* Page extras for markdown. */
+.markdown-content sup,
+.markdown-content sub {
+  font-size: 0.72em;
+  line-height: 0;
+}
+
+.math {
+  font-family: 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', serif;
+  white-space: nowrap;
+}
+
+/* Streaming caret: a red-pencil bar after the last word while "Writing" is
+   shown. It takes no width (2 px box, -2 px margin) and is shorter than the
+   line, so it never pushes text or changes a height; the inserted text is
+   not animated. */
+.main-container:has(.answer-status:not(.is-off)):has(#response-content:not(.is-off)) .markdown-content:not(.answer-error) > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.main-container:has(.answer-status:not(.is-off)):has(#response-content:not(.is-off)) .markdown-content:not(.answer-error) > :is(ul, ol):last-child > li:last-child:not(:has(> :is(p, ul, ol)))::after,
+.main-container:has(.answer-status:not(.is-off)):has(#response-content:not(.is-off)) .markdown-content:not(.answer-error) > :is(ul, ol):last-child > li:last-child > p:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 1em;
+  margin-right: -2px;
+  border-left: 2px solid var(--red);
+  border-radius: 1px;
+  vertical-align: -0.15em;
+  animation: answer-blink var(--t-blink) steps(1, end) infinite;
+}
+
+@keyframes answer-blink {
+  0%, 55% { opacity: 1; }
+  56%, 100% { opacity: 0; }
+}
+
+/* ---------- Errors: a red-pencil margin note ---------- */
+
+.answer-body .markdown-content.answer-error {
+  position: relative;
+  min-height: calc(3 * var(--lh-rule));
+  font-size: var(--fs-14);
+  line-height: var(--lh-rule);
+}
+
+.markdown-content.answer-error::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -18px;
+  width: 8px;
+  height: min(84px, 100%);
+  background-color: var(--red);
+  -webkit-mask: var(--icon-margin-mark) center / 100% 100% no-repeat;
+  mask: var(--icon-margin-mark) center / 100% 100% no-repeat;
+}
+
+.markdown-content.answer-error > * {
+  margin: 0;
+}
+
+.markdown-content.answer-error > :first-child {
+  font: italic 500 var(--fs-20) / var(--lh-rule) var(--font-display);
+  color: var(--red-ink);
+}
+
+/* ---------- Code: dark cards clipped to the paper ---------- */
+
+.code-block {
+  --code-text: var(--on-slate);
+  --code-punct: var(--on-slate-2);
+  --code-key: var(--syn-key);
+  --code-type: var(--syn-type);
+  --code-fn: var(--syn-fn);
+  --code-str: var(--syn-str);
+  --code-num: var(--syn-num);
+  --code-com: var(--syn-com);
+  position: relative;
+  margin-top: var(--s-4); /* with the panel padding, room for the clip */
+  color: var(--on-slate);
+  background: var(--slate);
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 1px var(--slate-line), var(--shadow-code);
+}
+
+.code-block + .code-block {
+  margin-top: var(--s-8);
+}
+
+/* The paperclip over the card's top edge. */
+.code-block::before {
+  content: '';
+  position: absolute;
+  top: -28px;
+  left: var(--s-5);
+  z-index: 1;
+  width: 16px;
+  height: 48px;
+  background-color: var(--steel);
+  -webkit-mask: var(--icon-paperclip) center / contain no-repeat;
+  mask: var(--icon-paperclip) center / contain no-repeat;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.6));
+  pointer-events: none;
+}
+
+/* Bar: language name and (on the final answer) Copy. Always 40 px, so the
+   button arriving never moves the code. */
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 var(--s-2) 0 var(--s-12);
+  background: var(--slate-2);
+  border-bottom: 1px solid var(--slate-line);
+  border-radius: var(--r-3) var(--r-3) 0 0;
+}
+
+.code-header .oc-label {
+  font: 600 var(--fs-12) / var(--lh-16) var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--on-slate);
+}
+
+.code-content pre {
+  margin: 0;
+  padding: var(--s-3) var(--s-4) var(--s-4);
+  overflow-x: auto;
+  background: none;
+  border: 0;
+}
+
+/* The same font and line height before and after Prism adds its language
+   class to the pre, so highlighting never changes heights. */
+.code-content pre,
+.code-content code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: var(--lh-20);
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0;
+  white-space: pre;
+  color: var(--on-slate);
+  background: none;
+}
+
+.no-code {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--ink-3);
+  font-size: var(--fs-13);
+}
+
+/* Copy buttons (class names are used by the script; it sets the text). */
+.copy-btn.oc-btn {
+  gap: 6px;
+  height: 28px;
+  padding: 0 var(--s-3) 0 var(--s-2);
+  font: 600 var(--fs-12) / 1 var(--font-ui);
+  color: var(--on-slate);
+  background: transparent;
+  border: 1px solid var(--slate-line);
+  box-shadow: none;
+  -webkit-app-region: no-drag;
+}
+
+.copy-btn.oc-btn::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  background-color: currentColor;
+  -webkit-mask: var(--icon-copy) center / contain no-repeat;
+  mask: var(--icon-copy) center / contain no-repeat;
+}
+
+.copy-btn.oc-btn:hover {
+  color: var(--on-slate);
+  background: rgba(246, 241, 231, 0.08);
+  border-color: rgba(246, 241, 231, 0.32);
+}
+
+.copy-btn.oc-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--slate), 0 0 0 4px var(--on-slate);
+}
+
+.copy-btn.copied,
+.copy-btn.copied:hover {
+  color: var(--syn-str);
+}
+
+.copy-btn.copied::before {
+  -webkit-mask-image: var(--icon-check);
+  mask-image: var(--icon-check);
+}
+
+/* Indented code in the full layout: theme.css makes it a dark card; Copy
+   sits in its top-right corner. */
+.oc-prose pre { position: relative; }
+
+.oc-prose pre .copy-btn {
+  position: absolute;
+  top: var(--s-2);
+  right: var(--s-2);
+  background: var(--slate-2);
+}
+
+.oc-prose pre .copy-btn:hover { background: #36322a; }
+
+/* ---------- Reduced motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .answer-view,
+  .answer-layout,
+  .answer-view.is-off,
+  .answer-layout.is-off { transition: none; }
+
+  .answer-status::before,
+  .draft-tip,
+  .markdown-content *::after {
+    animation: none !important;
+  }
+
+  .draft-path {
+    animation: none !important;
+    stroke-dashoffset: 0;
+  }
+
+  .draft-tip { display: none; }
+}

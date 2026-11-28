@@ -1,443 +1,82 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'" />
     <title>Cuewell</title>
-    <link href="./src/styles/common.css" rel="stylesheet" />
-    <link href="./assests/vendor/fontawesome/all.min.css" rel="stylesheet" />
-    <style>
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        background: transparent;
-      }
-
-      body {
-        width: fit-content;
-        height: fit-content;
-        font-family: var(--oc-font);
-        -webkit-app-region: no-drag;
-      }
-
-      /* ---------- Bar ---------- */
-
-      .command-tab {
-        display: flex;
-        align-items: center;
-        flex-wrap: nowrap;
-        gap: 2px;
-        box-sizing: border-box;
-        height: 40px;
-        padding: 0 6px;
-        min-width: 60px;
-        color: var(--oc-text-2);
-        background: var(--oc-glass-bar);
-        border-radius: var(--oc-r-pill);
-        box-shadow: var(--oc-edge);
-        overflow: visible;
-        user-select: none;
-        -webkit-app-region: drag;
-      }
-
-      .command-mark {
-        margin: 0 6px;
-      }
-
-      .command-item {
-        display: inline-flex;
-        align-items: center;
-        flex-shrink: 1;
-        gap: 6px;
-        box-sizing: border-box;
-        height: 28px;
-        margin: 0;
-        padding: 0 9px;
-        font: 600 var(--oc-fs-sm) / 1 var(--oc-font);
-        color: var(--oc-text-2);
-        white-space: nowrap;
-        background: transparent;
-        border: 0;
-        border-radius: var(--oc-r-pill);
-        cursor: pointer;
-        transition:
-          background var(--oc-t-fast) var(--oc-ease),
-          color var(--oc-t-fast) var(--oc-ease),
-          opacity var(--oc-t) var(--oc-ease);
-        -webkit-app-region: no-drag;
-      }
-
-      .command-item:hover {
-        color: var(--oc-text);
-        background: var(--oc-raised-2);
-      }
-
-      .command-item:active {
-        background: var(--oc-raised-3);
-      }
-
-      .command-item:focus-visible {
-        outline: 2px solid var(--oc-accent-line);
-        outline-offset: 0;
-      }
-
-      .command-item i {
-        width: 12px;
-        font-size: 12px;
-        text-align: center;
-      }
-
-      .command-item .oc-kbd-group {
-        gap: 2px;
-      }
-
-      .command-separator {
-        flex: none;
-        width: 1px;
-        height: 14px;
-        margin: 0 3px;
-        background: var(--oc-line-2);
-      }
-
-      /* Mic: idle "Listen", recording "Listening" (JS toggles .recording). */
-      .mic-live-dot,
-      .mic-label--live {
-        display: none;
-      }
-
-      #micButton.recording,
-      #micButton.recording:hover {
-        color: var(--oc-live);
-        background: var(--oc-live-soft);
-      }
-
-      #micButton.recording i,
-      #micButton.recording .mic-label--idle {
-        display: none;
-      }
-
-      #micButton.recording .mic-live-dot,
-      #micButton.recording .mic-label--live {
-        display: inline-block;
-      }
-
-      /* JS sets disabled in click-through mode; the bar-level rule dims it. */
-      #micButton:disabled {
-        cursor: default;
-      }
-
-      /* Skill name */
-      #skillIndicator span {
-        color: var(--oc-text);
-        font-weight: 600;
-      }
-
-      /* Language picker: borderless inline select */
-      #languageSelector {
-        cursor: default;
-      }
-
-      #languageSelector select {
-        margin: 0;
-        padding: 0 14px 0 0;
-        height: 22px;
-        font: 600 var(--oc-fs-sm) / 1 var(--oc-font);
-        color: var(--oc-text);
-        background-color: transparent;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%23b5b7bd' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-        background-repeat: no-repeat;
-        background-position: right 1px center;
-        background-size: 8px 5px;
-        border: 0;
-        border-radius: var(--oc-r-xs);
-        outline: none;
-        cursor: pointer;
-        -webkit-appearance: none;
-        appearance: none;
-        -webkit-app-region: no-drag;
-      }
-
-      #languageSelector select:focus-visible {
-        outline: 2px solid var(--oc-accent-line);
-        outline-offset: 2px;
-      }
-
-      #languageSelector select option {
-        color: var(--oc-text);
-        background: #1a1b20;
-        font-weight: 500;
-      }
-
-      /* Shortcuts, Settings and More: icon-only circles */
-      #infoButton,
-      #settingsButton,
-      #moreButton {
-        justify-content: center;
-        width: 28px;
-        padding: 0;
-        border-radius: 50%;
-      }
-
-      /* Interaction status dot (JS toggles .interactive / .non-interactive) */
-      .status-dot {
-        flex: none;
-        width: 7px;
-        height: 7px;
-        margin: 0 8px 0 6px;
-        border-radius: 50%;
-        background: var(--oc-text-4);
-        box-shadow: none;
-        animation: none;
-        transition: background var(--oc-t) var(--oc-ease), box-shadow var(--oc-t) var(--oc-ease);
-      }
-
-      .status-dot.interactive {
-        background: var(--oc-accent);
-        box-shadow: 0 0 0 3px var(--oc-accent-soft);
-      }
-
-      .status-dot.non-interactive {
-        background: var(--oc-text-4);
-        box-shadow: none;
-      }
-
-      /* Click-through mode: quieter, still legible. */
-      .command-tab:has(.status-dot.non-interactive) > .command-item {
-        opacity: 0.7;
-      }
-
-      .hidden-indicator {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        padding: 6px 12px;
-        font-size: var(--oc-fs-xs);
-        font-weight: 600;
-        color: var(--oc-text);
-        background: var(--oc-glass-pop);
-        border-radius: var(--oc-r-md);
-        box-shadow: var(--oc-edge);
-        opacity: 0;
-        transition: opacity var(--oc-t) var(--oc-ease);
-        z-index: 1000;
-      }
-
-      .hidden-indicator.show {
-        opacity: 1;
-      }
-
-      /* ---------- Shortcuts popover ---------- */
-
-      /* top = bar height (40px) + 6px gap; keep in sync with main-window.js */
-      .shortcuts-popover {
-        position: absolute;
-        top: 46px;
-        left: 0;
-        right: 0;
-        box-sizing: border-box;
-        padding: 12px 12px 10px;
-        color: var(--oc-text);
-        background: var(--oc-glass-pop);
-        border-radius: var(--oc-r-lg);
-        box-shadow: var(--oc-edge);
-        z-index: 1000;
-        -webkit-app-region: no-drag;
-        pointer-events: none;
-        opacity: 0;
-        visibility: hidden;
-        transform: translateY(-4px);
-        transition:
-          opacity var(--oc-t-fast) var(--oc-ease),
-          transform var(--oc-t) var(--oc-ease),
-          visibility var(--oc-t-fast);
-      }
-
-      .shortcuts-popover.is-open {
-        pointer-events: auto;
-        opacity: 1;
-        visibility: visible;
-        transform: none;
-      }
-
-      .shortcuts-title {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        margin: 0 0 6px;
-      }
-
-      .shortcuts-title i {
-        font-size: 11px;
-        color: var(--oc-accent);
-      }
-
-      .shortcuts-list {
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-
-      .shortcut-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        min-height: 30px;
-        border-bottom: 1px solid var(--oc-line);
-      }
-
-      .shortcut-action {
-        font-size: var(--oc-fs-sm);
-        color: var(--oc-text-2);
-      }
-
-      .shortcut-keys {
-        flex: none;
-      }
-
-      .shortcut-or {
-        margin: 0 3px;
-        font-size: var(--oc-fs-xs);
-        color: var(--oc-text-3);
-      }
-
-      .shortcuts-footer {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: space-between;
-        gap: 4px 12px;
-        padding-top: 10px;
-        font-size: var(--oc-fs-xs);
-        color: var(--oc-text-3);
-      }
-
-      .shortcuts-credit {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      /* ---------- Notice under the bar (microphone problems, etc.) ---------- */
-
-      /* top = bar height (40px) + 6px gap, like the shortcuts popover */
-      .toolbar-notice {
-        position: absolute;
-        top: 46px;
-        left: 0;
-        right: 0;
-        display: none;
-        align-items: flex-start;
-        gap: 9px;
-        box-sizing: border-box;
-        padding: 9px 8px 9px 12px;
-        color: var(--oc-text);
-        background: var(--oc-glass-pop);
-        border-radius: var(--oc-r-lg);
-        box-shadow: inset 0 0 0 1px var(--oc-live-line), inset 0 1px 0 var(--oc-sheen);
-        z-index: 1001;
-        -webkit-app-region: no-drag;
-      }
-
-      .toolbar-notice.is-open {
-        display: flex;
-      }
-
-      .toolbar-notice-icon {
-        flex: none;
-        width: 14px;
-        margin-top: 2px;
-        font-size: 12px;
-        text-align: center;
-        color: var(--oc-error);
-      }
-
-      .toolbar-notice-text {
-        flex: 1;
-        min-width: 0;
-        margin: 0;
-        font-size: var(--oc-fs-sm);
-        line-height: 1.45;
-        color: var(--oc-text);
-        user-select: text;
-      }
-
-      .toolbar-notice-close {
-        flex: none;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 22px;
-        height: 22px;
-        margin: -2px 0 0;
-        padding: 0;
-        font-size: 11px;
-        color: var(--oc-text-3);
-        background: transparent;
-        border: 0;
-        border-radius: 50%;
-        cursor: pointer;
-      }
-
-      .toolbar-notice-close:hover {
-        color: var(--oc-text);
-        background: var(--oc-raised-2);
-      }
-
-      .toolbar-notice-close:focus-visible {
-        outline: 2px solid var(--oc-accent-line);
-        outline-offset: 0;
-      }
-    </style>
     <link rel="stylesheet" href="./src/styles/theme.css">
+    <link rel="stylesheet" href="./src/styles/icons.css">
+    <link rel="stylesheet" href="./src/styles/toolbar.css">
   </head>
   <body>
+    <!-- The window is sized to .command-tab (see src/styles/toolbar.css). -->
     <div class="command-tab">
-      <span class="oc-mark command-mark" aria-hidden="true"></span>
-      <button type="button" class="command-item" title="Screenshot and ask" aria-label="Screenshot and ask">
-        <i class="fas fa-camera" aria-hidden="true"></i>
-        <span class="oc-kbd-group" aria-hidden="true">
-          <span class="oc-kbd oc-mod"></span>
-          <span class="oc-kbd">⇧</span>
-          <span class="oc-kbd">S</span>
-        </span>
-      </button>
-      <button type="button" class="command-item" id="micButton" title="Listen (Alt+R)" aria-label="Toggle listening">
-        <i class="fas fa-microphone" aria-hidden="true"></i>
-        <span class="oc-dot oc-dot--live mic-live-dot" aria-hidden="true"></span>
-        <span class="mic-label mic-label--idle">Listen</span>
-        <span class="mic-label mic-label--live">Listening</span>
-      </button>
-      <div class="command-separator" aria-hidden="true"></div>
-      <button type="button" class="command-item" id="skillIndicator" title="Interview mode" aria-label="Interview mode">
-        <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
-        <span>Auto</span>
-      </button>
-      <div class="command-item" id="languageSelector" title="Answer language">
-        <i class="fas fa-code" aria-hidden="true"></i>
-        <select id="codingLanguage" aria-label="Coding language">
-          <option value="cpp">C++</option>
-          <option value="c">C</option>
-          <option value="python">Python</option>
-          <option value="java">Java</option>
-          <option value="javascript">JavaScript</option>
-        </select>
+      <div class="command-card">
+        <!-- Row 2 (interview controls). First in the DOM: main-window.js takes
+             the first .command-item as the screenshot button. CSS shows the
+             brand row above it. -->
+        <div class="command-controls">
+          <button type="button" class="command-item" title="Screenshot and ask" aria-label="Screenshot and ask">
+            <i class="fas fa-camera" aria-hidden="true"></i>
+            <span class="command-label">Screenshot</span>
+            <span class="oc-kbd-group" aria-hidden="true">
+              <span class="oc-kbd oc-mod"></span>
+              <span class="oc-kbd">⇧</span>
+              <span class="oc-kbd">S</span>
+            </span>
+          </button>
+          <button type="button" class="command-item" id="micButton" title="Listen (Alt+R)" aria-label="Toggle listening">
+            <i class="fas fa-microphone" aria-hidden="true"></i>
+            <span class="oc-dot oc-dot--live mic-live-dot" aria-hidden="true"></span>
+            <span class="mic-labels">
+              <span class="mic-label mic-label--idle">Listen</span>
+              <span class="mic-label mic-label--live">Listening<svg class="mic-scribble" viewBox="0 0 60 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M1 3.6C8 2.2 14 4.6 21 3.4S34 1.8 41 3.6 53 4.6 59 2.6"/></svg></span>
+            </span>
+            <span class="oc-kbd-group" aria-hidden="true"><span class="oc-kbd oc-alt"></span><span class="oc-kbd">R</span></span>
+          </button>
+          <div class="command-separator" aria-hidden="true"></div>
+          <button type="button" class="command-item" id="skillIndicator" title="Interview mode" aria-label="Interview mode">
+            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+            <span>Auto</span>
+            <span class="oc-kbd-group" aria-hidden="true"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">↕</span></span>
+          </button>
+          <div class="command-item" id="languageSelector" title="Answer language">
+            <i class="fas fa-code" aria-hidden="true"></i>
+            <select id="codingLanguage" aria-label="Coding language">
+              <option value="cpp">C++</option>
+              <option value="c">C</option>
+              <option value="python">Python</option>
+              <option value="java">Java</option>
+              <option value="javascript">JavaScript</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Row 1: brand, app controls and the click-through status. -->
+        <div class="command-brand">
+          <span class="oc-mark command-mark" aria-hidden="true"></span>
+          <span class="command-wordmark">Cuewell</span>
+          <span class="command-spacer" aria-hidden="true"></span>
+          <button type="button" class="command-item" id="infoButton" title="Shortcuts" aria-label="Shortcuts">
+            <i class="fas fa-circle-info" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="command-item" id="settingsButton" title="Settings" aria-label="Settings">
+            <i class="fas fa-gear" aria-hidden="true"></i>
+            <span class="command-label">Settings</span>
+            <span class="oc-kbd-group" aria-hidden="true"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">,</span></span>
+          </button>
+          <button type="button" class="command-item" id="moreButton" title="More" aria-label="More" aria-haspopup="menu">
+            <i class="fas fa-ellipsis" aria-hidden="true"></i>
+            <span class="command-label">More</span>
+          </button>
+          <div class="command-separator" aria-hidden="true"></div>
+          <div class="status-dot non-interactive" id="statusDot" role="img" title="Click-through mode (Alt+A to interact)" aria-label="Click-through mode (Alt+A to interact)"></div>
+          <span class="oc-kbd-group" aria-hidden="true"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">I</span></span>
+        </div>
       </div>
-      <div class="command-separator" aria-hidden="true"></div>
-      <button type="button" class="command-item" id="infoButton" title="Shortcuts" aria-label="Shortcuts">
-        <i class="fas fa-circle-info" aria-hidden="true"></i>
-      </button>
-      <button type="button" class="command-item" id="settingsButton" title="Settings" aria-label="Settings">
-        <i class="fas fa-gear" aria-hidden="true"></i>
-      </button>
-      <button type="button" class="command-item" id="moreButton" title="More" aria-label="More" aria-haspopup="menu">
-        <i class="fas fa-ellipsis" aria-hidden="true"></i>
-      </button>
-      <div class="status-dot non-interactive" id="statusDot" role="img" title="Click-through mode (Alt+A to interact)" aria-label="Click-through mode (Alt+A to interact)"></div>
     </div>
 
-    <!-- Notice under the bar; main-window.js fills and opens it. -->
+    <!-- Notice under the tab; main-window.js fills and opens it. -->
     <div id="toolbarNotice" class="toolbar-notice" role="alert">
       <i class="fas fa-microphone-slash toolbar-notice-icon" aria-hidden="true"></i>
       <p class="toolbar-notice-text" id="toolbarNoticeText"></p>
@@ -455,47 +94,47 @@
       <ul class="shortcuts-list">
         <li class="shortcut-row">
           <span class="shortcut-action">Capture screenshot and analyze</span>
-          <span class="shortcut-keys oc-kbd-group">
-            <span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">S</span>
+          <span class="shortcut-keys">
+            <span class="oc-kbd-group"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">S</span></span>
           </span>
         </li>
         <li class="shortcut-row">
           <span class="shortcut-action">Toggle visibility</span>
-          <span class="shortcut-keys oc-kbd-group">
-            <span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">V</span>
+          <span class="shortcut-keys">
+            <span class="oc-kbd-group"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">V</span></span>
           </span>
         </li>
         <li class="shortcut-row">
           <span class="shortcut-action">Toggle interaction (click-through)</span>
-          <span class="shortcut-keys oc-kbd-group">
-            <span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">I</span>
+          <span class="shortcut-keys">
+            <span class="oc-kbd-group"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">I</span></span>
             <span class="shortcut-or">or</span>
-            <span class="oc-kbd">Alt</span><span class="oc-kbd">A</span>
+            <span class="oc-kbd-group"><span class="oc-kbd oc-alt"></span><span class="oc-kbd">A</span></span>
           </span>
         </li>
         <li class="shortcut-row">
           <span class="shortcut-action">Open chat</span>
-          <span class="shortcut-keys oc-kbd-group">
-            <span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">C</span>
+          <span class="shortcut-keys">
+            <span class="oc-kbd-group"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">⇧</span><span class="oc-kbd">C</span></span>
           </span>
         </li>
         <li class="shortcut-row">
           <span class="shortcut-action">Toggle speech</span>
-          <span class="shortcut-keys oc-kbd-group">
-            <span class="oc-kbd">Alt</span><span class="oc-kbd">R</span>
+          <span class="shortcut-keys">
+            <span class="oc-kbd-group"><span class="oc-kbd oc-alt"></span><span class="oc-kbd">R</span></span>
           </span>
         </li>
         <li class="shortcut-row">
           <span class="shortcut-action">Open settings</span>
-          <span class="shortcut-keys oc-kbd-group">
-            <span class="oc-kbd oc-mod"></span><span class="oc-kbd">,</span>
+          <span class="shortcut-keys">
+            <span class="oc-kbd-group"><span class="oc-kbd oc-mod"></span><span class="oc-kbd">,</span></span>
           </span>
         </li>
       </ul>
       <div class="shortcuts-footer">
         <span>Tip: Alt+A also toggles interaction from anywhere.</span>
         <span class="shortcuts-credit">
-          <span class="oc-mark" style="--s: 10px" aria-hidden="true"></span>
+          <span class="oc-mark" aria-hidden="true"></span>
           Made by Ankit Chaudhary
         </span>
       </div>

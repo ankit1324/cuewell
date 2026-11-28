@@ -1,0 +1,921 @@
+/*
+ * First-run wizard (onboarding.html).
+ *
+ * The window is the desk (a darker paper); each step is an index card on it,
+ * with the step's name in Fraunces over a double header rule. The header
+ * shows where you are: "Step n of total" and one bar per step, done steps in
+ * ink and the current one in red pencil. Choice tiles are fresh cards; the
+ * chosen one gets an ink edge, and the chosen provider a red tick.
+ *
+ * Linked after theme.css, so these rules win over its primitives.
+ * onboarding.js builds the step bars, the voice model cards, the status lines
+ * and the summary rows with the classes used here.
+ */
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  font-family: var(--font-ui);
+  color: var(--ink);
+}
+
+a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--red);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  border-radius: var(--r-1);
+}
+
+a:hover {
+  color: var(--red-ink);
+}
+
+code {
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--ink);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+}
+
+/* ---------- Window: the desk ---------- */
+
+.wizard {
+  --ob-field-edge: rgba(29, 27, 22, 0.5); /* 3:1 field edge on paper */
+  display: flex;
+  flex-direction: column;
+  padding: var(--s-5) var(--s-6) var(--s-5);
+  background: var(--paper-2);
+}
+
+/* ---------- Header: brand and step progress ---------- */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  flex: none;
+  margin-bottom: var(--s-4);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.brand .oc-mark {
+  --s: 28px;
+  margin-top: -2px;
+}
+
+.brand .oc-mark::after {
+  font-size: 17px;
+}
+
+.brand-name {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-word {
+  font: 600 17px / var(--lh-20) var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.brand-by {
+  font-size: var(--fs-12);
+  line-height: var(--lh-16);
+  color: var(--ink-2);
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.step-badge.oc-label {
+  color: var(--ink-2);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+
+/* One bar per step: to do in a ruled line, done in ink, current in red. */
+.step-dot {
+  width: 24px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rule-2);
+  transition: background var(--t) var(--ease);
+}
+
+.step-dot.done {
+  background: var(--ink);
+}
+
+.step-dot.active {
+  background: var(--red);
+}
+
+/* ---------- Content: the step card ---------- */
+
+.content {
+  flex: 1;
+  min-height: 0;
+  margin: -4px -10px -4px -4px;
+  padding: 4px 10px 4px 4px;
+  overflow-y: auto;
+}
+
+.screen {
+  display: none;
+}
+
+.screen.active {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: var(--s-6);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  box-shadow: var(--shadow-tab);
+  animation: oc-rise var(--t) var(--ease) both;
+}
+
+.screen h1 {
+  margin-bottom: var(--s-2);
+  font: 600 var(--fs-24) / var(--lh-32) var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.012em;
+  color: var(--ink);
+}
+
+/* Card header: the subtitle sits over a full-bleed double rule. */
+.screen .subtitle {
+  margin: 0 calc(-1 * var(--s-6)) var(--s-5);
+  padding: 0 var(--s-6) var(--s-4);
+  font-size: var(--fs-14);
+  line-height: 22px;
+  color: var(--ink-2);
+  box-shadow:
+    inset 0 -1px 0 var(--rule-2),
+    inset 0 -3px 0 var(--paper),
+    inset 0 -4px 0 var(--rule-2);
+}
+
+/* ---------- Welcome ---------- */
+
+.hero {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Small caps with a red-pencil tick, as above an answer. */
+.hero-eyebrow.oc-label {
+  margin-bottom: var(--s-3);
+  padding-left: 20px;
+  font-weight: 700;
+  color: var(--red-ink);
+  background: var(--icon-tick) left 0 top 0 / 14px 14px no-repeat;
+}
+
+.screen .hero h1 {
+  margin-bottom: var(--s-3);
+  font-size: 32px;
+  line-height: 40px;
+  letter-spacing: -0.018em;
+}
+
+.hero h1 em {
+  font-style: italic;
+  font-weight: 500;
+  color: var(--red-ink);
+}
+
+.hero .tagline {
+  max-width: 44ch;
+  font-size: var(--fs-14);
+  line-height: 22px;
+  color: var(--ink-2);
+}
+
+.feature-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-top: var(--s-5);
+}
+
+.feature-pill.oc-chip {
+  gap: 4px;
+}
+
+.feature-pill > .fas {
+  margin-right: 2px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* Shortcut lists sit on ruled lines, one shortcut per line. */
+.shortcut-card.oc-card {
+  margin-top: var(--s-6);
+  padding: 0;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--rule-2);
+  border-radius: 0;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-height: 36px;
+  font-size: var(--fs-13);
+  color: var(--ink);
+  border-bottom: 1px solid var(--rule);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3) var(--s-4);
+  margin-top: var(--s-6);
+}
+
+.hero .hero-cta {
+  height: 36px;
+  padding: 0 var(--s-4);
+}
+
+.hero-note {
+  font-size: var(--fs-12);
+  color: var(--ink-2);
+}
+
+/* The welcome card has its own button; the nav row keeps its space. */
+.wizard.welcome-active .nav {
+  visibility: hidden;
+}
+
+/* ---------- Form controls ---------- */
+
+.field {
+  margin-bottom: var(--s-4);
+}
+
+.field label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  line-height: var(--lh-16);
+  color: var(--ink-2);
+}
+
+.field label .optional {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.field .hint {
+  margin-top: 6px;
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--ink-2);
+}
+
+.input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-wrap .icon {
+  position: absolute;
+  left: var(--s-3);
+  font-size: 13px;
+  color: var(--ink-2);
+  pointer-events: none;
+}
+
+.wizard .oc-input {
+  border-color: var(--ob-field-edge);
+}
+
+.wizard .oc-input:hover:not(:focus) {
+  border-color: var(--ink-2);
+}
+
+.wizard .oc-input:focus {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+.wizard .oc-input:invalid:not(:placeholder-shown) {
+  border-color: var(--red-ink);
+}
+
+.input-wrap .oc-input {
+  padding-left: 34px;
+}
+
+.input-wrap .oc-input.has-toggle {
+  padding-right: 40px;
+}
+
+.input-wrap input[type="password"].oc-input,
+.input-wrap .oc-input.is-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-13);
+}
+
+.input-wrap .toggle-vis {
+  position: absolute;
+  right: 4px;
+  width: 28px;
+  height: 28px;
+}
+
+#azurePanel {
+  margin-top: var(--s-4);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+fieldset.choice-list,
+fieldset.provider-grid {
+  min-width: 0;
+  border: 0;
+}
+
+/* ---------- Choice tiles: providers, speech, voice models ---------- */
+
+.provider-card.oc-card,
+.choice-card.oc-card,
+.model-card.oc-card {
+  position: relative;
+  background: var(--paper-field);
+  border: 1px solid var(--ob-field-edge);
+  border-radius: var(--r-3);
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+
+.provider-card.oc-card:hover,
+.choice-card.oc-card:hover,
+.model-card.oc-card:hover {
+  border-color: var(--ink-2);
+}
+
+/* Chosen: an ink edge (2 px). */
+.provider-card.oc-card:has(input:checked),
+.choice-card.oc-card:has(input:checked),
+.model-card.oc-card:has(input:checked) {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink), var(--shadow-key);
+}
+
+/* Each tile wraps a visually hidden radio; its focus shows on the tile. */
+.provider-card:has(input:focus-visible),
+.choice-card:has(input:focus-visible),
+.model-card:has(input:focus-visible) {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: var(--s-5);
+}
+
+.provider-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--s-2) 10px;
+  cursor: pointer;
+}
+
+/* The chosen provider gets a red-pencil tick. */
+.provider-card:has(input:checked)::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 12px;
+  height: 12px;
+  background-color: var(--red);
+  -webkit-mask: var(--icon-tick) center / contain no-repeat;
+  mask: var(--icon-tick) center / contain no-repeat;
+}
+
+.provider-name {
+  padding-right: var(--s-3);
+  overflow: hidden;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.provider-note {
+  overflow: hidden;
+  font-size: var(--fs-11);
+  line-height: var(--lh-16);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.choice-card {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 14px;
+  cursor: pointer;
+}
+
+.choice-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  transition: color var(--t-fast) var(--ease), background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+.choice-card:has(input:checked) .choice-icon,
+.model-card:has(input:checked) .choice-icon {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.choice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.choice-title {
+  margin-bottom: 2px;
+  font: 600 var(--fs-15) / var(--lh-20) var(--font-display);
+  font-optical-sizing: auto;
+  color: var(--ink);
+}
+
+.choice-desc {
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--ink-2);
+}
+
+/* Radio ring; ink with a paper check when chosen. */
+.choice-radio {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--ink-2);
+  border-radius: 50%;
+  transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+.choice-card:has(input:checked) .choice-radio,
+.model-card:has(input:checked) .choice-radio {
+  border-color: var(--ink);
+  background: var(--ink) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23f6f1e7' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center;
+}
+
+/* ---------- Status lines (.test-result): a margin note ----------
+   onboarding.js sets idle | testing | success | error. */
+
+.test-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+
+.test-row .oc-btn {
+  flex: none;
+  height: 36px;
+}
+
+.test-result {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: var(--s-2);
+  min-width: 0;
+  min-height: 36px;
+  padding: var(--s-2) 10px var(--s-2) var(--s-5);
+  font-size: var(--fs-12);
+  line-height: var(--lh-20);
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border-radius: var(--r-2);
+}
+
+.test-result::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
+  width: 4px;
+  background-color: var(--graphite);
+  -webkit-mask: var(--icon-margin-mark) center / 100% 100% no-repeat;
+  mask: var(--icon-margin-mark) center / 100% 100% no-repeat;
+}
+
+.test-result:empty {
+  display: none;
+}
+
+.test-result > .fas {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.test-result.success {
+  color: var(--ink);
+}
+
+.test-result.success::before {
+  background-color: var(--ink);
+}
+
+.test-result.error {
+  color: var(--red-ink);
+}
+
+.test-result.error::before {
+  background-color: var(--red);
+}
+
+/* ---------- Local voice models ---------- */
+
+.voice-problem {
+  margin-bottom: var(--s-3);
+}
+
+.voice-problem a {
+  color: inherit;
+}
+
+.voice-problem .oc-btn {
+  flex: none;
+  height: 28px;
+  margin-left: auto;
+  padding: 0 10px;
+  font-size: var(--fs-12);
+}
+
+.voice-status {
+  margin-top: var(--s-3);
+}
+
+.voice-hint {
+  margin-top: var(--s-3);
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--ink-2);
+}
+
+.model-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px var(--s-3);
+  padding: var(--s-3) 14px;
+}
+
+.model-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 0;
+  cursor: pointer;
+}
+
+.choice-title .tag.oc-chip {
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 6px;
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  vertical-align: 2px;
+  color: var(--red-ink);
+  background: transparent;
+  border-color: var(--red-ring);
+}
+
+.model-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.model-side .oc-btn {
+  height: 32px;
+}
+
+.model-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.model-state:empty {
+  display: none;
+}
+
+.model-state.ok {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.model-state > .fas {
+  font-size: 12px;
+}
+
+.model-progress {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+/* Download meter: an ink bar filling a ruled track. */
+.meter {
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  background: var(--paper-3);
+  border-radius: var(--r-round);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.meter > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--ink);
+  border-radius: inherit;
+  transition: width 240ms var(--ease);
+}
+
+.model-progress-text {
+  font: 500 var(--fs-11) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.model-msg {
+  grid-column: 1 / -1;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.model-msg:empty {
+  display: none;
+}
+
+.model-msg.error {
+  color: var(--red-ink);
+}
+
+.model-msg.info {
+  color: var(--ink-2);
+}
+
+/* ---------- Finish ---------- */
+
+/* A red-pencil tick in place of the check icon. */
+.finish-card .check {
+  width: 32px;
+  height: 32px;
+  margin-bottom: var(--s-3);
+  background-color: var(--red);
+  -webkit-mask: var(--icon-tick) center / contain no-repeat;
+  mask: var(--icon-tick) center / contain no-repeat;
+}
+
+.finish-card .check > .fas {
+  display: none;
+}
+
+.finish-card .subtitle {
+  margin-bottom: var(--s-4);
+}
+
+/* Summary rows on ruled lines (rows come from onboarding.js). */
+.summary-list.oc-card {
+  padding: 0;
+  font-size: var(--fs-13);
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--rule-2);
+  border-radius: 0;
+}
+
+.summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-height: 40px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.summary-row .label {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-2);
+}
+
+.summary-row .label > .fas {
+  width: 14px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.summary-row .value {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--s-2);
+  overflow: hidden;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.summary-row .value.ok {
+  font-weight: 600;
+  color: var(--ink);
+  border-color: var(--line-2);
+}
+
+.summary-row .value.skip {
+  font-style: italic;
+}
+
+.finish-card .summary-list.oc-card {
+  border-top: 0;
+}
+
+.try-title.oc-label {
+  margin: var(--s-5) 0 var(--s-1);
+  color: var(--ink-2);
+}
+
+.try-card.oc-card {
+  margin-top: 0;
+}
+
+.try-card .shortcut-row {
+  min-height: 32px;
+}
+
+/* ---------- Navigation ---------- */
+
+.nav {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+}
+
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.nav .oc-btn {
+  height: 36px;
+}
+
+.nav .oc-btn--ghost:hover {
+  background: var(--paper-3);
+}
+
+.nav #nextBtn {
+  min-width: 112px;
+}
+
+.wizard .oc-btn > .fas {
+  font-size: 12px;
+}
+
+/* Completed state (model ready): an inked outline instead of the red fill. */
+.oc-btn.oc-btn--success,
+.oc-btn.oc-btn--success:hover {
+  color: var(--ink);
+  background: var(--paper-field);
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.oc-btn.oc-btn--success:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--ink), var(--focus);
+}
+
+.oc-btn.oc-btn--success:disabled {
+  opacity: 1;
+}
+
+.oc-btn .spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ob-spin 0.8s linear infinite;
+}
+
+@keyframes ob-spin {
+  to { transform: rotate(360deg); }
+}

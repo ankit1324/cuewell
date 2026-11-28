@@ -1,0 +1,565 @@
+/*
+ * Chat window (chat.html): an index card holding the conversation.
+ *
+ * Same paper, header double rule and code card as the answer window
+ * (src/styles/answer.css). Each kind of row reads differently:
+ *   Heard        mic label, the words as an italic quote with a rule
+ *   You (typed)  a raised paper note on the right
+ *   Cuewell      brand keycap label, prose; lists on 28 px ruled lines
+ *   Thinking     pencil and a graphite sweep, one 28 px line
+ *   Error        red-pencil margin note
+ *   System       a short line centered between two rules
+ * A hairline rule opens each new question after an answer.
+ *
+ * Streaming: the "Thinking…" line and the answer's first line are both
+ * 28 px; ruled list lines are 28 px; the caret takes no width; the code
+ * bar is 40 px with or without Copy; Prism keeps the code's font and line
+ * height. So text arriving only adds lines below.
+ */
+
+:root {
+  --chat-pad: var(--s-5);
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  cursor: default;
+}
+
+/* ---------- Window ---------- */
+
+.chat-container {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header: the drag region, closed by the card's double rule. */
+.chat-header.oc-titlebar {
+  height: 44px;
+  padding: 0 var(--s-2) 4px var(--chat-pad);
+  border-bottom: 0;
+  box-shadow:
+    inset 0 -1px 0 var(--rule-2),
+    inset 0 -3px 0 var(--paper),
+    inset 0 -4px 0 var(--rule-2);
+}
+
+.chat-header .oc-mark { --s: 20px; }
+
+.header-title.oc-title {
+  flex: 1;
+  min-width: 0;
+  font: 600 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  -webkit-app-region: no-drag;
+}
+
+/* Shown by chat-page.js (style.display = 'block') while recording. */
+.recording-indicator {
+  display: none;
+  -webkit-app-region: no-drag;
+}
+
+/* ---------- Message list ---------- */
+
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--chat-pad);
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+  -webkit-app-region: no-drag;
+}
+
+/* Nothing asked yet: blank ruled paper with the hint (set by
+   chat-page.js in data-empty) on the first rule. */
+.chat-messages:empty {
+  /* The first layer hides the tile that repeats up into the top padding. */
+  background:
+    linear-gradient(var(--paper), var(--paper)) 0 0 / 100% var(--s-4) no-repeat,
+    linear-gradient(to bottom, transparent 23px, var(--rule) 23px, var(--rule) 24px, transparent 24px) 0 var(--s-4) / 100% var(--lh-rule) repeat-y;
+}
+.chat-messages:empty::before {
+  content: attr(data-empty);
+  display: block;
+  font: italic 500 var(--fs-15) / var(--lh-rule) var(--font-display);
+  color: var(--ink-2);
+}
+
+.chat-messages .message {
+  position: relative;
+  flex: none;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-messages .message-text {
+  display: block;
+  max-width: 100%;
+  font-size: var(--fs-14);
+  line-height: var(--lh-24);
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.message-text .math {
+  font-family: 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', Georgia, serif;
+  white-space: nowrap;
+}
+.message-text sup,
+.message-text sub {
+  font-size: 0.72em;
+  line-height: 0;
+}
+
+/* Timestamps show in the head row of heard and Cuewell rows only. */
+.chat-messages .message > .message-time { display: none; }
+
+/* A new question after an answer starts below a hairline rule. */
+.chat-messages .message:is(.assistant, .error) + .message:is(.user, .transcription) {
+  margin-top: var(--s-2);
+}
+.chat-messages .message:is(.assistant, .error) + .message:is(.user, .transcription)::before {
+  content: '';
+  position: absolute;
+  top: calc(-1 * var(--s-3) - 1px);
+  left: calc(-1 * var(--chat-pad));
+  right: calc(-1 * var(--chat-pad));
+  height: 1px;
+  background: var(--rule);
+  pointer-events: none;
+}
+
+/* ---------- Head row: label and time ---------- */
+
+.message-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 16px;
+  margin-bottom: var(--s-2);
+}
+.message-head .oc-mark { --s: 12px; }
+.message-head .oc-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chat-messages .message-head .message-time {
+  margin: 0;
+  font: 500 var(--fs-11) / var(--lh-16) var(--font-mono);
+  color: var(--ink-3);
+}
+
+/* ---------- Heard (voice) ---------- */
+
+.message.transcription .message-head .oc-label::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  background-color: currentColor;
+  -webkit-mask: url('../../assests/icons/ui/mic.svg') center / 116% 116% no-repeat;
+  mask: url('../../assests/icons/ui/mic.svg') center / 116% 116% no-repeat;
+}
+.chat-messages .message.transcription .message-text {
+  padding-left: var(--s-3);
+  font: italic 450 var(--fs-15) / var(--lh-24) var(--font-display);
+  color: var(--ink-2);
+  border-left: 2px solid var(--rule-2);
+}
+
+/* ---------- Typed by the user: a paper note on the right ---------- */
+
+.chat-messages .message.user {
+  display: flex;
+  justify-content: flex-end;
+}
+.chat-messages .message.user .message-text {
+  max-width: 82%;
+  box-sizing: border-box;
+  padding: var(--s-2) var(--s-3);
+  font-size: var(--fs-14);
+  line-height: var(--lh-20);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3) var(--r-3) var(--r-1) var(--r-3);
+  box-shadow: 0 1px 0 var(--line);
+}
+
+/* ---------- Cuewell's answer ---------- */
+
+.chat-messages .message.assistant .message-text { white-space: normal; }
+
+/* The line to say first, as on the answer card (smaller). */
+.chat-messages .message.assistant:not(.snippet) > .message-text > p:first-child {
+  font: 450 17px / var(--lh-rule) var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.008em;
+  color: var(--ink);
+  text-wrap: pretty;
+}
+.chat-messages .message.assistant:not(.snippet) > .message-text > p:first-child strong { font-weight: 600; }
+
+/* Lists sit on ruled lines that run to the card's edges. The rule is 5 px
+   under the baseline of 14 px text on a 28 px line. */
+.chat-messages .message.assistant .message-text > :is(ul, ol) {
+  margin: 0 calc(-1 * var(--chat-pad)) var(--s-3);
+  padding: 0 var(--chat-pad) 0 calc(var(--chat-pad) + var(--s-6));
+  line-height: var(--lh-rule);
+  background-image: linear-gradient(to bottom, transparent 23px, var(--rule) 23px, var(--rule) 24px, transparent 24px);
+  background-size: 100% var(--lh-rule);
+  background-repeat: repeat-y;
+}
+.chat-messages .message.assistant .message-text > :is(ul, ol) li {
+  margin: 0;
+  padding-left: 0;
+}
+.chat-messages .message.assistant .message-text > :is(ul, ol) li > :is(p, ul, ol) { margin: 0; }
+.chat-messages .message.assistant .message-text > :is(ul, ol) :is(ul, ol) { padding-left: var(--s-5); }
+
+/* Streaming caret: a red-pencil bar after the last word. No width, shorter
+   than the line, so it never moves text. */
+.message.streaming > .message-text > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.message.streaming > .message-text > :is(ul, ol):last-child > li:last-child:not(:has(> :is(p, ul, ol)))::after,
+.message.streaming > .message-text > :is(ul, ol):last-child > li:last-child > p:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 1em;
+  margin-right: -2px;
+  border-left: 2px solid var(--red);
+  border-radius: 1px;
+  vertical-align: -0.15em;
+  animation: chat-blink var(--t-blink) steps(1, end) infinite;
+}
+
+@keyframes chat-blink {
+  0%, 55% { opacity: 1; }
+  56%, 100% { opacity: 0; }
+}
+
+/* Thinking: one 28 px line, as tall as the first line that replaces it. */
+.chat-messages .message.thinking .message-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--lh-rule);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  line-height: var(--lh-20);
+}
+.chat-messages .message.thinking .message-text::before {
+  content: '';
+  flex: none;
+  width: 12px;
+  height: 12px;
+  background-color: var(--ink-3);
+  -webkit-mask: var(--icon-pencil) center / contain no-repeat;
+  mask: var(--icon-pencil) center / contain no-repeat;
+}
+
+/* An answer that is only code: the row keeps its head above the cards. */
+.chat-messages .message.no-text .message-text { display: none; }
+
+/* ---------- Code: a dark card held by a paperclip ---------- */
+
+/* Code that follows an answer belongs to it: no head of its own. */
+.chat-messages .message.assistant:not(.thinking) + .message.snippet { margin-top: calc(-1 * var(--s-3)); }
+.chat-messages .message.assistant:not(.thinking) + .message.snippet .message-head { display: none; }
+
+.chat-messages .code-block {
+  --code-text: var(--on-slate);
+  --code-punct: var(--on-slate-2);
+  --code-key: var(--syn-key);
+  --code-type: var(--syn-type);
+  --code-fn: var(--syn-fn);
+  --code-str: var(--syn-str);
+  --code-num: var(--syn-num);
+  --code-com: var(--syn-com);
+  position: relative;
+  margin-top: 28px; /* room for the clip above the card */
+  color: var(--on-slate);
+  background: var(--slate);
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 1px var(--slate-line), var(--shadow-code);
+}
+
+/* The paperclip over the card's top edge. */
+.chat-messages .code-block::before {
+  content: '';
+  position: absolute;
+  top: -28px;
+  left: var(--s-5);
+  z-index: 1;
+  width: 16px;
+  height: 48px;
+  background-color: var(--steel);
+  -webkit-mask: var(--icon-paperclip) center / contain no-repeat;
+  mask: var(--icon-paperclip) center / contain no-repeat;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.6));
+  pointer-events: none;
+}
+
+/* Bar: language and (on the final answer) Copy. Always 40 px. */
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 var(--s-2) 0 var(--s-12);
+  background: var(--slate-2);
+  border-bottom: 1px solid var(--slate-line);
+  border-radius: var(--r-3) var(--r-3) 0 0;
+}
+.code-head .oc-label {
+  font: 600 var(--fs-12) / var(--lh-16) var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--on-slate);
+}
+
+.chat-messages .code-block > pre {
+  margin: 0;
+  padding: var(--s-3) var(--s-4) var(--s-4);
+  overflow-x: auto;
+  color: var(--on-slate);
+  background: none;
+  border-radius: 0 0 var(--r-3) var(--r-3);
+  box-shadow: none;
+}
+/* The same font and line height before and after Prism runs. */
+.chat-messages .code-block > pre,
+.chat-messages .code-block > pre > code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: var(--lh-20);
+  white-space: pre;
+  color: var(--on-slate);
+  background: none;
+}
+
+/* Copy (added by chat-page.js, which sets the text and .copied). */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 var(--s-3) 0 var(--s-2);
+  font: 600 var(--fs-12) / 1 var(--font-ui);
+  color: var(--on-slate);
+  background: transparent;
+  border: 1px solid var(--slate-line);
+  border-radius: var(--r-2);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+.copy-btn::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  background-color: currentColor;
+  -webkit-mask: var(--icon-copy) center / contain no-repeat;
+  mask: var(--icon-copy) center / contain no-repeat;
+}
+.copy-btn:hover {
+  background: rgba(246, 241, 231, 0.08);
+  border-color: rgba(246, 241, 231, 0.32);
+}
+.copy-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--slate-2), 0 0 0 4px var(--on-slate);
+}
+.copy-btn.copied,
+.copy-btn.copied:hover { color: var(--syn-str); }
+.copy-btn.copied::before {
+  -webkit-mask-image: var(--icon-check);
+  mask-image: var(--icon-check);
+}
+
+/* ---------- Errors: a red-pencil margin note ---------- */
+
+.chat-messages .message.error { padding-left: var(--s-4); }
+.chat-messages .message.error::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8px;
+  height: min(84px, 100%);
+  background-color: var(--red);
+  -webkit-mask: var(--icon-margin-mark) center / 100% 100% no-repeat;
+  mask: var(--icon-margin-mark) center / 100% 100% no-repeat;
+  pointer-events: none;
+}
+.chat-messages .message.error .message-text {
+  font: italic 500 var(--fs-15) / var(--lh-24) var(--font-display);
+  color: var(--red-ink);
+}
+
+/* ---------- Status lines ("Stopped listening") ---------- */
+
+.chat-messages .message.system {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.chat-messages .message.system::before,
+.chat-messages .message.system::after {
+  content: '';
+  flex: 1 1 var(--s-4);
+  min-width: var(--s-4);
+  height: 1px;
+  background: var(--rule);
+}
+.chat-messages .message.system .message-text {
+  flex: 0 1 auto;
+  font-size: var(--fs-12);
+  line-height: var(--lh-16);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+/* ---------- Live partial transcription ---------- */
+
+.interim-overlay {
+  display: none;
+  position: relative;
+  flex: none;
+  box-sizing: border-box;
+  height: 28px;
+  margin: 0 var(--chat-pad) var(--s-2);
+  padding: 0 var(--s-3) 0 26px;
+  font: italic 450 var(--fs-13) / 26px var(--font-display);
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  pointer-events: none;
+}
+/* chat-page.js writes the text with textContent, so the live dot is a
+   pseudo-element. */
+.interim-overlay::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: var(--s-3);
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: chat-live var(--t-pulse) var(--ease) infinite;
+}
+.interim-overlay.active {
+  display: block;
+  animation: oc-rise var(--t) var(--ease) both;
+}
+
+@keyframes chat-live {
+  0% { box-shadow: 0 0 0 0 rgba(212, 64, 42, 0.45); }
+  70%, 100% { box-shadow: 0 0 0 5px rgba(212, 64, 42, 0); }
+}
+
+/* ---------- Composer ---------- */
+
+.chat-input {
+  flex: none;
+  padding: 0 var(--s-3) var(--s-3);
+  -webkit-app-region: no-drag;
+}
+
+.input-container {
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-field);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-3);
+  transition:
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.input-container:focus-within {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(29, 27, 22, 0.1);
+}
+
+.input-field {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 40px;
+  max-height: 140px;
+  margin: 0;
+  padding: 10px var(--s-3) var(--s-1);
+  font: 400 var(--fs-14) / var(--lh-20) var(--font-ui);
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+}
+.input-field:focus,
+.input-field:focus-visible { outline: none; }
+.input-field::placeholder { color: var(--ink-3); }
+
+.input-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-1) 6px 6px var(--s-3);
+}
+
+.input-hints {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-12);
+  line-height: var(--lh-16);
+  color: var(--ink-3);
+  white-space: nowrap;
+  user-select: none;
+}
+.input-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.input-hint .oc-kbd { color: var(--ink-2); }
+
+.mic-button.recording,
+.mic-button.recording:hover {
+  color: var(--red-ink);
+  background: var(--red-soft);
+}

@@ -1,0 +1,101 @@
+/*
+ * Cuewell icons: Lucide (ISC, see assests/icons/ui/LICENSE-lucide.txt),
+ * drawn with CSS masks so they take the text color.
+ *
+ * The markup and scripts still use the Font Awesome class names they always
+ * had (`<i class="fas fa-microphone">`, `fa-spin`, names built as
+ * `fa-${name}`), so nothing in the pages or scripts had to change. Each
+ * fa-* name below points at one Lucide SVG in assests/icons/ui/.
+ *
+ * The icon is a 1em square, set on the text baseline like the old font
+ * glyphs. Lucide draws inside a 2px inset of its 24px grid, so the mask is
+ * drawn a little larger than the box to match the old glyph size.
+ */
+
+.fas,
+.fa-solid {
+  display: inline-block;
+  flex: none;
+  box-sizing: content-box;
+  width: 1em;
+  height: 1em;
+  font-style: normal;
+  line-height: 1;
+  vertical-align: -0.125em;
+  background-color: currentColor;
+  /* No known name: draw nothing rather than a filled square. */
+  -webkit-mask: var(--icon, linear-gradient(transparent, transparent)) center / 116% 116% no-repeat;
+  mask: var(--icon, linear-gradient(transparent, transparent)) center / 116% 116% no-repeat;
+}
+
+/* Spinners (fa-spin-fast is defined in settings.css on these keyframes). */
+@keyframes fa-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.fa-spin { animation: fa-spin 2s linear infinite; }
+
+/* ---------- fa-* name -> Lucide SVG ---------- */
+
+.fa-arrow-left { --icon: url('../../assests/icons/ui/arrow-left.svg'); }
+.fa-arrow-right { --icon: url('../../assests/icons/ui/arrow-right.svg'); }
+.fa-arrow-up { --icon: url('../../assests/icons/ui/arrow-up.svg'); }
+.fa-bolt { --icon: url('../../assests/icons/ui/zap.svg'); }
+.fa-book-open { --icon: url('../../assests/icons/ui/book-open.svg'); }
+.fa-brain { --icon: url('../../assests/icons/ui/brain.svg'); }
+.fa-camera { --icon: url('../../assests/icons/ui/focus.svg'); }
+.fa-check { --icon: url('../../assests/icons/ui/check.svg'); }
+.fa-check-circle,
+.fa-circle-check { --icon: url('../../assests/icons/ui/circle-check.svg'); }
+.fa-circle-exclamation { --icon: url('../../assests/icons/ui/circle-alert.svg'); }
+.fa-circle-info { --icon: url('../../assests/icons/ui/info.svg'); }
+.fa-circle-notch { --icon: url('../../assests/icons/ui/loader-circle.svg'); }
+.fa-circle-xmark { --icon: url('../../assests/icons/ui/circle-x.svg'); }
+.fa-clock-rotate-left { --icon: url('../../assests/icons/ui/history.svg'); }
+.fa-cloud { --icon: url('../../assests/icons/ui/cloud.svg'); }
+.fa-code { --icon: url('../../assests/icons/ui/code.svg'); }
+.fa-cog,
+.fa-gear { --icon: url('../../assests/icons/ui/settings.svg'); }
+.fa-comments { --icon: url('../../assests/icons/ui/messages-square.svg'); }
+.fa-download { --icon: url('../../assests/icons/ui/download.svg'); }
+.fa-ellipsis { --icon: url('../../assests/icons/ui/ellipsis.svg'); }
+.fa-eye { --icon: url('../../assests/icons/ui/eye.svg'); }
+.fa-eye-slash { --icon: url('../../assests/icons/ui/eye-off.svg'); }
+.fa-file-lines { --icon: url('../../assests/icons/ui/file-text.svg'); }
+.fa-forward { --icon: url('../../assests/icons/ui/fast-forward.svg'); }
+.fa-globe { --icon: url('../../assests/icons/ui/globe.svg'); }
+.fa-id-card { --icon: url('../../assests/icons/ui/id-card.svg'); }
+.fa-key { --icon: url('../../assests/icons/ui/key-round.svg'); }
+.fa-keyboard { --icon: url('../../assests/icons/ui/keyboard.svg'); }
+.fa-laptop { --icon: url('../../assests/icons/ui/laptop.svg'); }
+.fa-magnifying-glass { --icon: url('../../assests/icons/ui/search.svg'); }
+.fa-microchip { --icon: url('../../assests/icons/ui/cpu.svg'); }
+.fa-microphone,
+.fa-microphone-lines { --icon: url('../../assests/icons/ui/mic.svg'); }
+.fa-microphone-slash { --icon: url('../../assests/icons/ui/mic-off.svg'); }
+.fa-pen { --icon: url('../../assests/icons/ui/pencil.svg'); }
+.fa-plug { --icon: url('../../assests/icons/ui/plug.svg'); }
+.fa-power-off { --icon: url('../../assests/icons/ui/power.svg'); }
+.fa-rotate-right { --icon: url('../../assests/icons/ui/rotate-cw.svg'); }
+.fa-server { --icon: url('../../assests/icons/ui/server.svg'); }
+.fa-shield-halved { --icon: url('../../assests/icons/ui/shield-half.svg'); }
+.fa-sitemap { --icon: url('../../assests/icons/ui/network.svg'); }
+.fa-sliders { --icon: url('../../assests/icons/ui/sliders-horizontal.svg'); }
+.fa-terminal { --icon: url('../../assests/icons/ui/terminal.svg'); }
+.fa-trash-can { --icon: url('../../assests/icons/ui/trash-2.svg'); }
+.fa-triangle-exclamation { --icon: url('../../assests/icons/ui/triangle-alert.svg'); }
+.fa-user { --icon: url('../../assests/icons/ui/user.svg'); }
+.fa-user-tie { --icon: url('../../assests/icons/ui/briefcase-business.svg'); }
+.fa-wand-magic-sparkles { --icon: url('../../assests/icons/ui/wand-sparkles.svg'); }
+.fa-xmark { --icon: url('../../assests/icons/ui/x.svg'); }
+
+/* Icons the Cue Card pages draw from CSS (not Font Awesome names). */
+:root {
+  --icon-copy: url('../../assests/icons/ui/copy.svg');
+  --icon-check: url('../../assests/icons/ui/check.svg');
+  --icon-pencil: url('../../assests/icons/ui/pencil.svg');
+  --icon-chevron-down: url('../../assests/icons/ui/chevron-down.svg');
+  --icon-paperclip: url('../../assests/icons/ui/cue-paperclip.svg');
+  --icon-margin-mark: url('../../assests/icons/ui/cue-margin-mark.svg');
+  --icon-tick: url('../../assests/icons/ui/cue-tick.svg');
+}
