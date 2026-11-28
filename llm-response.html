@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cuewell</title>
     <script src="./node_modules/dompurify/dist/purify.min.js"></script>
@@ -12,273 +12,13 @@
     <script src="lib/mathrender.js"></script>
     <!-- PrismJS core (bundled with markup, css, clike and javascript) and the
          autoloader, which adds other languages from components/ on demand.
-         Token colors come from theme.css. -->
+         Token colors come from theme.css; code card styles from answer.css. -->
     <script src="./node_modules/prismjs/prism.js"></script>
     <script src="./node_modules/prismjs/plugins/autoloader/prism-autoloader.min.js"></script>
     <script src="./src/ui/prism-config.js"></script>
-    <style>
-        html,
-        body {
-            margin: 0;
-            padding: 0;
-            width: 100vw;
-            height: 100vh;
-            overflow: hidden;
-            background: transparent;
-        }
-        body {
-            -webkit-app-region: no-drag;
-        }
-
-        /* ---------- Window surface ---------- */
-
-        .main-container {
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* Header: the drag region */
-        .window-header {
-            -webkit-app-region: drag;
-            user-select: none;
-        }
-        .window-title {
-            pointer-events: none;
-            user-select: none;
-        }
-        .window-header .answer-spacer { flex: 1; }
-        .answer-status.oc-label {
-            color: var(--oc-accent);
-            pointer-events: none;
-            transition: opacity var(--oc-t-swap) var(--oc-ease);
-        }
-        .answer-status.is-off { opacity: 0; }
-        .window-controls {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            -webkit-app-region: no-drag;
-        }
-        .window-controls svg { display: block; }
-
-        /* ---------- Views ----------
-           The empty, loading and answer views (and, inside the answer, the
-           split and full layouts) share one grid cell, so switching between
-           them never moves anything. The one being left fades out while the
-           next fades in; visibility drops it from focus and screen readers
-           once the fade ends. */
-
-        .answer-body,
-        .content-area {
-            flex: 1;
-            min-height: 0;
-            display: grid;
-            grid-template-rows: minmax(0, 1fr);
-            grid-template-columns: minmax(0, 1fr);
-        }
-        .answer-view,
-        .answer-layout {
-            grid-area: 1 / 1;
-            min-width: 0;
-            min-height: 0;
-            opacity: 1;
-            visibility: visible;
-            transition: opacity var(--oc-t-swap) var(--oc-ease), visibility 0s linear 0s;
-        }
-        .answer-view.is-off,
-        .answer-layout.is-off {
-            opacity: 0;
-            visibility: hidden;
-            pointer-events: none;
-            transition: opacity var(--oc-t-swap) var(--oc-ease), visibility 0s linear var(--oc-t-swap);
-        }
-        /* Set for one frame when a view changes behind a hidden window. */
-        .answer-view.no-motion,
-        .answer-layout.no-motion,
-        .answer-status.no-motion { transition: none !important; }
-        @media (prefers-reduced-motion: reduce) {
-            .answer-view,
-            .answer-layout,
-            .answer-view.is-off,
-            .answer-layout.is-off { transition: none; }
-        }
-
-        /* ---------- Empty and loading ---------- */
-
-        .answer-empty {
-            padding: 16px 20px;
-        }
-        .answer-empty-title {
-            margin: 0 0 4px;
-            font-size: var(--oc-fs-md);
-            font-weight: 600;
-            color: var(--oc-text);
-        }
-        .answer-empty-hint,
-        .loading-hint {
-            margin: 0;
-            font-size: var(--oc-fs-sm);
-            color: var(--oc-text-3);
-        }
-
-        .loading {
-            display: flex;
-            flex-direction: column;
-        }
-        .loading-text {
-            padding: 14px 20px 0;
-            font-size: var(--oc-fs-md);
-            font-weight: 600;
-        }
-        .loading-hint {
-            padding: 4px 20px 14px;
-            transition: opacity var(--oc-t-swap) var(--oc-ease);
-        }
-        .loading-hint.is-off { opacity: 0; }
-
-        /* ---------- Content ---------- */
-
-        .content-area {
-            -webkit-app-region: no-drag;
-        }
-
-        .split-layout {
-            display: grid;
-            grid-template-rows: minmax(0, 1fr);
-            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            overflow: hidden;
-        }
-
-        .text-panel,
-        .code-panel {
-            position: relative;
-            min-height: 0;
-            min-width: 0;
-            overflow: hidden;
-        }
-        .code-panel {
-            background: var(--oc-sunken);
-            border-left: 1px solid var(--oc-line);
-        }
-
-        .panel-content,
-        .full-content-inner {
-            height: 100%;
-            box-sizing: border-box;
-            overflow: auto;
-            outline: none;
-        }
-        .text-panel .panel-content { padding: 16px 20px 20px; }
-        .code-panel .panel-content { padding: 14px 16px; }
-
-        .full-content {
-            position: relative;
-            overflow: hidden;
-        }
-        .full-content-inner { padding: 16px 20px 20px; }
-        #full-markdown { max-width: 80ch; }
-
-        /* Each panel scrolls on its own; theme.css draws the thin scrollbars. */
-
-        .panel-content:focus-visible,
-        .full-content-inner:focus-visible {
-            outline: none;
-            box-shadow: inset 0 0 0 1px var(--oc-accent-line);
-        }
-
-        .interactive-scrolling .panel-content,
-        .interactive-scrolling .full-content-inner { cursor: grab; }
-        .interactive-scrolling .panel-content:active,
-        .interactive-scrolling .full-content-inner:active { cursor: grabbing; }
-
-        /* Markdown: .oc-prose does the typography; these are page extras. */
-        .markdown-content sup,
-        .markdown-content sub {
-            font-size: 0.72em;
-            line-height: 0;
-        }
-        .math {
-            font-family: 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', serif;
-            white-space: nowrap;
-        }
-
-        /* Error callout (e.g. "Screen capture failed...") */
-        .answer-error {
-            padding: 10px 14px;
-            color: var(--oc-text);
-            background: var(--oc-error-soft);
-            border-left: 2px solid var(--oc-error);
-            border-radius: 0 var(--oc-r-sm) var(--oc-r-sm) 0;
-        }
-
-        /* ---------- Code panel ---------- */
-
-        .code-block + .code-block {
-            margin-top: 14px;
-            padding-top: 14px;
-            border-top: 1px solid var(--oc-line);
-        }
-        .code-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            min-height: 22px;
-            margin-bottom: 8px;
-        }
-        .code-content pre {
-            margin: 0;
-            padding: 0;
-            overflow-x: auto;
-            background: none;
-            border: 0;
-        }
-        /* The same font and line height before and after Prism adds its
-           language class to the pre, so highlighting never changes heights. */
-        .code-content pre,
-        .code-content code {
-            font-family: var(--oc-mono);
-            font-size: 12.5px;
-            line-height: 1.6;
-            font-variant-ligatures: none;
-            font-feature-settings: "calt" 0;
-            white-space: pre;
-            color: #e6e4dd;
-            background: none;
-        }
-        .no-code {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            color: var(--oc-text-3);
-            font-size: var(--oc-fs-sm);
-        }
-
-        /* Copy buttons (class names are used by the script) */
-        .copy-btn.oc-btn {
-            height: 22px;
-            padding: 0 8px;
-            font-family: var(--oc-mono);
-            font-size: var(--oc-fs-2xs);
-            font-weight: 500;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            -webkit-app-region: no-drag;
-        }
-        .copy-btn.copied,
-        .copy-btn.copied:hover { color: var(--oc-accent); }
-        .oc-prose pre { position: relative; }
-        .oc-prose pre .copy-btn {
-            position: absolute;
-            top: 6px;
-            right: 6px;
-            background: var(--oc-glass-pop);
-            border-color: var(--oc-line);
-        }
-        .oc-prose pre .copy-btn:hover { background: var(--oc-raised-3); }
-    </style>
     <link rel="stylesheet" href="./src/styles/theme.css">
+    <link rel="stylesheet" href="./src/styles/icons.css">
+    <link rel="stylesheet" href="./src/styles/answer.css">
 </head>
 <body>
     <div class="main-container oc-window oc-window--native has-header">
@@ -304,7 +44,18 @@
 
             <!-- Loading State -->
             <div id="loading" class="answer-view loading is-off" aria-hidden="true">
-                <div class="oc-progress" aria-hidden="true"></div>
+                <p class="answer-label" aria-hidden="true">Say this</p>
+                <!-- A pencil drafting the first line along the rule. -->
+                <div class="draft" aria-hidden="true">
+                    <div class="draft-line">
+                        <svg class="draft-svg" viewBox="0 0 568 32" preserveAspectRatio="none" focusable="false"><path class="draft-path" pathLength="100" d="M2 25C64 23.5 118 26.5 182 24.8S302 23 366 25.2 480 26.4 548 24.4"/></svg>
+                        <span class="draft-tip"></span>
+                    </div>
+                    <div class="draft-line draft-line--short">
+                        <svg class="draft-svg" viewBox="0 0 568 32" preserveAspectRatio="none" focusable="false"><path class="draft-path" pathLength="100" d="M2 25C64 23.5 118 26.5 182 24.8S302 23 366 25.2"/></svg>
+                    </div>
+                </div>
+                <div class="draft-rules" aria-hidden="true"></div>
                 <div class="loading-text"><span id="loading-text" class="oc-shimmer">Thinking…</span></div>
                 <p id="loading-hint" class="loading-hint is-off">The AI provider is taking longer than usual.</p>
             </div>

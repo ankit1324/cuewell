@@ -1,50 +1,61 @@
 /*
- * Cuewell theme: "Graphite & Lime"
+ * Cuewell theme: "Cue Card"
  * Design by Ankit Chaudhary.
  *
  * Shared tokens and primitives for every window. Pages link this file after
  * common.css so these values win. Fonts are bundled locally (SIL OFL 1.1, see
  * assests/fonts/LICENSE-*.txt); nothing here loads from the network.
  *
- * Look: a dark graphite glass overlay that stays readable over any light or
- * dark screen, one sharp accent (signal lime), monospace for anything
- * technical (code, shortcuts, labels).
+ * Look: each overlay is an opaque warm-paper index card with ink text,
+ * blue-grey ruled lines and one red-pencil accent. Every surface is opaque, so
+ * text contrast never depends on what is behind the window or on native blur.
+ * Fraunces for display, Instrument Sans for UI and prose, JetBrains Mono for
+ * code and key hints.
  */
 
 /* ---------- Fonts ---------- */
 
 @font-face {
-  font-family: 'Manrope Variable';
+  font-family: 'Fraunces Cue';
   font-style: normal;
+  font-weight: 100 900;
   font-display: swap;
-  font-weight: 200 800;
-  src: url('../../assests/fonts/manrope-latin-wght-normal.woff2') format('woff2-variations');
+  src: url('../../assests/fonts/fraunces-latin-opsz-normal.woff2') format('woff2-variations');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: 'Manrope Variable';
-  font-style: normal;
+  font-family: 'Fraunces Cue';
+  font-style: italic;
+  font-weight: 100 900;
   font-display: swap;
-  font-weight: 200 800;
-  src: url('../../assests/fonts/manrope-latin-ext-wght-normal.woff2') format('woff2-variations');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  src: url('../../assests/fonts/fraunces-latin-opsz-italic.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: 'JetBrains Mono Variable';
+  font-family: 'Instrument Sans Cue';
   font-style: normal;
+  font-weight: 400 700;
   font-display: swap;
+  src: url('../../assests/fonts/instrument-sans-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono Cue';
+  font-style: normal;
   font-weight: 100 800;
+  font-display: swap;
   src: url('../../assests/fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2-variations');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 @font-face {
-  font-family: 'JetBrains Mono Variable';
+  font-family: 'JetBrains Mono Cue';
   font-style: normal;
-  font-display: swap;
   font-weight: 100 800;
+  font-display: swap;
   src: url('../../assests/fonts/jetbrains-mono-latin-ext-wght-normal.woff2') format('woff2-variations');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
@@ -52,133 +63,180 @@
 /* ---------- Tokens ---------- */
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
-  /* Type */
-  --oc-font: 'Manrope Variable', 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --oc-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --oc-fs-2xs: 10.5px;  /* mono labels, kbd */
-  --oc-fs-xs: 11.5px;   /* meta, chips */
-  --oc-fs-sm: 12.5px;   /* controls, toolbar */
-  --oc-fs-md: 13.5px;   /* body text */
-  --oc-fs-lg: 15px;     /* section titles */
-  --oc-fs-xl: 18px;     /* window titles */
-  --oc-fs-2xl: 24px;    /* onboarding headline */
+  /* ---- Color: paper ---- */
+  --paper: #f6f1e7;            /* card and tab surface */
+  --paper-2: #efe8db;          /* hover, raised chips and cards */
+  --paper-3: #e6ddcc;          /* pressed */
+  --paper-field: #fbf8f2;      /* inputs and wells: a fresh card */
+  --ink: #1d1b16;              /* primary text      15.3:1 on paper */
+  --ink-2: #5b5448;            /* secondary text     6.7:1 on paper */
+  --ink-3: #6e675a;            /* meta, hints        5.0:1 on paper */
+  --rule: #c9cfd6;             /* ruled lines (decorative) */
+  --rule-2: #b3bcc6;           /* header double rule */
+  --line: rgba(29, 27, 22, 0.15);   /* card border */
+  --line-2: rgba(29, 27, 22, 0.24); /* keycaps, ghost buttons */
+  --graphite: rgba(29, 27, 22, 0.55); /* pencil line while drafting */
+  --steel: #7f8790;            /* paperclip (3.2:1, decorative) */
 
-  /* Surfaces: graphite glass */
-  --oc-glass: rgba(16, 17, 21, 0.93);       /* panel fill without native blur */
-  --oc-glass-bar: rgba(13, 14, 17, 0.94);   /* toolbar pill (always CSS glass) */
-  --oc-glass-pop: rgba(20, 21, 26, 0.97);   /* popovers, menus */
-  --oc-raised: rgba(255, 255, 255, 0.05);   /* inputs, cards, chips */
-  --oc-raised-2: rgba(255, 255, 255, 0.08); /* hover */
-  --oc-raised-3: rgba(255, 255, 255, 0.12); /* pressed, selected */
-  --oc-sunken: rgba(0, 0, 0, 0.30);         /* code blocks, wells, fields */
-  --oc-line: rgba(255, 255, 255, 0.08);
-  --oc-line-2: rgba(255, 255, 255, 0.14);
-  --oc-sheen: rgba(255, 255, 255, 0.07);    /* 1px top highlight on glass */
+  /* ---- Color: red pencil (sparingly: live, "Say this", primary) ---- */
+  --red: #d4402a;              /* marks, dots, caret (non-text, 4.1:1) */
+  --red-ink: #b3321f;          /* red text            5.5:1 on paper */
+  --red-fill: #b8361f;         /* primary button fill, paper text 5.2:1 */
+  --red-fill-2: #a32e1a;       /* primary hover */
+  --red-soft: rgba(212, 64, 42, 0.10);
+  --red-ring: rgba(212, 64, 42, 0.28);
 
-  /* Text */
-  --oc-text: #f2f1ec;
-  --oc-text-2: #b5b7bd;
-  --oc-text-3: #80848d;
-  --oc-text-4: #5d6169;
+  /* ---- Color: status text other than red ---- */
+  --warn-ink: #8a5300;         /* 5.6:1 on paper */
+  --warn-soft: rgba(138, 83, 0, 0.12);
+  --info-ink: #2f5876;         /* 6.7:1 on paper */
 
-  /* Accent: signal lime. Use sparingly: primary action, focus, live AI state. */
-  --oc-accent: #c9f26b;
-  --oc-accent-2: #dbf79a;                   /* hover */
-  --oc-accent-ink: #141a08;                 /* text and icons on accent */
-  --oc-accent-soft: rgba(201, 242, 107, 0.13);
-  --oc-accent-line: rgba(201, 242, 107, 0.38);
+  /* ---- Color: ink card (code) ---- */
+  --slate: #1d1b16;
+  --slate-2: #2a2720;          /* code bar */
+  --slate-line: rgba(246, 241, 231, 0.16);
+  --on-slate: #f6f1e7;         /* 15.3:1 */
+  --on-slate-2: #b9b0a0;       /*  8.0:1 */
+  --on-slate-3: #8f8676;       /*  4.8:1 */
+  --syn-key: #f0a35e;          /*  8.3:1 */
+  --syn-type: #9ccfd8;         /* 10.1:1 */
+  --syn-fn: #e6c07b;           /* 10.0:1 */
+  --syn-str: #a9c98a;          /*  9.4:1 */
+  --syn-num: #c8b6f0;          /*  9.3:1 */
+  --syn-com: #a39a89;          /*  6.2:1 */
 
-  /* Status */
-  --oc-live: #ff5f57;                       /* recording / listening */
-  --oc-live-soft: rgba(255, 95, 87, 0.15);
-  --oc-live-line: rgba(255, 95, 87, 0.38);
-  --oc-warn: #f6c453;
-  --oc-warn-soft: rgba(246, 196, 83, 0.14);
-  --oc-error: #ff7a72;
-  --oc-error-soft: rgba(255, 122, 114, 0.14);
-  --oc-info: #8ccaff;
+  /* Syntax colors in use. Default: code on paper (wells, inline). Dark code
+     cards (.oc-slate, .oc-prose pre) switch these to the --syn-* set. */
+  --code-text: var(--ink);
+  --code-punct: var(--ink-2);  /* 6.1:1 on paper-2 */
+  --code-key: #a3401c;         /* 5.2:1 on paper-2 */
+  --code-type: #1f5f6b;        /* 5.9:1 */
+  --code-fn: #7a5200;          /* 5.7:1 */
+  --code-str: #3d6b22;         /* 5.2:1 */
+  --code-num: #5b3fa0;         /* 6.5:1 */
+  --code-com: var(--ink-3);    /* 4.6:1 */
 
-  /* Shape */
-  --oc-r-window: 10px;  /* matches the macOS native-glass corner mask */
-  --oc-r-lg: 12px;
-  --oc-r-md: 8px;
-  --oc-r-sm: 6px;
-  --oc-r-xs: 4px;
-  --oc-r-pill: 999px;
+  /* ---- Type ---- */
+  --font-display: 'Fraunces Cue', 'Iowan Old Style', Georgia, serif;
+  --font-ui: 'Instrument Sans Cue', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+  --font-mono: 'JetBrains Mono Cue', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --fs-11: 11px;   /* small caps labels, key hints */
+  --fs-12: 12px;   /* toolbar controls, meta, code */
+  --fs-13: 13px;   /* footers, buttons */
+  --fs-14: 14px;   /* details prose */
+  --fs-15: 15px;   /* question, wordmark */
+  --fs-20: 20px;   /* margin note */
+  --fs-24: 24px;   /* the one-line answer */
+  --lh-16: 16px;
+  --lh-20: 20px;
+  --lh-24: 24px;
+  --lh-rule: 28px; /* ruled-line pitch */
+  --lh-32: 32px;
+  --track-caps: 0.1em;
 
-  /* Depth */
-  --oc-edge: inset 0 0 0 1px var(--oc-line-2), inset 0 1px 0 var(--oc-sheen);
-  --oc-shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.30);
+  /* ---- Space (4 px grid) ---- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
 
-  /* Motion */
-  --oc-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --oc-t-fast: 120ms;
-  --oc-t: 180ms;
-  --oc-t-swap: 140ms;   /* cross-fade between two states of one panel */
-  --oc-t-appear: 160ms; /* a panel window appearing */
+  /* ---- Radius ---- */
+  --r-1: 2px;      /* keycaps, kbd */
+  --r-2: 4px;      /* controls, buttons */
+  --r-3: 6px;      /* cards */
+  --r-tab: 12px;   /* tab bottom corners */
+  --r-round: 999px;
+  --r-window: var(--r-3); /* a window's own card; macOS value below */
+
+  /* ---- Shadow ---- */
+  --shadow-card:
+    0 1px 1px rgba(29, 27, 22, 0.06),
+    0 4px 8px -2px rgba(29, 27, 22, 0.14),
+    0 16px 32px -8px rgba(29, 27, 22, 0.28);
+  --shadow-tab:
+    0 1px 1px rgba(29, 27, 22, 0.08),
+    0 8px 16px -8px rgba(29, 27, 22, 0.32);
+  --shadow-code:
+    0 2px 4px rgba(0, 0, 0, 0.18),
+    0 12px 24px -8px rgba(0, 0, 0, 0.40);
+  --shadow-key: 0 1px 0 var(--line-2);
+  --focus: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
+
+  /* ---- Motion ---- */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-draw: cubic-bezier(0.45, 0.05, 0.25, 1);
+  --t-fast: 120ms;
+  --t: 180ms;
+  --t-swap: 160ms;
+  --t-appear: 160ms;
+  --t-draw: 1800ms;
+  --t-pulse: 1600ms;
+  --t-blink: 1060ms;
 }
 
-/*
- * On macOS the main process gives panel windows native blur (vibrancy), so the
- * tint can be light and the background shows through as frosted glass. Pages
- * opt in by putting `oc-window--native` on their root surface. preload.js sets
- * html[data-platform] to process.platform.
- */
-html[data-platform="darwin"] .oc-window--native {
-  --oc-glass: rgba(14, 15, 19, 0.34);
+/* macOS rounds vibrancy windows with a 10 px corner mask; the card follows it
+   so no glass shows in the corners. preload.js sets html[data-platform]. */
+html[data-platform="darwin"] {
+  --r-window: 10px;
 }
 
 /* ---------- Base ---------- */
 
 html,
 body {
-  font-family: var(--oc-font);
-  color: var(--oc-text);
+  font-family: var(--font-ui);
+  color: var(--ink);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background: rgba(201, 242, 107, 0.28);
-  color: #ffffff;
+  background: rgba(212, 64, 42, 0.2);
+  color: var(--ink);
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track,
 ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(29, 27, 22, 0.22);
   background-clip: padding-box;
   border: 2px solid transparent;
-  border-radius: var(--oc-r-pill);
+  border-radius: var(--r-round);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: rgba(29, 27, 22, 0.36);
   background-clip: padding-box;
   border: 2px solid transparent;
 }
 
 :focus-visible {
-  outline: 2px solid var(--oc-accent-line);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
 /* ---------- Window surface ---------- */
 
-/* Root surface of a panel window. Must fill the whole window: no transparent
-   margin around it, or native blur shows outside the panel. */
+/* Root surface of a panel window: one opaque card that fills the window.
+   `oc-window--native` marks windows that get macOS vibrancy; the card covers
+   it, so the blur never carries contrast. */
 .oc-window {
   position: relative;
   width: 100vw;
   height: 100vh;
   margin: 0;
   overflow: hidden;
-  color: var(--oc-text);
-  background: var(--oc-glass);
-  border-radius: var(--oc-r-window);
-  box-shadow: var(--oc-edge);
+  color: var(--ink);
+  background: var(--paper);
+  border-radius: var(--r-window);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .oc-drag { -webkit-app-region: drag; user-select: none; }
@@ -187,95 +245,100 @@ body {
 .oc-titlebar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--s-2);
   height: 40px;
-  padding: 0 8px 0 14px;
-  border-bottom: 1px solid var(--oc-line);
+  padding: 0 var(--s-2) 0 var(--s-4);
+  border-bottom: 1px solid var(--rule);
   flex: none;
 }
 
 .oc-title {
-  font-size: var(--oc-fs-sm);
-  font-weight: 650;
-  letter-spacing: 0.01em;
-  color: var(--oc-text);
+  font: 600 var(--fs-15) / var(--lh-20) var(--font-display);
+  font-variation-settings: 'opsz' 18;
+  letter-spacing: -0.005em;
+  color: var(--ink);
 }
 
-/* Brand mark: a lime keycap "C". Pure CSS, scales with --s. */
+/* Brand mark: a paper keycap with a Fraunces "C". Pure CSS, scales with --s. */
 .oc-mark {
   --s: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
+  box-sizing: border-box;
   width: var(--s);
   height: var(--s);
-  border-radius: calc(var(--s) * 0.28);
-  background: var(--oc-accent);
-  /* Darker bottom edge, like a key. At least 1px so small marks keep it. */
-  box-shadow: inset 0 calc(-1 * max(1px, var(--s) * 0.08)) 0 rgba(0, 0, 0, 0.25);
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: max(2px, calc(var(--s) * 0.17));
+  /* The key's front edge. At least 1px so small marks keep it. */
+  box-shadow: 0 max(1px, calc(var(--s) * 0.08)) 0 var(--line-2);
 }
 .oc-mark::after {
   content: 'C';
-  font: 800 calc(var(--s) * 0.62) / 1 var(--oc-mono);
-  color: var(--oc-accent-ink);
+  font: 600 calc(var(--s) * 0.62) / 1 var(--font-display);
+  font-variation-settings: 'opsz' 14;
+  color: var(--ink);
 }
 
-/* Mono eyebrow label: section names, states, meta. */
+/* Small caps label: section names, states, meta. */
 .oc-label {
-  font-family: var(--oc-mono);
-  font-size: var(--oc-fs-2xs);
-  font-weight: 500;
-  letter-spacing: 0.08em;
+  font: 600 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
-  color: var(--oc-text-3);
-}
-
-.oc-sep {
-  flex: none;
-  width: 1px;
-  height: 16px;
-  background: var(--oc-line-2);
-}
-
-.oc-hr {
-  height: 1px;
-  margin: 0;
-  border: 0;
-  background: var(--oc-line);
+  color: var(--ink-3);
 }
 
 /* ---------- Keyboard hints ---------- */
 
+/* A group is one keycap ("⌘⇧S"); a lone .oc-kbd is a keycap too. */
+.oc-kbd,
 .oc-kbd-group {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-}
-
-.oc-kbd {
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  font-family: var(--oc-mono);
-  font-size: var(--oc-fs-2xs);
-  font-weight: 500;
-  line-height: 1;
-  color: var(--oc-text-2);
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-bottom-color: rgba(255, 255, 255, 0.05);
-  border-radius: 5px;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+  height: 16px;
+  min-width: 16px;
+  padding: 0 var(--s-1);
+  font: 500 var(--fs-11) / 1 var(--font-mono);
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  white-space: nowrap;
+  background: var(--paper);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  box-shadow: var(--shadow-key);
 }
 
-/* Platform modifier: <span class="oc-kbd oc-mod"></span> shows ⌘ on macOS, Ctrl elsewhere. */
+.oc-kbd-group {
+  gap: 1px;
+}
+
+.oc-kbd-group > .oc-kbd {
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Platform modifiers: ⌘ / ⌥ on macOS, Ctrl / Alt elsewhere. */
 .oc-mod::before { content: '\2318'; }
+.oc-alt::before { content: '\2325'; }
 html[data-platform="win32"] .oc-mod::before,
 html[data-platform="linux"] .oc-mod::before { content: 'Ctrl'; }
+html[data-platform="win32"] .oc-alt::before,
+html[data-platform="linux"] .oc-alt::before { content: 'Alt'; }
+html[data-platform="win32"] .oc-kbd-group > :is(.oc-mod, .oc-alt),
+html[data-platform="linux"] .oc-kbd-group > :is(.oc-mod, .oc-alt) { margin-right: 2px; }
 
 /* ---------- Controls ---------- */
 
@@ -283,143 +346,162 @@ html[data-platform="linux"] .oc-mod::before { content: 'Ctrl'; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-  font: 600 var(--oc-fs-sm)/1 var(--oc-font);
-  color: var(--oc-text);
-  background: var(--oc-raised);
-  border: 1px solid var(--oc-line);
-  border-radius: var(--oc-r-md);
+  gap: var(--s-2);
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 var(--s-3);
+  font: 600 var(--fs-13) / 1 var(--font-ui);
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
   cursor: pointer;
   white-space: nowrap;
   transition:
-    background var(--oc-t-fast) var(--oc-ease),
-    border-color var(--oc-t-fast) var(--oc-ease),
-    color var(--oc-t-fast) var(--oc-ease),
-    transform var(--oc-t-fast) var(--oc-ease);
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
 }
-.oc-btn:hover { background: var(--oc-raised-2); border-color: var(--oc-line-2); }
-.oc-btn:active { background: var(--oc-raised-3); transform: translateY(0.5px); }
-.oc-btn:disabled { opacity: 0.45; cursor: default; }
+.oc-btn:hover { background: var(--paper-2); }
+.oc-btn:active { background: var(--paper-3); }
+.oc-btn:focus-visible { outline: none; box-shadow: var(--focus); }
+.oc-btn:disabled { opacity: 0.5; cursor: default; }
+.oc-btn:disabled:hover { background: transparent; }
 
 .oc-btn--primary {
-  color: var(--oc-accent-ink);
-  background: var(--oc-accent);
-  border-color: transparent;
+  color: var(--paper);
+  background: var(--red-fill);
+  border-color: var(--red-fill-2);
+  box-shadow: 0 1px 0 var(--red-fill-2);
 }
-.oc-btn--primary:hover { background: var(--oc-accent-2); border-color: transparent; }
+.oc-btn--primary:hover,
+.oc-btn--primary:active { background: var(--red-fill-2); }
+.oc-btn--primary:disabled:hover { background: var(--red-fill); }
 
 .oc-btn--ghost {
-  color: var(--oc-text-2);
-  background: transparent;
+  color: var(--ink-2);
   border-color: transparent;
 }
-.oc-btn--ghost:hover { color: var(--oc-text); background: var(--oc-raised-2); border-color: transparent; }
+.oc-btn--ghost:hover { color: var(--ink); }
 
 .oc-btn--danger {
-  color: var(--oc-error);
-  background: var(--oc-error-soft);
-  border-color: transparent;
+  color: var(--red-ink);
+  background: var(--red-soft);
+  border-color: var(--red-ring);
 }
+.oc-btn--danger:hover { background: rgba(212, 64, 42, 0.16); }
 
 /* Square icon button; combine with .oc-btn (and usually .oc-btn--ghost). */
 .oc-icon-btn {
   width: 28px;
   height: 28px;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
-/* Round accent send button. */
+/* Round send button (primary). */
 .oc-send {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  color: var(--oc-accent-ink);
-  background: var(--oc-accent);
+  color: var(--paper);
+  background: var(--red-fill);
   border: 0;
   border-radius: 50%;
+  box-shadow: 0 1px 0 var(--red-fill-2);
   cursor: pointer;
-  transition: background var(--oc-t-fast) var(--oc-ease), transform var(--oc-t-fast) var(--oc-ease), opacity var(--oc-t-fast);
+  transition: background var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
 }
-.oc-send:hover { background: var(--oc-accent-2); }
-.oc-send:active { transform: scale(0.96); }
-.oc-send:disabled { opacity: 0.4; cursor: default; }
+.oc-send:hover { background: var(--red-fill-2); }
+.oc-send:focus-visible { outline: none; box-shadow: var(--focus); }
+.oc-send:disabled { opacity: 0.45; cursor: default; }
 
 .oc-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  box-sizing: border-box;
   height: 24px;
-  padding: 0 10px;
-  font-size: var(--oc-fs-xs);
-  font-weight: 600;
-  color: var(--oc-text-2);
-  background: var(--oc-raised);
-  border: 1px solid var(--oc-line);
-  border-radius: var(--oc-r-pill);
+  padding: 0 var(--s-2);
+  font: 500 var(--fs-12) / 1 var(--font-ui);
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
   white-space: nowrap;
 }
-.oc-chip--accent { color: var(--oc-accent); background: var(--oc-accent-soft); border-color: var(--oc-accent-line); }
-.oc-chip--live { color: var(--oc-live); background: var(--oc-live-soft); border-color: var(--oc-live-line); }
+.oc-chip--accent { color: var(--ink); background: rgba(29, 27, 22, 0.08); border-color: var(--line-2); }
+.oc-chip--live { color: var(--red-ink); background: var(--red-soft); border-color: var(--red-ring); }
 
 .oc-input {
+  box-sizing: border-box;
   width: 100%;
-  height: 34px;
-  padding: 0 11px;
-  font: 500 var(--oc-fs-md)/1.4 var(--oc-font);
-  color: var(--oc-text);
-  background: var(--oc-sunken);
-  border: 1px solid var(--oc-line-2);
-  border-radius: var(--oc-r-md);
+  height: 36px;
+  padding: 0 var(--s-3);
+  font: 400 var(--fs-14) / 1.4 var(--font-ui);
+  color: var(--ink);
+  background: var(--paper-field);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
   outline: none;
-  transition: border-color var(--oc-t-fast), box-shadow var(--oc-t-fast), background var(--oc-t-fast);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
-.oc-input::placeholder { color: var(--oc-text-4); }
-.oc-input:focus { border-color: var(--oc-accent-line); box-shadow: 0 0 0 3px var(--oc-accent-soft); }
-textarea.oc-input { height: auto; padding: 9px 11px; resize: none; }
+.oc-input::placeholder { color: var(--ink-3); }
+.oc-input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(29, 27, 22, 0.1); }
+textarea.oc-input { height: auto; padding: var(--s-2) var(--s-3); resize: none; }
 select.oc-input {
   appearance: none;
-  padding-right: 30px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23b5b7bd' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  padding-right: var(--s-8);
+  background-image: url('../../assests/icons/ui/chevron-down.svg');
   background-repeat: no-repeat;
-  background-position: right 11px center;
+  background-position: right var(--s-3) center;
+  background-size: 12px 12px;
   cursor: pointer;
 }
 
 .oc-card {
-  background: var(--oc-raised);
-  border: 1px solid var(--oc-line);
-  border-radius: var(--oc-r-lg);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
 }
 
 /* ---------- Status ---------- */
 
 .oc-dot {
+  position: relative;
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--oc-text-4);
+  background: var(--ink-3);
 }
-.oc-dot--ok { background: var(--oc-accent); box-shadow: 0 0 0 3px var(--oc-accent-soft); }
-.oc-dot--live { background: var(--oc-live); animation: oc-pulse 1.6s var(--oc-ease) infinite; }
+.oc-dot--ok { background: var(--ink); box-shadow: 0 0 0 3px rgba(29, 27, 22, 0.12); }
+
+/* Live: a red-pencil dot with a ring that keeps pulsing out. */
+.oc-dot--live { background: var(--red); }
+.oc-dot--live::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1.5px solid var(--red);
+  border-radius: 50%;
+  opacity: 0;
+  animation: oc-pulse var(--t-pulse) var(--ease) infinite;
+}
 
 @keyframes oc-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(255, 95, 87, 0.45); }
-  70% { box-shadow: 0 0 0 6px rgba(255, 95, 87, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(255, 95, 87, 0); }
+  0% { transform: scale(0.5); opacity: 0.6; }
+  70%, 100% { transform: scale(1); opacity: 0; }
 }
 
-/* "Thinking" text: a slow light sweep. */
+/* "Thinking" text: a slow graphite sweep. Both ends stay readable. */
 .oc-shimmer {
   color: transparent;
-  background: linear-gradient(90deg, var(--oc-text-3) 0%, var(--oc-text) 45%, var(--oc-text-3) 90%);
+  background: linear-gradient(90deg, var(--ink-3) 0%, var(--ink) 45%, var(--ink-3) 90%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -430,7 +512,7 @@ select.oc-input {
   to { background-position: -100% 0; }
 }
 
-/* Thin indeterminate progress line (place at the top edge of a panel). */
+/* Thin indeterminate progress line: a pencil stroke running along the edge. */
 .oc-progress {
   position: relative;
   height: 2px;
@@ -442,8 +524,9 @@ select.oc-input {
   position: absolute;
   inset: 0 auto 0 0;
   width: 35%;
-  background: linear-gradient(90deg, transparent, var(--oc-accent), transparent);
-  animation: oc-progress 1.2s var(--oc-ease) infinite;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, var(--graphite), transparent);
+  animation: oc-progress 1.2s var(--ease) infinite;
 }
 @keyframes oc-progress {
   from { transform: translateX(-100%); }
@@ -454,13 +537,13 @@ select.oc-input {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
-.oc-rise { animation: oc-rise var(--oc-t) var(--oc-ease) both; }
+.oc-rise { animation: oc-rise var(--t) var(--ease) both; }
 
 /* A panel window appearing: 160 ms fade and 4 px rise. Put .oc-appear on the
    root surface; .is-held keeps the first frame until the window is on
-   screen. On macOS the main process fades the whole window (the native glass
-   cannot be faded from CSS), so the page only adds the rise, on the
-   surface's children so the tint stays aligned with the glass. */
+   screen. On macOS the main process fades the whole window (a vibrancy
+   window cannot be faded from CSS), so the page only adds the rise, on the
+   surface's children. */
 @keyframes oc-appear {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
@@ -469,10 +552,10 @@ select.oc-input {
   from { transform: translateY(4px); }
   to { transform: none; }
 }
-.oc-appear { animation: oc-appear var(--oc-t-appear) var(--oc-ease) both; }
+.oc-appear { animation: oc-appear var(--t-appear) var(--ease) both; }
 html[data-platform="darwin"] .oc-window--native.oc-appear { animation: none; }
 html[data-platform="darwin"] .oc-window--native.oc-appear > * {
-  animation: oc-appear-rise var(--oc-t-appear) var(--oc-ease) both;
+  animation: oc-appear-rise var(--t-appear) var(--ease) both;
 }
 .oc-appear.is-held,
 .oc-appear.is-held > * { animation-play-state: paused !important; }
@@ -482,106 +565,138 @@ html[data-platform="darwin"] .oc-window--native.oc-appear > * {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-.oc-fade-in { animation: oc-fade-in var(--oc-t-swap) var(--oc-ease) both; }
+.oc-fade-in { animation: oc-fade-in var(--t-swap) var(--ease) both; }
 
 /* ---------- Markdown answers ---------- */
 
 .oc-prose {
-  font-size: var(--oc-fs-md);
-  line-height: 1.62;
-  color: var(--oc-text);
+  font-size: var(--fs-14);
+  line-height: var(--lh-24);
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
 .oc-prose > :first-child { margin-top: 0; }
 .oc-prose > :last-child { margin-bottom: 0; }
-.oc-prose p { margin: 0 0 0.75em; }
+.oc-prose p { margin: 0 0 var(--s-3); }
 .oc-prose h1,
 .oc-prose h2,
-.oc-prose h3,
-.oc-prose h4 {
-  margin: 1.1em 0 0.45em;
-  line-height: 1.3;
-  letter-spacing: -0.005em;
-  color: #ffffff;
-}
-.oc-prose h1 { font-size: 17px; font-weight: 750; }
-.oc-prose h2 { font-size: 15.5px; font-weight: 720; }
-.oc-prose h3 { font-size: 14px; font-weight: 700; }
-.oc-prose h4 {
-  font-family: var(--oc-mono);
-  font-size: var(--oc-fs-2xs);
+.oc-prose h3 {
+  margin: var(--s-5) 0 var(--s-2);
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.oc-prose h1 { font-size: var(--fs-20); line-height: var(--lh-rule); }
+.oc-prose h2 { font-size: 17px; line-height: var(--lh-24); }
+.oc-prose h3 { font-size: var(--fs-15); line-height: var(--lh-24); }
+.oc-prose h4,
+.oc-prose h5,
+.oc-prose h6 {
+  margin: var(--s-4) 0 var(--s-1);
+  font: 600 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
-  color: var(--oc-text-3);
+  color: var(--ink-2);
 }
-.oc-prose strong { font-weight: 700; color: #ffffff; }
+.oc-prose strong { font-weight: 600; color: var(--ink); }
+.oc-prose em { font-style: italic; }
 .oc-prose a {
-  color: var(--oc-accent);
+  color: var(--ink);
   text-decoration: underline;
-  text-decoration-color: var(--oc-accent-line);
-  text-underline-offset: 2px;
+  text-decoration-color: var(--red);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
 }
+.oc-prose a:hover { color: var(--red-ink); }
 .oc-prose ul,
-.oc-prose ol { margin: 0 0 0.75em; padding-left: 1.25em; }
-.oc-prose li { margin: 0.2em 0; padding-left: 0.15em; }
-.oc-prose li::marker { color: var(--oc-text-3); }
-.oc-prose ol li::marker { font-family: var(--oc-mono); font-size: 0.9em; }
-.oc-prose blockquote {
-  margin: 0 0 0.75em;
-  padding: 2px 0 2px 12px;
-  color: var(--oc-text-2);
-  border-left: 2px solid var(--oc-accent-line);
+.oc-prose ol { margin: 0 0 var(--s-3); padding-left: var(--s-6); }
+.oc-prose li { margin: var(--s-1) 0; padding-left: 2px; }
+.oc-prose li::marker { color: var(--ink-2); }
+.oc-prose ol > li::marker {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 500;
 }
-.oc-prose hr { margin: 1em 0; border: 0; border-top: 1px solid var(--oc-line); }
+.oc-prose blockquote {
+  margin: 0 0 var(--s-3);
+  padding: 0 0 0 var(--s-3);
+  font-style: italic;
+  color: var(--ink-2);
+  border-left: 2px solid var(--rule-2);
+}
+.oc-prose hr { margin: var(--s-4) 0; border: 0; border-top: 1px solid var(--rule); }
 .oc-prose :not(pre) > code {
-  padding: 0.1em 0.38em;
-  font-family: var(--oc-mono);
+  padding: 1px 4px;
+  font-family: var(--font-mono);
   font-size: 0.88em;
-  color: #ecebe5;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid var(--oc-line);
-  border-radius: var(--oc-r-xs);
+  color: var(--ink);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
 }
 .oc-prose pre {
-  margin: 0 0 0.85em;
-  padding: 12px 14px;
+  margin: 0 0 var(--s-4);
+  padding: var(--s-3) var(--s-4);
   overflow: auto;
-  background: var(--oc-sunken);
-  border: 1px solid var(--oc-line);
-  border-radius: var(--oc-r-md);
+  color: var(--on-slate);
+  background: var(--slate);
+  border-radius: var(--r-3);
+  box-shadow: 0 0 0 1px var(--slate-line), var(--shadow-code);
 }
 .oc-prose pre code {
   padding: 0;
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: #e6e4dd;
+  font-size: var(--fs-12);
+  line-height: var(--lh-20);
+  color: inherit;
   background: none;
   border: 0;
 }
-.oc-prose table { width: 100%; margin: 0 0 0.85em; border-collapse: collapse; font-size: var(--oc-fs-sm); }
-.oc-prose th {
-  padding: 6px 10px 6px 0;
-  text-align: left;
-  font-family: var(--oc-mono);
-  font-size: var(--oc-fs-2xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--oc-text-3);
-  border-bottom: 1px solid var(--oc-line-2);
+.oc-prose table {
+  width: 100%;
+  margin: 0 0 var(--s-4);
+  border-collapse: collapse;
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
 }
-.oc-prose td { padding: 6px 10px 6px 0; vertical-align: top; border-bottom: 1px solid var(--oc-line); }
+.oc-prose th {
+  padding: var(--s-1) var(--s-3) var(--s-1) 0;
+  text-align: left;
+  font: 600 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--rule-2);
+}
+.oc-prose td {
+  padding: var(--s-1) var(--s-3) var(--s-1) 0;
+  vertical-align: top;
+  border-bottom: 1px solid var(--rule);
+}
+.oc-prose img { max-width: 100%; }
 
 /* ---------- Code and syntax colors (Prism tokens) ---------- */
 
-.oc-code,
-.oc-code code,
+/* Dark code card: ink surface with the --syn-* colors. */
+.oc-slate,
+.oc-prose pre {
+  --code-text: var(--on-slate);
+  --code-punct: var(--on-slate-2);
+  --code-key: var(--syn-key);
+  --code-type: var(--syn-type);
+  --code-fn: var(--syn-fn);
+  --code-str: var(--syn-str);
+  --code-num: var(--syn-num);
+  --code-com: var(--syn-com);
+}
+.oc-slate { color: var(--on-slate); background: var(--slate); }
+
 pre[class*="language-"],
 code[class*="language-"],
 .oc-prose pre,
 .oc-prose code {
-  font-family: var(--oc-mono);
+  font-family: var(--font-mono);
   font-variant-ligatures: none;
   font-feature-settings: "calt" 0;
   tab-size: 4;
@@ -590,36 +705,36 @@ code[class*="language-"],
 .token.comment,
 .token.prolog,
 .token.doctype,
-.token.cdata { color: #6f7480; font-style: italic; }
-.token.punctuation { color: #a3a8b2; }
+.token.cdata { color: var(--code-com); font-style: italic; }
+.token.punctuation { color: var(--code-punct); }
 .token.operator,
 .token.entity,
-.token.url { color: #d3d1ca; }
+.token.url,
+.token.variable,
+.token.parameter { color: var(--code-text); }
 .token.keyword,
 .token.atrule,
 .token.important,
-.token.rule { color: #c9f26b; }
+.token.rule { color: var(--code-key); }
 .token.string,
 .token.char,
 .token.attr-value,
 .token.regex,
-.token.template-string { color: #f2cf7e; }
-.token.function,
-.token.class-name { color: #8fd0ff; }
+.token.template-string,
+.token.inserted { color: var(--code-str); }
+.token.function { color: var(--code-fn); }
+.token.class-name,
+.token.builtin,
+.token.property,
+.token.attr-name { color: var(--code-type); }
 .token.number,
 .token.boolean,
 .token.constant,
-.token.symbol { color: #ffab85; }
-.token.builtin,
-.token.property,
-.token.attr-name { color: #9be8d8; }
+.token.symbol,
 .token.tag,
 .token.selector,
-.token.deleted { color: #ff9db0; }
-.token.inserted { color: #c9f26b; }
-.token.variable,
-.token.parameter { color: #ece9e1; }
-.token.namespace { opacity: 0.75; }
+.token.deleted { color: var(--code-num); }
+.token.namespace { opacity: 0.8; }
 .token.bold { font-weight: 700; }
 .token.italic { font-style: italic; }
 

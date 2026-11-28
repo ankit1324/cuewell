@@ -711,14 +711,14 @@ class ChatWindowUI {
             interimElement = document.createElement('div');
             interimElement.className = 'interim-text';
             interimElement.style.cssText = `
-                color: var(--oc-text-2);
-                font-size: var(--oc-fs-sm);
+                color: var(--ink-2);
+                font-size: var(--fs-13);
                 font-style: italic;
                 margin-top: 8px;
                 padding: 4px 12px;
-                background: var(--oc-raised);
-                border: 1px solid var(--oc-line);
-                border-radius: var(--oc-r-pill);
+                background: var(--paper-2);
+                border: 1px solid var(--line);
+                border-radius: var(--r-round);
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;

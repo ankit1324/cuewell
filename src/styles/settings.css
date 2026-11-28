@@ -1,0 +1,1441 @@
+/*
+ * Settings window (settings.html): one opaque paper card.
+ *
+ * A darker paper sidebar holds the search box and the section nav; the
+ * current section is marked with a red-pencil stroke. The content pane opens
+ * with the section name in Fraunces over the card's double header rule.
+ * Groups are ruled sections, not boxes: a Fraunces title over a header rule,
+ * then one row per ruled line. Choice tiles (providers, voice models, app
+ * icons) are fresh cards; the chosen one gets an ink border and a red tick.
+ *
+ * Linked after theme.css, so these rules win over its primitives.
+ * src/ui/settings-window.js builds the provider tiles, key fields, model
+ * cards, shortcut rows and search notes with the sw-* classes used here.
+ */
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  font-family: var(--font-ui);
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--red);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  border-radius: var(--r-1);
+}
+
+a:hover {
+  color: var(--red-ink);
+}
+
+code,
+.sw-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+code {
+  padding: 1px 4px;
+  color: var(--ink);
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  word-break: break-all;
+}
+
+/* ---------- Window ---------- */
+
+.sw {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  color: var(--ink);
+}
+
+/* Windows and Linux get a square window (the OS rounds it on Windows 11). */
+html:not([data-platform="darwin"]) .sw {
+  border-radius: 0;
+}
+
+/* ---------- Sidebar ---------- */
+
+.sw-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--paper-2);
+  border-right: 1px solid var(--rule);
+}
+
+.sw-side-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+  height: 48px;
+  padding: 0 var(--s-4);
+}
+
+/* Leave room for the macOS traffic lights. */
+html[data-platform="darwin"] .sw-side-head {
+  padding-left: 84px;
+}
+
+html[data-platform="darwin"] .sw-side-head .oc-mark {
+  display: none;
+}
+
+.sw-side-head .oc-mark {
+  --s: 20px;
+}
+
+.sw-side-title {
+  font: 600 var(--fs-15) / var(--lh-20) var(--font-display);
+  font-variation-settings: 'opsz' 18;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+
+.sw-search {
+  position: relative;
+  flex: none;
+  margin: 0 var(--s-3) var(--s-3);
+}
+
+.sw-search > .fas {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.sw-search .oc-input {
+  height: 32px;
+  padding-left: 30px;
+  font-size: var(--fs-13);
+}
+
+.sw-search .oc-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background-color: var(--ink-2);
+  -webkit-mask: url('../../assests/icons/ui/x.svg') center / contain no-repeat;
+  cursor: pointer;
+}
+
+.sw-search .oc-input::-webkit-search-cancel-button:hover {
+  background-color: var(--ink);
+}
+
+.sw-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+  padding: var(--s-1) var(--s-2);
+  overflow-y: auto;
+}
+
+.sw-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px 0 var(--s-3);
+  font: 500 var(--fs-13) / 1 var(--font-ui);
+  color: var(--ink-2);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.sw-nav-item > .fas {
+  width: 14px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.sw-nav-item:hover {
+  color: var(--ink);
+  background: var(--paper-3);
+}
+
+/* The open section: a card pulled forward, with a red-pencil stroke. */
+.sw-nav-item[aria-current="page"] {
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--paper);
+  border-color: var(--line);
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.sw-nav-item[aria-current="page"] > .fas {
+  color: var(--ink);
+}
+
+.sw-nav-item[aria-current="page"]::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 3px;
+  width: 4px;
+  background-color: var(--red);
+  -webkit-mask: var(--icon-margin-mark) center / 100% 100% no-repeat;
+  mask: var(--icon-margin-mark) center / 100% 100% no-repeat;
+}
+
+.sw-nav-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+.sw-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sw-nav-count {
+  font: 500 var(--fs-11) / 1 var(--font-mono);
+  color: var(--ink-2);
+}
+
+/* While searching: sections with no match. Dimmed in color, not opacity,
+   so the label stays readable. */
+.sw-nav-item.is-empty,
+.sw-nav-item.is-empty > .fas {
+  color: var(--ink-3);
+}
+
+.sw-nav-alert {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn-ink);
+}
+
+.sw-side-foot {
+  flex: none;
+  padding: var(--s-2) var(--s-2) var(--s-3);
+  border-top: 1px solid var(--rule);
+}
+
+.sw-side-foot .oc-btn {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px 0 var(--s-3);
+  font-weight: 500;
+}
+
+.sw-side-foot .oc-btn > .fas {
+  width: 14px;
+  font-size: 12px;
+}
+
+.sw-side-foot .oc-btn:hover {
+  color: var(--red-ink);
+  background: var(--red-soft);
+}
+
+/* ---------- Content pane ---------- */
+
+.sw-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--paper);
+}
+
+/* Section name over the card's double header rule (as on the answer card). */
+.sw-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: none;
+  height: 52px;
+  padding: 0 var(--s-2) 4px var(--s-8);
+  box-shadow:
+    inset 0 -1px 0 var(--rule-2),
+    inset 0 -3px 0 var(--paper),
+    inset 0 -4px 0 var(--rule-2);
+}
+
+.sw-head-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font: 600 var(--fs-20) / var(--lh-rule) var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+html[data-platform="darwin"] .sw-close {
+  display: none;
+}
+
+.sw-progress {
+  flex: none;
+  margin-top: -2px;
+}
+
+.sw-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: var(--s-6) var(--s-8) var(--s-10);
+  overflow-y: auto;
+  scroll-padding: var(--s-4);
+}
+
+.sw-scroll:focus-visible {
+  outline: none;
+}
+
+/* ---------- Notes: banners, removal confirm, search hints ----------
+   A margin note: a pencil stroke on the left, red for problems and
+   graphite otherwise, on a slightly darker paper. */
+
+.sw-banner,
+.sw-confirm,
+.sw-gate-hint {
+  position: relative;
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
+  color: var(--ink);
+  background: var(--paper-2);
+  border-radius: var(--r-2);
+}
+
+.sw-banner::before,
+.sw-confirm::before,
+.sw-gate-hint::before {
+  content: '';
+  position: absolute;
+  top: var(--s-2);
+  bottom: var(--s-2);
+  left: 5px;
+  width: 4px;
+  background-color: var(--red);
+  -webkit-mask: var(--icon-margin-mark) center / 100% 100% no-repeat;
+  mask: var(--icon-margin-mark) center / 100% 100% no-repeat;
+}
+
+.sw-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: var(--s-5);
+  padding: 10px var(--s-3) 10px var(--s-5);
+}
+
+.sw-banner > .fas {
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--red-ink);
+}
+
+.sw-banner--warn::before,
+.sw-banner--ok::before,
+.sw-gate-hint::before {
+  background-color: var(--graphite);
+}
+
+.sw-banner--warn > .fas {
+  color: var(--warn-ink);
+}
+
+.sw-banner--ok > .fas {
+  color: var(--ink);
+}
+
+.sw-banner-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.sw-banner .oc-btn,
+.sw-gate-hint .oc-btn {
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-12);
+}
+
+.sw-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+  padding: 10px var(--s-3) 10px var(--s-5);
+}
+
+.sw-confirm p {
+  flex: 1 1 220px;
+}
+
+.sw-confirm .sw-inline {
+  flex: none;
+}
+
+.sw-row > .sw-confirm {
+  grid-column: 1 / -1;
+}
+
+/* ---------- Sections and groups ---------- */
+
+.sw-section {
+  max-width: 680px;
+}
+
+/* The pane header names the open section; while searching every section
+   shows, each under its own name. */
+.sw-section-title {
+  display: none;
+  margin: 0 0 var(--s-3);
+  font: 600 17px / var(--lh-24) var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.is-searching .sw-section-title {
+  display: block;
+}
+
+.is-searching .sw-section {
+  margin-bottom: var(--s-8);
+}
+
+.sw-intro {
+  max-width: 64ch;
+  margin: 0 0 var(--s-5);
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
+  color: var(--ink-2);
+}
+
+/* A group is a ruled section: title over the header rule, then rows. */
+.sw-group {
+  margin: 0 0 var(--s-8);
+}
+
+.sw-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 0 var(--s-2);
+  border-bottom: 1px solid var(--rule-2);
+}
+
+/* A group without a title starts on a plain rule. */
+.sw-group > .sw-row:first-child,
+.sw-group > .sw-table:first-child,
+.sw-group > .sw-defs:first-child,
+.sw-group > .sw-about-hero:first-child {
+  border-top: 1px solid var(--rule-2);
+}
+
+.sw-group-title {
+  flex: 1;
+  min-width: 0;
+  font: 600 var(--fs-15) / var(--lh-24) var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+
+.sw-group-head .oc-btn {
+  height: 28px;
+  font-size: var(--fs-12);
+}
+
+.sw-group-status {
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.sw-group-status.is-ok {
+  color: var(--ink);
+}
+
+.sw-group-status.is-error {
+  color: var(--red-ink);
+  white-space: normal;
+}
+
+.sw-group-help {
+  padding: var(--s-3) 0 0;
+}
+
+.sw-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 260px);
+  align-items: start;
+  gap: var(--s-2) var(--s-5);
+  padding: var(--s-4) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.sw-row--auto {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.sw-row--stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.sw-row-label {
+  display: block;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  line-height: var(--lh-20);
+  color: var(--ink);
+}
+
+.sw-row-help {
+  margin-top: var(--s-1);
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--ink-2);
+}
+
+.sw-row-help code {
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.sw-row-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sw-row-note {
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
+  color: var(--ink-2);
+}
+
+.sw-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.sw-inline > .oc-input {
+  flex: 1;
+  min-width: 140px;
+}
+
+.sw-fields-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-3) var(--s-4);
+}
+
+.sw-field-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+  margin-bottom: 6px;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  line-height: var(--lh-16);
+  color: var(--ink-2);
+}
+
+.sw-field-help {
+  margin-top: 6px;
+}
+
+/* ---------- Controls ---------- */
+
+/* Field borders darker than the shared --line-2 so each field's edge
+   reaches 3:1 on paper. */
+.sw .oc-input {
+  height: 32px;
+  font-size: var(--fs-13);
+  border-color: var(--sw-field-edge);
+}
+
+.sw {
+  --sw-field-edge: rgba(29, 27, 22, 0.5);
+}
+
+.sw .oc-input:hover:not(:disabled):not(:focus) {
+  border-color: var(--ink-2);
+}
+
+.sw .oc-input:focus {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+.sw .oc-input:disabled {
+  color: var(--ink-3);
+  background-color: var(--paper-2);
+  border-style: dashed;
+  cursor: default;
+}
+
+.sw .oc-input[aria-invalid="true"] {
+  border-color: var(--red-ink);
+}
+
+.sw .oc-input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 1px var(--red-ink), 0 0 0 4px var(--red-soft);
+}
+
+.sw .oc-input--mono,
+.sw input[type="password"].oc-input {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  letter-spacing: 0.02em;
+}
+
+.sw select.oc-input option {
+  color: var(--ink);
+  background: var(--paper-field);
+}
+
+.sw select.oc-input option:disabled {
+  color: var(--ink-3);
+}
+
+.sw textarea.oc-input {
+  height: auto;
+  min-height: 72px;
+  padding: var(--s-2) var(--s-3);
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
+  resize: vertical;
+}
+
+.sw .oc-btn {
+  font-size: var(--fs-13);
+}
+
+.sw .oc-btn > .fas {
+  font-size: 12px;
+}
+
+/* Inline save state under a control */
+.sw-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--ink-2);
+}
+
+.sw-status:empty {
+  display: none;
+}
+
+.sw-status > .fas {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.sw-status.is-ok {
+  color: var(--ink);
+}
+
+.sw-status.is-error {
+  color: var(--red-ink);
+}
+
+.sw-status.is-warn {
+  color: var(--warn-ink);
+}
+
+.sw-count {
+  font: 500 var(--fs-11) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+.sw-count.is-near {
+  color: var(--warn-ink);
+}
+
+/* Segmented choice built from real radio buttons: the chosen side is inked. */
+.sw-segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--paper-2);
+  border: 1px solid var(--sw-field-edge);
+  border-radius: var(--r-2);
+}
+
+.sw-segmented label {
+  position: relative;
+}
+
+.sw-segmented input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sw-segmented span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-13);
+  font-weight: 500;
+  color: var(--ink-2);
+  border-radius: var(--r-1);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.sw-segmented span > .fas {
+  font-size: 12px;
+}
+
+.sw-segmented span:hover {
+  color: var(--ink);
+  background: var(--paper-3);
+}
+
+.sw-segmented input:checked + span {
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--ink);
+}
+
+.sw-segmented input:disabled + span {
+  cursor: default;
+}
+
+.sw-segmented input:disabled:not(:checked) + span {
+  color: var(--ink-3);
+  background: transparent;
+}
+
+.sw-segmented input:focus-visible + span {
+  box-shadow: var(--focus);
+}
+
+/* ---------- Choice tiles: providers and app icons ---------- */
+
+.sw-providers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--s-2);
+  padding: var(--s-4) 0;
+}
+
+.sw-provider,
+.sw-icon {
+  position: relative;
+  color: var(--ink);
+  background: var(--paper-field);
+  border: 1px solid var(--sw-field-edge);
+  border-radius: var(--r-3);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+
+.sw-provider:hover,
+.sw-icon:hover {
+  background: var(--paper-2);
+  border-color: var(--ink-2);
+}
+
+/* Chosen: an ink edge (2 px) and a red-pencil tick in the corner. */
+.sw-provider[aria-checked="true"],
+.sw-icon[aria-checked="true"] {
+  background: var(--paper-field);
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink), var(--shadow-key);
+}
+
+.sw-provider:focus-visible,
+.sw-icon:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.sw-provider:disabled {
+  cursor: progress;
+}
+
+.sw-provider {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-1);
+  min-height: 60px;
+  padding: 10px var(--s-3);
+  text-align: left;
+}
+
+.sw-provider-name {
+  padding-right: 18px;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.sw-provider-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--s-2);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  line-height: var(--lh-16);
+  color: var(--ink-2);
+}
+
+.sw-provider-meta .is-ok {
+  color: var(--ink);
+}
+
+.sw-provider-meta .is-missing {
+  color: var(--warn-ink);
+}
+
+.sw-provider-check {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  display: none;
+  width: 14px;
+  height: 14px;
+  background-color: var(--red);
+  -webkit-mask: var(--icon-tick) center / contain no-repeat;
+  mask: var(--icon-tick) center / contain no-repeat;
+}
+
+.sw-provider-check > .fas {
+  display: none;
+}
+
+.sw-provider[aria-checked="true"] .sw-provider-check,
+.sw-icon[aria-checked="true"] .sw-provider-check {
+  display: block;
+}
+
+.sw-icons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-2);
+  padding: var(--s-4) 0;
+}
+
+.sw-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-2) var(--s-3);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.sw-icon[aria-checked="true"] {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.sw-icon img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+}
+
+.sw-icon .sw-provider-check {
+  top: 7px;
+  right: 7px;
+}
+
+/* ---------- Saved key ---------- */
+
+.sw-key-saved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.sw-key-mask {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 32px;
+  padding: 0 var(--s-3);
+  font: 500 var(--fs-12) / 1 var(--font-mono);
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  background: var(--paper-2);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-2);
+}
+
+.sw-key-mask > .fas {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.sw-key-input {
+  position: relative;
+  flex: 1;
+  min-width: 180px;
+}
+
+.sw-key-input .oc-input {
+  padding-right: 38px;
+}
+
+.sw-key-reveal.oc-icon-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 28px;
+  height: 28px;
+}
+
+/* ---------- Status blocks ---------- */
+
+.sw-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
+}
+
+.sw-state-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sw-state-text strong {
+  font-weight: 600;
+}
+
+.sw-state-sub {
+  display: block;
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.sw-state-sub.is-ok {
+  color: var(--ink);
+}
+
+.sw-state-icon {
+  flex: none;
+  width: 14px;
+  font-size: 14px;
+  text-align: center;
+  color: var(--ink);
+}
+
+.fa-spin-fast {
+  animation: fa-spin 0.9s linear infinite;
+}
+
+/* ---------- Local voice models ---------- */
+
+.sw-models {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+.sw-models-empty {
+  color: var(--ink-2);
+}
+
+.sw-model {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px var(--s-4);
+  padding: var(--s-3) var(--s-3) var(--s-3) 14px;
+  background: var(--paper-field);
+  border: 1px solid var(--sw-field-edge);
+  border-radius: var(--r-3);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+
+.sw-model.is-selected {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink), var(--shadow-key);
+}
+
+.sw-model:has(input:focus-visible) {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.sw-model-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  min-width: 0;
+  cursor: pointer;
+}
+
+.sw-model-pick:has(input:disabled) {
+  cursor: default;
+}
+
+.sw-model-pick input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Radio ring; filled with ink and a paper check once the model is in use.
+   Dashed while the model is not downloaded yet (it cannot be chosen). */
+.sw-model-ring {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1.5px solid var(--ink-2);
+  border-radius: 50%;
+  transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+.sw-model-pick input:disabled + .sw-model-ring {
+  border-style: dashed;
+  border-color: var(--ink-3);
+}
+
+.sw-model-pick input:checked + .sw-model-ring {
+  border-color: var(--ink);
+  background: var(--ink) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23f6f1e7' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center;
+}
+
+.sw-model-pick input:checked:disabled + .sw-model-ring {
+  border-style: solid;
+  border-color: var(--ink-2);
+  background: transparent;
+}
+
+.sw-model-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sw-model-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  font: 600 var(--fs-15) / var(--lh-20) var(--font-display);
+  font-optical-sizing: auto;
+  color: var(--ink);
+}
+
+.sw-model-tag.oc-chip {
+  height: 18px;
+  padding: 0 6px;
+  font: 600 10px / 1 var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--red-ink);
+  background: transparent;
+  border-color: var(--red-ring);
+}
+
+.sw-model-desc {
+  font-size: var(--fs-12);
+  line-height: 18px;
+  color: var(--ink-2);
+}
+
+.sw-model-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.sw-model-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.sw-model-state:empty {
+  display: none;
+}
+
+.sw-model-state.is-ok {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.sw-model-state > .fas {
+  font-size: 12px;
+}
+
+.sw-model-progress {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+/* Download meter: an ink bar filling a ruled track. */
+.sw-meter {
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  background: var(--paper-3);
+  border-radius: var(--r-round);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.sw-meter > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--ink);
+  border-radius: inherit;
+  transition: width 240ms var(--ease);
+}
+
+.sw-model-progress-text {
+  font: 500 var(--fs-11) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.sw-model > .sw-status {
+  grid-column: 1 / -1;
+}
+
+/* ---------- Tables ---------- */
+
+.sw-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
+}
+
+.sw-table th {
+  padding: var(--s-3) var(--s-3) var(--s-1) 0;
+  font: 600 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--rule-2);
+}
+
+.sw-table td {
+  height: 44px;
+  padding: var(--s-1) var(--s-3) var(--s-1) 0;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--rule);
+}
+
+.sw-table td:last-child,
+.sw-table th:last-child {
+  padding-right: 0;
+}
+
+.sw-table .sw-keys {
+  white-space: nowrap;
+}
+
+.sw-table .oc-kbd-group {
+  height: 20px;
+  padding: 0 6px;
+  font-size: var(--fs-12);
+}
+
+.sw-scope {
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.sw-scope.is-global {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.sw-scope.is-warn {
+  color: var(--warn-ink);
+  white-space: normal;
+}
+
+.sw-here {
+  margin-left: var(--s-2);
+}
+
+/* ---------- Lists: on ruled lines ---------- */
+
+/* One rule every 28 px, 5 px under the baseline, as on the answer card. */
+.sw-list {
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--s-1);
+  list-style: none;
+  background-image: linear-gradient(to bottom, transparent 23px, var(--rule) 23px, var(--rule) 24px, transparent 24px);
+  background-size: 100% var(--lh-rule);
+  background-position: 0 var(--s-1);
+  background-origin: border-box;
+}
+
+.sw-list li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: var(--s-3);
+  font-size: var(--fs-13);
+  line-height: var(--lh-rule);
+  color: var(--ink-2);
+}
+
+.sw-list li > .fas {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+  justify-self: center;
+}
+
+.sw-list strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ---------- About ---------- */
+
+.sw-about-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-5) 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.sw-about-hero .oc-mark {
+  --s: 44px;
+}
+
+.sw-about-name {
+  font: 600 var(--fs-24) / var(--lh-32) var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.012em;
+}
+
+.sw-about-sub {
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
+  color: var(--ink-2);
+}
+
+.sw-defs {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+}
+
+.sw-defs dt,
+.sw-defs dd {
+  padding: var(--s-2) 0;
+  font-size: var(--fs-13);
+  line-height: var(--lh-20);
+  border-bottom: 1px solid var(--rule);
+}
+
+.sw-defs dt {
+  padding-right: var(--s-5);
+  color: var(--ink-2);
+}
+
+.sw-defs dd {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.sw-defs dd.sw-mono {
+  font-size: var(--fs-12);
+}
+
+/* ---------- Search ---------- */
+
+.sw-empty {
+  padding: var(--s-12) var(--s-4);
+  text-align: center;
+  font: italic 500 var(--fs-15) / var(--lh-24) var(--font-display);
+  color: var(--ink-2);
+}
+
+.sw-empty > .fas {
+  display: block;
+  margin: 0 auto var(--s-3);
+  font-size: 20px;
+  color: var(--ink-3);
+}
+
+.sw-empty strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Search hides rows that do not match, and the notes around them. */
+.sw-filtered,
+.is-searching .sw-section .sw-banner,
+.is-searching .sw-intro {
+  display: none !important;
+}
+
+/* Search also lists settings hidden by the current provider choice
+   (data-gate). They show dimmed and inactive under a note that says
+   which provider they belong to, with a button to switch. */
+.sw-group.sw-gate-revealed[hidden] {
+  display: block !important;
+}
+
+.sw-row.sw-gate-revealed[hidden] {
+  display: grid !important;
+}
+
+.sw-gate-revealed > [inert] {
+  opacity: 0.5;
+}
+
+.sw-gate-revealed.sw-gate-revealed--note-only > [inert] {
+  display: none !important;
+}
+
+.sw-gate-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) 10px;
+  margin: var(--s-3) 0 0;
+  padding: var(--s-2) var(--s-3) var(--s-2) var(--s-5);
+}
+
+.sw-row > .sw-gate-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.sw-gate-hint > .fas {
+  font-size: 13px;
+  color: var(--info-ink);
+}
+
+.sw-gate-hint-text {
+  flex: 1;
+  min-width: 180px;
+}
+
+/* The setting a search result jumps to. */
+.sw-flash {
+  animation: sw-flash 1.4s var(--ease) 1;
+}
+
+@keyframes sw-flash {
+  0%, 40% { background: var(--paper-3); box-shadow: 0 0 0 6px var(--paper-3); }
+  100% { background: transparent; box-shadow: 0 0 0 6px transparent; }
+}
+
+.sw-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 780px) {
+  .sw {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  .sw-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sw-scroll {
+    padding: var(--s-5) var(--s-5) var(--s-8);
+  }
+
+  .sw-head {
+    padding-left: var(--s-5);
+  }
+}

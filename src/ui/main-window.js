@@ -459,7 +459,7 @@ class MainWindowUI {
             this.languageSelect.value = 'cpp';
             this.fitLanguageSelect();
 
-            // Manrope is a bundled web font (font-display: swap), so that first
+            // The UI fonts are bundled web fonts (font-display: swap), so that first
             // measurement can use fallback metrics. Measure again once it loads.
             if (document.fonts && document.fonts.ready) {
                 document.fonts.ready.then(() => this.updateLanguageSelectWidth());

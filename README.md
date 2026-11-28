@@ -385,4 +385,4 @@ Planned: export of conversation history to Markdown or PDF.
 
 Released under the Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-Cuewell is maintained by Ankit Chaudhary. It is a modified version of [OpenCluely](https://github.com/TechyCSR/OpenCluely) by TechyCSR, licensed under the Apache License 2.0. Bundled fonts (Manrope, JetBrains Mono) are under the SIL Open Font License 1.1. UI and structure were inspired by [Vysper](https://github.com/varun-singhh/Vysper) by varun-singhh.
+Cuewell is maintained by Ankit Chaudhary. It is a modified version of [OpenCluely](https://github.com/TechyCSR/OpenCluely) by TechyCSR, licensed under the Apache License 2.0. Bundled fonts (Fraunces, Instrument Sans, JetBrains Mono) are under the SIL Open Font License 1.1, and the Lucide icons are under the ISC License. UI and structure were inspired by [Vysper](https://github.com/varun-singhh/Vysper) by varun-singhh.
