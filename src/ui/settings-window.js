@@ -1716,6 +1716,8 @@
                     works = el('span', { class: 'sw-scope is-warn' }, 'Not working: another app uses these keys');
                 } else if (s.scope === 'global') {
                     works = el('span', { class: 'sw-scope is-global' }, 'Everywhere');
+                } else if (s.scope === 'answer') {
+                    works = el('span', { class: 'sw-scope is-global' }, 'Everywhere, while an answer is being written');
                 } else {
                     works = el('span', { class: 'sw-scope' }, 'When Cuewell has focus');
                 }

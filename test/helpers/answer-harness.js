@@ -49,6 +49,33 @@ async function run(root) {
   const { electron, handlers } = createElectronMock({ userData, appData: path.join(root, 'appData'), appPath: ROOT });
   installElectronMock(electron);
 
+  // Global shortcuts as the system sees them: what this app holds now, and
+  // every call main.js made. `heldElsewhere` is an accelerator another app
+  // owns, so registering it fails.
+  const STOP = 'CommandOrControl+Shift+X';
+  const owned = new Map();
+  let shortcutCalls = [];
+  let heldElsewhere = null;
+  Object.assign(electron.globalShortcut, {
+    register(accelerator, handler) {
+      shortcutCalls.push(['register', accelerator]);
+      if (accelerator === heldElsewhere || owned.has(accelerator)) return false;
+      owned.set(accelerator, handler);
+      return true;
+    },
+    unregister(accelerator) {
+      shortcutCalls.push(['unregister', accelerator]);
+      owned.delete(accelerator);
+    },
+    unregisterAll() {
+      shortcutCalls.push(['unregisterAll']);
+      owned.clear();
+    },
+    isRegistered: (accelerator) => owned.has(accelerator),
+  });
+  const stopCalls = () => shortcutCalls.filter((c) => c[1] === STOP || c[0] === 'unregisterAll').map((c) => c[0]);
+  const stopHeld = () => owned.has(STOP);
+
   // main.js keeps its controller to itself. Its constructor assigns
   // this._utteranceCoalesceMs, which this accessor catches once to learn
   // the instance, then turns into a plain property.
@@ -143,14 +170,30 @@ async function run(root) {
     memory: memory(),
     started: startedIds(),
     fetchCalls: fetch ? fetch.calls.map((c) => ({ aborted: c.aborted, sentAfterAbort: c.sentAfterAbort })) : [],
+    stopShortcut: stopCalls(),
+    stopShortcutHeld: stopHeld(),
     ...extra,
   });
   const reset = () => {
     sessionManager.clear();
     events = [];
+    shortcutCalls = [];
+  };
+  const stopInfo = () => {
+    const entry = controller.getSettingsInfo().shortcuts.find((s) => s.accelerator === STOP);
+    return entry ? { scope: entry.scope, registered: entry.registered, action: entry.action } : null;
   };
 
   const scenarios = {};
+
+  // Startup: the global shortcuts, without the Stop shortcut.
+  controller.setupGlobalShortcuts();
+  const startupInfo = controller.getSettingsInfo().shortcuts;
+  scenarios.startup = {
+    registered: shortcutCalls.filter((c) => c[0] === 'register').map((c) => c[1]),
+    shortcuts: startupInfo.map((s) => ({ accelerator: s.accelerator, scope: s.scope, registered: s.registered })),
+    stop: stopInfo(),
+  };
 
   // Typed chat: a second message while the first answer streams.
   reset();
@@ -258,6 +301,124 @@ async function run(root) {
   await sleep(120);
   await waitForFinal(first);
   scenarios.shortUtterance = snapshot({ first });
+
+  // The Stop shortcut through one answer's life, and the next answer's.
+  const terminal = (id) => events.some((e) => idOf(e) === id &&
+    ((e.to === 'chat' && e.channel === 'transcription-llm-response') || e.channel === 'llm-error'));
+  const idOf = (e) => e.data && (e.data.messageId || (e.data.metadata && e.data.metadata.messageId));
+  const lifecycle = {};
+  reset();
+  useProvider();
+  lifecycle.idle = stopHeld();
+  await ipc('send-chat-message', 'chat', 'What is a heap?');
+  [first] = startedIds();
+  await waitForChunks(first, 2);
+  lifecycle.firstStreaming = stopHeld();
+  await ipc('send-chat-message', 'chat', 'And a stack?');
+  second = startedIds()[1];
+  await waitForChunks(second, 2);
+  lifecycle.replacedStreaming = stopHeld();
+  lifecycle.callsWhileReplacing = stopCalls();
+  await waitForFinal(second);
+  await sleep(20);
+  lifecycle.finished = stopHeld();
+  lifecycle.callsAfterFinish = stopCalls();
+
+  // Stop button.
+  reset();
+  await ipc('send-chat-message', 'chat', 'What is a trie?');
+  [first] = startedIds();
+  await waitForChunks(first, 2);
+  lifecycle.nextAnswerStreaming = stopHeld();
+  await ipc('stop-answer', 'chat', first);
+  await sleep(20);
+  lifecycle.afterStopButton = stopHeld();
+  lifecycle.callsStopButton = stopCalls();
+
+  // The shortcut itself, as the system would call it.
+  reset();
+  await ipc('send-chat-message', 'chat', 'What is a B-tree?');
+  [first] = startedIds();
+  await waitForChunks(first, 2);
+  owned.get(STOP)();
+  await sleep(20);
+  lifecycle.shortcutStopped = events.some((e) => e.channel === 'transcription-llm-response' && idOf(e) === first && e.data.stopped === true);
+  lifecycle.afterShortcut = stopHeld();
+  lifecycle.callsShortcut = stopCalls();
+
+  // The provider fails part way: an error ends the answer.
+  reset();
+  const errorLogsFrom = logs.length;
+  llmService.provider = new OpenAICompatibleProvider({
+    apiKey: 'test-key', baseURL: 'http://127.0.0.1:9/v1', label: 'OpenAI', timeout: 5000, idleTimeoutMs: 5000,
+    clientOptions: {
+      // A rejected key: not retried.
+      fetch: async () => {
+        await sleep(80);
+        return new Response(JSON.stringify({ error: { message: 'Incorrect API key provided', type: 'invalid_request_error' } }),
+          { status: 401, headers: { 'content-type': 'application/json' } });
+      },
+    },
+  });
+  await ipc('send-chat-message', 'chat', 'What is a graph?');
+  [first] = startedIds();
+  await sleep(20);
+  lifecycle.failingStreaming = stopHeld();
+  await waitFor(() => terminal(first), 'the failed answer to end');
+  await sleep(20);
+  lifecycle.afterError = stopHeld();
+  lifecycle.callsError = stopCalls();
+  logs.splice(errorLogsFrom); // the failure's own error logs are expected
+
+  // Another app owns the keys: both answers work, the failure is logged
+  // once, and nothing is unregistered.
+  reset();
+  useProvider({ intervalMs: 5 });
+  heldElsewhere = STOP;
+  const warnsFrom = logs.length;
+  for (const question of ['What is a queue?', 'What is a deque?']) {
+    await ipc('send-chat-message', 'chat', question);
+    const id = startedIds().slice(-1)[0];
+    await waitForFinal(id);
+  }
+  await sleep(20);
+  lifecycle.heldFinals = startedIds().filter((id) => events.some((e) => e.channel === 'transcription-llm-response' &&
+    idOf(e) === id && e.to !== 'llmResponse' && !e.data.stopped)).length;
+  lifecycle.heldCalls = stopCalls();
+  lifecycle.heldWarnings = logs.slice(warnsFrom).filter((l) => l.level === 'warn' && /Stop shortcut/.test(l.message)).length;
+  lifecycle.heldInfo = stopInfo();
+  // The other app lets go: the next answer gets the shortcut again.
+  heldElsewhere = null;
+  reset();
+  await ipc('send-chat-message', 'chat', 'What is a ring buffer?');
+  [first] = startedIds();
+  await waitForChunks(first, 2);
+  lifecycle.releasedStreaming = stopHeld();
+  await waitForFinal(first);
+  await sleep(20);
+  lifecycle.releasedInfo = stopInfo();
+  lifecycle.releasedAfter = stopHeld();
+
+  // Quitting while an answer is written: everything is released, and the
+  // answer ending afterwards registers nothing.
+  reset();
+  useProvider();
+  await ipc('send-chat-message', 'chat', 'What is a skip list?');
+  [first] = startedIds();
+  await waitForChunks(first, 2);
+  lifecycle.beforeQuit = stopHeld();
+  controller.isQuitting = true; // onBeforeQuit sets this first
+  try {
+    controller.onWillQuit();
+  } catch (error) {
+    lifecycle.quitError = error.message;
+  }
+  lifecycle.afterQuit = stopHeld();
+  await waitForFinal(first);
+  await sleep(20);
+  lifecycle.afterQuitAnswerEnded = stopHeld();
+  lifecycle.callsQuit = stopCalls();
+  scenarios.stopShortcut = lifecycle;
 
   return {
     scenarios,
