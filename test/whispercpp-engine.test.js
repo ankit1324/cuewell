@@ -573,5 +573,16 @@ describe('WhisperCppEngine privacy', () => {
     assert.equal(cleanTranscript(' [BLANK_AUDIO] '), '');
     assert.equal(cleanTranscript('(music) hello  [ Silence ]  world ♪'), 'hello world');
     assert.equal(cleanTranscript(null), '');
+    assert.equal(cleanTranscript('[MUSIC] next [ MUSIC PLAYING ] one (upbeat music)'), 'next one');
+    assert.equal(cleanTranscript('(coughs) yes (clears throat) [inaudible] ok [Sound effect]'), 'yes ok');
+  });
+
+  it('cleanTranscript keeps brackets and parentheses that are spoken code', () => {
+    assert.equal(cleanTranscript('arr[i] plus a[0]'), 'arr[i] plus a[0]');
+    assert.equal(cleanTranscript('dp[i][j] is O(n log n)'), 'dp[i][j] is O(n log n)');
+    assert.equal(cleanTranscript('f(x) and (n) items in list(range(10))'), 'f(x) and (n) items in list(range(10))');
+    assert.equal(cleanTranscript('map[key] or [1, 2, 3] or [left, right]'), 'map[key] or [1, 2, 3] or [left, right]');
+    // A marker word glued to a name is code, not a marker.
+    assert.equal(cleanTranscript('arr[music] and sounds(x)'), 'arr[music] and sounds(x)');
   });
 });

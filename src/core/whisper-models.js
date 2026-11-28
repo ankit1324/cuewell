@@ -35,7 +35,10 @@ const MODELS = Object.freeze([
 ]);
 
 const DEFAULT_MODEL_ID = 'small-q5_1';
-const DOWNLOAD_BASE_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/';
+// Pinned to a commit of the model repository, not "main", so the files the
+// catalog's sizes and SHA-256 values describe cannot change under us.
+const MODEL_REPO_COMMIT = '5359861c739e955e79d9a303bcbc70fb988958b1';
+const DOWNLOAD_BASE_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/${MODEL_REPO_COMMIT}/`;
 const MAX_REDIRECTS = 5;
 // No bytes for this long: treat the connection as dead.
 const IDLE_TIMEOUT_MS = 30000;
@@ -570,6 +573,7 @@ module.exports = {
   MODELS,
   DEFAULT_MODEL_ID,
   DOWNLOAD_BASE_URL,
+  MODEL_REPO_COMMIT,
   getModel,
   isModelId,
   modelPath,

@@ -282,8 +282,23 @@ async function localFetch(url, init = {}) {
 }
 
 // Markers whisper.cpp writes for silence or noise ("[BLANK_AUDIO]",
-// "[ Silence ]", "(music)"), which are not speech.
-const NON_SPEECH_RE = /\[[^\]]{0,40}\]|\((?:[^)]{0,20})(?:music|silence|blank|noise|applause|laugh|inaudible)(?:[^)]{0,20})\)|[♪♫]+/gi;
+// "[ Silence ]", "[MUSIC]", "(upbeat music)", "(coughs)"), which are not
+// speech. Only a bracket or parenthesis that holds nothing but words and a
+// known non-speech word is removed, and not one glued to a name before it, so
+// spoken code such as "arr[i]", "a[0]", "f(x)" or "(n log n)" is kept.
+const NON_SPEECH_WORDS = [
+  'blank_audio', 'blank audio', 'silence', 'silent', 'music', 'musical', 'noise', 'noises',
+  'applause', 'laugh', 'laughs', 'laughing', 'laughter', 'inaudible', 'no speech',
+  'sound', 'sounds', 'beep', 'beeping', 'typing', 'cough', 'coughs', 'coughing',
+  'sigh', 'sighs', 'sighing', 'breath', 'breathing', 'breathes', 'clears throat',
+  'static', 'pause', 'click', 'clicking', 'clicks', 'keyboard', 'rustling', 'wind',
+];
+const NON_SPEECH_RE = new RegExp(
+  String.raw`(?<![\w\])])[\[(]\s*(?:[a-z_ -]{0,30}\s)?(?:` +
+  NON_SPEECH_WORDS.map((w) => w.replace(/ /g, '\\s+')).join('|') +
+  String.raw`)(?:\s[a-z_ -]{0,30})?\s*[\])]|[♪♫]+`,
+  'gi',
+);
 
 function cleanTranscript(text) {
   return String(text || '')
