@@ -10,6 +10,14 @@
 //   FAKE_WHISPER_TEXT     transcript to return (default "hello world")
 //   FAKE_WHISPER_MARKER   file used by the CRASH_ONCE audio below
 //   FAKE_WHISPER_LOAD_MS  how long /health answers 503 ("loading model")
+//   FAKE_WHISPER_BIND_DELAY_MS  wait this long before binding the port
+//   FAKE_WHISPER_NO_BIND  "1": keep running but never bind or print anything,
+//                         like a server still loading its model
+//
+// Binding works like whisper-server b5907: on success it prints
+// "whisper server listening at http://<host>:<port>" on stdout (and logs a
+// "listening" event); on failure it prints "couldn't bind to server socket:
+// hostname=<host> port=<port>" on stderr and exits with code 1.
 //
 // The uploaded audio can carry a directive instead of WAV data:
 //   "delay:<ms>"   answer after <ms>
@@ -118,5 +126,20 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(port, host);
+function bind() {
+  server.once('error', (error) => {
+    process.stderr.write(`\ncouldn't bind to server socket: hostname=${host} port=${port}\n\n`);
+    log({ event: 'bind-failed', port, code: error.code });
+    process.exit(1);
+  });
+  server.listen(port, host, () => {
+    log({ event: 'listening', port });
+    process.stdout.write(`\nwhisper server listening at http://${host}:${port}\n\n`);
+  });
+}
+
+const bindDelayMs = Number(process.env.FAKE_WHISPER_BIND_DELAY_MS || 0);
+if (process.env.FAKE_WHISPER_NO_BIND === '1') setInterval(() => {}, 1000); // stay alive
+else if (bindDelayMs > 0) setTimeout(bind, bindDelayMs);
+else bind();
 process.on('SIGTERM', () => process.exit(0));

@@ -8,6 +8,8 @@ const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
+const http = require('node:http');
+const net = require('node:net');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
@@ -22,7 +24,9 @@ process.env.TMP = TMP;
 process.env.TEMP = TMP;
 
 const WhisperCppEngine = require('../src/services/whispercpp-engine.service');
-const { cleanTranscript } = require('../src/services/whispercpp-engine.service');
+const {
+  cleanTranscript, parseNetstatListeners, parseLsofPids, tcpListenerPids,
+} = require('../src/services/whispercpp-engine.service');
 
 const FAKE_SERVER = path.join(__dirname, 'helpers', 'fake-whisper-server.js');
 const TRANSCRIPT = 'SECRET-TRANSCRIPT-do-not-log';
@@ -37,12 +41,58 @@ for (const level of ['debug', 'info', 'warn', 'error']) {
 const allChildren = [];
 let caseNo = 0;
 
+// Ports held by a "foreign" program in a test (this test process), as the
+// listener lookup below reports them.
+const foreignListeners = new Map();
+const foreignServers = new Set();
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** A local HTTP server that answers 200 {"status":"ok"} to everything and records the requests. */
+async function foreignResponder(port, { visible = true } = {}) {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    requests.push({ method: req.method, url: req.url });
+    req.resume();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', text: 'from the foreign responder' }));
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+  if (visible) foreignListeners.set(port, process.pid);
+  const responder = {
+    requests,
+    close: () => {
+      foreignListeners.delete(port);
+      foreignServers.delete(responder);
+      const closed = new Promise((resolve) => server.close(resolve));
+      server.closeAllConnections(); // fetch keeps connections alive
+      return closed;
+    },
+  };
+  foreignServers.add(responder);
+  return responder;
+}
+
 /**
  * A fake install: a placeholder whisper-server file, a model file, a log
  * file the fake server writes to, and a spawnFn that runs the fake server
- * with node instead of the placeholder.
+ * with node instead of the placeholder. `spawnEnv(n)` adds environment for
+ * the n-th spawn (0-based); `onSpawn(args, n)` runs before it.
+ *
+ * The engine's listener lookup is answered from the fake servers' own
+ * "listening" log lines and the foreign responders above, like netstat would.
  */
-function setup(t, { modelContent = 'ggml', engineOptions = {}, env = {} } = {}) {
+function setup(t, { modelContent = 'ggml', engineOptions = {}, env = {}, spawnEnv, onSpawn } = {}) {
   caseNo += 1;
   const dir = path.join(ROOT, `case-${caseNo}`);
   const binDir = path.join(dir, 'bin');
@@ -58,6 +108,7 @@ function setup(t, { modelContent = 'ggml', engineOptions = {}, env = {} } = {}) 
 
   const spawns = [];
   const spawnFn = (command, args, options) => {
+    if (onSpawn) onSpawn(args, spawns.length);
     const child = spawn(process.execPath, [FAKE_SERVER, ...args], {
       ...options,
       env: {
@@ -66,6 +117,7 @@ function setup(t, { modelContent = 'ggml', engineOptions = {}, env = {} } = {}) 
         FAKE_WHISPER_TEXT: TRANSCRIPT,
         FAKE_WHISPER_MARKER: marker,
         ...env,
+        ...(spawnEnv ? spawnEnv(spawns.length) : {}),
       },
     });
     spawns.push({ command, args, options, child });
@@ -77,6 +129,17 @@ function setup(t, { modelContent = 'ggml', engineOptions = {}, env = {} } = {}) 
     urls.push(String(url));
     return fetch(url, init);
   };
+  const events = () => {
+    if (!fs.existsSync(logFile)) return [];
+    return fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  };
+  const listenerPidsFn = async (port) => {
+    const pids = events()
+      .filter((e) => e.event === 'listening' && e.port === port && isAlive(e.pid))
+      .map((e) => e.pid);
+    if (foreignListeners.has(port)) pids.push(foreignListeners.get(port));
+    return pids;
+  };
 
   const engine = new WhisperCppEngine({
     serverPath,
@@ -87,15 +150,12 @@ function setup(t, { modelContent = 'ggml', engineOptions = {}, env = {} } = {}) 
     logger,
     spawnFn,
     fetchFn,
+    listenerPidsFn,
     ...engineOptions,
   });
   t.after(() => engine.close());
 
-  const events = () => {
-    if (!fs.existsSync(logFile)) return [];
-    return fs.readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  };
-  return { engine, spawns, urls, events, serverPath, modelPath, marker, dir };
+  return { engine, spawns, urls, events, listenerPidsFn, serverPath, modelPath, marker, dir };
 }
 
 function exited(child) {
@@ -111,6 +171,7 @@ async function waitFor(check, ms = 3000) {
 }
 
 after(async () => {
+  for (const responder of [...foreignServers]) await responder.close();
   for (const child of allChildren) {
     if (!exited(child)) {
       child.kill('SIGKILL');
@@ -334,6 +395,156 @@ describe('WhisperCppEngine start errors', { concurrency: true }, () => {
       assert.match(error.message, /not allowed to run/);
       return true;
     });
+  });
+});
+
+describe('WhisperCppEngine proves the listener is its own child', { concurrency: true }, () => {
+  const portOf = (spawn) => Number(spawn.args[spawn.args.indexOf('--port') + 1]);
+
+  it('a foreign responder on the port and a child that exits on bind failure: retries on a new port, no audio to the foreign one', async (t) => {
+    let foreign = null;
+    let ready = null;
+    const { engine, spawns, events } = setup(t, {
+      // The child binds late, so the foreign responder holds the port first.
+      // The lookup does not show it (visible: false): only the child's bind
+      // failure and exit stop this start.
+      env: { FAKE_WHISPER_BIND_DELAY_MS: '300' },
+      onSpawn: (args, n) => {
+        if (n === 0) ready = foreignResponder(Number(args[args.indexOf('--port') + 1]), { visible: false });
+      },
+    });
+    t.after(async () => { if (foreign) await foreign.close(); });
+    const warm = engine.warmup();
+    await waitFor(() => ready);
+    foreign = await ready;
+    await warm;
+
+    assert.equal(spawns.length, 2, 'one retry');
+    assert.equal(exited(spawns[0].child), true, 'the first child exited on its bind failure');
+    assert.notEqual(portOf(spawns[1]), portOf(spawns[0]), 'the retry uses a new port');
+    assert.ok(events().some((e) => e.event === 'bind-failed' && e.port === portOf(spawns[0])));
+
+    assert.equal((await engine.transcribe(Buffer.from('audio'))).text, TRANSCRIPT);
+    assert.deepEqual(foreign.requests, [], 'nothing, not even /health with the secret path, went to the foreign responder');
+    const requests = events().filter((e) => e.event === 'inference');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].pid, spawns[1].child.pid, 'the audio went to the retried child');
+  });
+
+  it('a foreign listener on the port while the child runs is never trusted', async (t) => {
+    let foreign = null;
+    let ready = null;
+    const { engine, spawns, events } = setup(t, {
+      // The first child stays up without a listener of its own.
+      spawnEnv: (n) => (n === 0 ? { FAKE_WHISPER_NO_BIND: '1' } : {}),
+      onSpawn: (args, n) => {
+        if (n === 0) ready = foreignResponder(Number(args[args.indexOf('--port') + 1]));
+      },
+    });
+    t.after(async () => { if (foreign) await foreign.close(); });
+    const warm = engine.warmup();
+    await waitFor(() => ready);
+    foreign = await ready;
+    await warm;
+
+    assert.equal(spawns.length, 2, 'stopped and retried');
+    await waitFor(() => exited(spawns[0].child));
+    assert.ok(logs.some((l) => /Another program is listening/.test(l.message)));
+    assert.equal((await engine.transcribe(Buffer.from('audio'))).text, TRANSCRIPT);
+    assert.deepEqual(foreign.requests, [], 'no request at all to the foreign responder');
+    assert.equal(events().filter((e) => e.event === 'inference')[0].pid, spawns[1].child.pid);
+  });
+
+  it('a second foreign hit on the retry port gives up with BIND_FAILED', async (t) => {
+    const foreigns = [];
+    const pending = [];
+    const { engine, spawns } = setup(t, {
+      env: { FAKE_WHISPER_BIND_DELAY_MS: '300' },
+      onSpawn: (args) => pending.push(foreignResponder(Number(args[args.indexOf('--port') + 1]), { visible: false })),
+    });
+    t.after(async () => { for (const f of foreigns) await f.close(); });
+    const warm = engine.warmup();
+    await assert.rejects(warm, { code: 'BIND_FAILED', userFacing: true });
+    foreigns.push(...(await Promise.all(pending)));
+    assert.equal(spawns.length, 2, 'one retry only');
+    assert.equal(engine.isRunning(), false);
+    for (const f of foreigns) assert.deepEqual(f.requests, []);
+  });
+
+  it('a running, listening child gets no request and is not ready until it is shown to own the listener', async (t) => {
+    let proven = false;
+    let checks = 0;
+    const ctx = setup(t, {
+      engineOptions: {
+        listenerPidsFn: async (port) => {
+          checks += 1;
+          return proven ? ctx.listenerPidsFn(port) : [];
+        },
+      },
+    });
+    const { engine, spawns, events, urls } = ctx;
+    let done = false;
+    const warm = engine.warmup().then((r) => { done = true; return r; });
+    await waitFor(() => checks >= 3, 5000);
+    assert.equal(done, false, 'not ready while the listener is unproven');
+    assert.equal(exited(spawns[0].child), false);
+    assert.ok(events().some((e) => e.event === 'listening'), 'the child printed its listening line');
+    assert.deepEqual(urls, [], 'not even /health is sent before the proof');
+
+    proven = true;
+    const result = await warm;
+    assert.equal(result.ready, true);
+    assert.equal(spawns.length, 1, 'the same child, no restart');
+    assert.equal((await engine.transcribe(Buffer.from('a'))).text, TRANSCRIPT);
+  });
+
+  it('a listener check that cannot run fails the start closed, without a retry', async (t) => {
+    let checks = 0;
+    const { engine, spawns, urls } = setup(t, {
+      engineOptions: { listenerPidsFn: async () => { checks += 1; throw new Error('netstat was not found'); } },
+    });
+    await assert.rejects(engine.warmup(), { code: 'LISTENER_UNVERIFIED', userFacing: true });
+    assert.equal(checks, 2, 'one more try after a failed check');
+    assert.deepEqual(urls, []);
+    assert.equal(spawns.length, 1);
+    await waitFor(() => exited(spawns[0].child));
+    assert.equal(engine.isRunning(), false);
+  });
+
+  it('parses netstat -ano listeners for one port, in any language', () => {
+    const output = [
+      '',
+      'Active Connections',
+      '',
+      '  Proto  Local Address          Foreign Address        State           PID',
+      '  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1060',
+      '  TCP    127.0.0.1:51234        0.0.0.0:0              LISTENING       4242',
+      '  TCP    127.0.0.1:51234        127.0.0.1:51300        ESTABLISHED     4242',
+      '  TCP    127.0.0.1:51300        127.0.0.1:51234        ESTABLISHED     9000',
+      '  TCP    0.0.0.0:51234          0.0.0.0:0              ABHÖREN         7777',
+      '  TCP    [::]:51234             [::]:0                 LISTENING       8888',
+      '  TCP    127.0.0.1:512345       0.0.0.0:0              LISTENING       1',
+      '  UDP    127.0.0.1:51234        *:*                                    5555',
+    ].join('\r\n');
+    assert.deepEqual(parseNetstatListeners(output, 51234).sort(), [4242, 7777, 8888]);
+    assert.deepEqual(parseNetstatListeners(output, 135), [1060]);
+    assert.deepEqual(parseNetstatListeners(output, 9), []);
+    assert.deepEqual(parseNetstatListeners('', 9), []);
+    assert.deepEqual(parseLsofPids('p123\nf7\np456\n'), [123, 456]);
+  });
+
+  it('the default lookup finds this process listening on a port', {
+    skip: process.platform !== 'win32' && !['/usr/sbin/lsof', '/usr/bin/lsof'].some((f) => fs.existsSync(f))
+      ? 'no lsof here' : false,
+  }, async () => {
+    const server = net.createServer();
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const pids = await tcpListenerPids(server.address().port);
+      assert.deepEqual(pids, [process.pid]);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });
 

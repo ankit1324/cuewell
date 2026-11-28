@@ -25,7 +25,10 @@
  * uses it); otherwise it is a warning.
  *
  * Running it again is cheap: a target whose VERSION file matches the pinned
- * tag and whose files match the recorded hashes is skipped. --force rebuilds.
+ * tag and whose files match the recorded hashes is skipped. Those hashes are
+ * written by this script, so they only show the folder was not changed since;
+ * --force ignores VERSION (and, for macOS, any earlier build folder) and
+ * makes every target again from the pinned downloads. Release builds use it.
  * Downloads are cached in vendor/whisper/.cache, mac builds in
  * vendor/whisper/.build; both stay out of the app.
  */
@@ -108,6 +111,7 @@ function usage() {
     '                       for another OS with one supported arch, that arch)',
     '  --all-arches         every supported arch for the platform (darwin: arm64,x64)',
     '  --force              fetch or build again even if the folder is up to date',
+    '                       (macOS: a clean build from the pinned source)',
     '  --require-runtime    fail if the compiler runtime (Windows VC++, Linux libgomp) cannot be bundled',
     '  --help               show this help',
     '',
@@ -764,7 +768,9 @@ async function buildMac(target, options) {
   try {
     stampValue = fs.readFileSync(stamp, 'utf8').trim();
   } catch {}
-  if (stampValue !== SOURCE.sha256 || !fs.existsSync(path.join(sourceDir, 'CMakeLists.txt'))) {
+  // --force: a clean build. The stamp is written here, not pinned, so an
+  // earlier build folder is not trusted.
+  if (options.force || stampValue !== SOURCE.sha256 || !fs.existsSync(path.join(sourceDir, 'CMakeLists.txt'))) {
     fs.rmSync(workDir, { recursive: true, force: true });
     fs.mkdirSync(workDir, { recursive: true });
     log(`Extracting ${SOURCE.file}`);

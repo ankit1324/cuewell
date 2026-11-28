@@ -88,23 +88,26 @@ jobs:
           fi
 
       # macOS builds whisper-server from source for arm64 and x64 (x64 is
-      # cross-compiled on the arm64 runner), which takes a few minutes, so the
-      # result is cached per whisper.cpp tag, OS and arch. Windows and Linux
-      # download the official assets each run and check them against the
-      # SHA-256 pinned in the script, so nothing unverified is restored there.
-      # A restored mac build is checked for its architecture and for linking
-      # only system libraries; only this repository's workflows can write the
-      # cache, and a tag run reads only its own and the default branch's.
+      # cross-compiled on the arm64 runner), which takes a few minutes, so
+      # manual runs cache the result per whisper.cpp tag, OS and arch. A
+      # restored mac build is checked for its architecture and for linking
+      # only system libraries, but the SHA-256 values in its VERSION file were
+      # written by the build that filled the cache, not pinned independently.
+      # So tag runs (the ones that publish a release) never restore or save
+      # the cache: the fetch step runs with --force, which builds macOS from
+      # the pinned source tarball and re-checks the Windows and Linux assets
+      # against the SHA-256 pinned in the script.
       - name: whisper.cpp cache key
-        if: matrix.whisper_platform == 'darwin'
+        if: matrix.whisper_platform == 'darwin' && github.ref_type != 'tag'
         id: whisper-key
         shell: bash
         run: |
           TAG=$(node -p "require('./scripts/fetch-whisper-cpp.js').TAG")
           echo "key=whisper-cpp-${TAG}-${{ runner.os }}-darwin-arm64-x64-${{ hashFiles('scripts/fetch-whisper-cpp.js') }}" >> "$GITHUB_OUTPUT"
 
+      # actions/cache saves in its post step, which a skipped step never runs.
       - name: Restore whisper.cpp build
-        if: matrix.whisper_platform == 'darwin'
+        if: matrix.whisper_platform == 'darwin' && github.ref_type != 'tag'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
@@ -113,10 +116,14 @@ jobs:
           key: ${{ steps.whisper-key.outputs.key }}
 
       # --require-runtime: fail instead of shipping a Windows build without the
-      # Visual C++ runtime DLLs or a Linux build without libgomp.
+      # Visual C++ runtime DLLs or a Linux build without libgomp. --force on
+      # tag runs: ignore anything already in vendor/whisper and rebuild or
+      # re-extract every target from the pinned sources.
       - name: Fetch whisper.cpp
         shell: bash
-        run: node scripts/fetch-whisper-cpp.js --platform ${{ matrix.whisper_platform }} --all-arches --require-runtime
+        env:
+          WHISPER_FORCE: ${{ github.ref_type == 'tag' && '--force' || '' }}
+        run: node scripts/fetch-whisper-cpp.js --platform ${{ matrix.whisper_platform }} --all-arches --require-runtime $WHISPER_FORCE
 
       - name: Build
         shell: bash
@@ -219,7 +226,8 @@ jobs:
   release:
     name: Create GitHub Release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Only a pushed tag publishes: a manual run started on a tag ref does not.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -13,6 +13,21 @@
 // allows any web origin (CORS *), so a page in the user's browser must not
 // be able to guess /inference or /load.
 //
+// Readiness: /health answering is not enough, because on Windows another
+// local process could take the port between freePort() and the server's
+// bind and answer /health itself (and then receive the audio). whisper-server
+// b5907 prints "whisper server listening at http://<host>:<port>" when it has
+// bound, but on stdout with printf, which is fully buffered into a pipe: the
+// line only arrives when the process exits, so it cannot be waited for. A
+// start therefore counts only when our child is still running, its stderr has
+// no "couldn't bind" line, and the listener is shown to be the child's own,
+// before any request (the URL holds the secret path) and again after /health
+// answers: on TCP every process listening on the port must be the child
+// (netstat -ano on Windows), for a Unix socket the socket file must exist in
+// our owner-only folder. A child that exits during the start is a failed
+// start even if /health answered; a bind failure or a foreign listener is
+// retried once on a new port.
+//
 // Privacy: the server prints transcripts on stdout, so stdout is discarded
 // and stderr is kept only until the model has loaded (for start errors).
 // Transcript text is never logged.
@@ -23,15 +38,21 @@ const net = require('net');
 const http = require('http');
 const path = require('path');
 const crypto = require('crypto');
-const { spawn, spawnSync } = require('child_process');
+const { spawn, spawnSync, execFile } = require('child_process');
 const { childProcessEnv } = require('../core/whisper-installer');
 
 const START_TIMEOUT_MS = 120000;
 const REQUEST_TIMEOUT_MS = 120000;
 const HEALTH_POLL_MS = 100;
 const STOP_GRACE_MS = 2000;
-const MAX_START_ATTEMPTS = 3;
+// One start, plus one retry on a new port after a bind failure.
+const MAX_START_ATTEMPTS = 2;
 const STDERR_LINES_KEPT = 20;
+const LISTENER_CHECK_TIMEOUT_MS = 5000;
+// Listener checks that may fail in a row (netstat timed out) before a start fails.
+const LISTENER_CHECK_ATTEMPTS = 2;
+// whisper-server's stderr line when the port or socket is taken.
+const BIND_FAILED_RE = /couldn't bind/i;
 
 // Server children still running; killed when the main process exits, even
 // if the app never called unload().
@@ -147,6 +168,73 @@ function freePort() {
 }
 
 /**
+ * PIDs of the processes with a TCP socket listening on `port`, on any local
+ * address, from `netstat -ano` output. A listening row has a foreign address
+ * of 0.0.0.0:0 or [::]:0; the state column is translated on non-English
+ * Windows, so it is not read.
+ */
+function parseNetstatListeners(output, port) {
+  const pids = new Set();
+  for (const line of String(output || '').split(/\r?\n/)) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 5 || cols[0].toUpperCase() !== 'TCP') continue;
+    const local = /:(\d+)$/.exec(cols[1]);
+    if (!local || Number(local[1]) !== port) continue;
+    if (!/^(?:0\.0\.0\.0|\[::\]):0$/.test(cols[2])) continue;
+    const pid = Number(cols[cols.length - 1]);
+    if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+  }
+  return [...pids];
+}
+
+/** PIDs from `lsof -F p` output ("p1234" lines). */
+function parseLsofPids(output) {
+  const pids = new Set();
+  for (const line of String(output || '').split(/\r?\n/)) {
+    const match = /^p(\d+)$/.exec(line.trim());
+    if (match) pids.add(Number(match[1]));
+  }
+  return [...pids];
+}
+
+function runTool(file, args) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, {
+      encoding: 'utf8',
+      timeout: LISTENER_CHECK_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+      windowsHide: true,
+    }, (error, stdout) => {
+      // A numeric code is the tool's exit status; anything else (not found,
+      // timed out) means it did not run.
+      if (error && typeof error.code !== 'number') reject(error);
+      else resolve({ code: error ? error.code : 0, stdout: String(stdout || '') });
+    });
+  });
+}
+
+/**
+ * PIDs listening on TCP `port` (any address). Uses the system's own netstat
+ * (Windows) or lsof (macOS and Linux); never a program found on PATH. Throws
+ * when the tool cannot run. The app uses TCP only on Windows: lsof, which may
+ * not show other users' sockets without root, is for tests.
+ */
+async function tcpListenerPids(port) {
+  if (process.platform === 'win32') {
+    const netstat = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'netstat.exe');
+    const { code, stdout } = await runTool(netstat, ['-ano']);
+    if (code !== 0) throw new Error(`netstat exited with code ${code}`);
+    return parseNetstatListeners(stdout, port);
+  }
+  const lsof = ['/usr/sbin/lsof', '/usr/bin/lsof'].find((file) => fs.existsSync(file));
+  if (!lsof) throw new Error('lsof was not found');
+  const { code, stdout } = await runTool(lsof, ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp']);
+  // lsof exits 1 when nothing matches.
+  if (code !== 0 && code !== 1) throw new Error(`lsof exited with code ${code}`);
+  return parseLsofPids(stdout);
+}
+
+/**
  * fetch() subset over node:http that can also use a Unix socket
  * (init.socketPath). Returns { ok, status, json(), text() }. FormData and
  * Buffer bodies are supported.
@@ -218,10 +306,12 @@ class WhisperCppEngine {
    *   when the model file is damaged
    * @param {Function} [options.spawnFn] child_process.spawn-compatible, for tests
    * @param {Function} [options.fetchFn] fetch-compatible, for tests
+   * @param {(port: number) => Promise<number[]>} [options.listenerPidsFn] PIDs
+   *   listening on a TCP port, for tests (default: netstat or lsof)
    */
   constructor({
     serverPath, serverDir, modelPath, threads, idleUnloadMs = 60000,
-    logger, isBusy, verifyModel, spawnFn, fetchFn, startTimeoutMs = START_TIMEOUT_MS,
+    logger, isBusy, verifyModel, spawnFn, fetchFn, listenerPidsFn, startTimeoutMs = START_TIMEOUT_MS,
     requestTimeoutMs = REQUEST_TIMEOUT_MS,
   } = {}) {
     this.serverPath = serverPath;
@@ -234,6 +324,7 @@ class WhisperCppEngine {
     this.verifyModel = typeof verifyModel === 'function' ? verifyModel : async () => true;
     this.spawnFn = spawnFn || spawn;
     this.fetchFn = fetchFn || localFetch;
+    this.listenerPidsFn = typeof listenerPidsFn === 'function' ? listenerPidsFn : tcpListenerPids;
     this.useSocket = !fetchFn && process.platform !== 'win32';
     this.startTimeoutMs = startTimeoutMs;
     this.requestTimeoutMs = requestTimeoutMs;
@@ -392,8 +483,9 @@ class WhisperCppEngine {
         return;
       } catch (error) {
         lastError = error;
-        // Only a busy port is worth another try.
+        // Only a busy port (or another process on it) is worth another try.
         if (error.code !== 'BIND_FAILED' || this.generation !== generation) break;
+        this.logger.warn('whisper.cpp server could not take its port; trying a new one', { attempt });
       }
     }
     throw lastError;
@@ -447,6 +539,7 @@ class WhisperCppEngine {
     // stderr until the model has loaded, for start errors only.
     const stderrLines = [];
     let ready = false;
+    let bindFailed = false;
     let partial = '';
     if (child.stderr) {
       child.stderr.on('data', (chunk) => {
@@ -456,6 +549,7 @@ class WhisperCppEngine {
         partial = lines.pop();
         for (const line of lines) {
           if (!line.trim()) continue;
+          if (BIND_FAILED_RE.test(line)) bindFailed = true;
           stderrLines.push(line.slice(0, 300));
           if (stderrLines.length > STDERR_LINES_KEPT) stderrLines.shift();
         }
@@ -491,6 +585,9 @@ class WhisperCppEngine {
     this.endpoint = endpoint;
 
     const deadline = Date.now() + this.startTimeoutMs;
+    // Set once /health answered: if the child then exits, the start failed.
+    let answered = false;
+    let failedChecks = 0;
     while (!exited) {
       if (this.generation !== generation) {
         await this._kill(child);
@@ -500,14 +597,32 @@ class WhisperCppEngine {
         await this._stopChild();
         throw engineError('START_TIMEOUT', 'The speech engine took too long to start. Try again.');
       }
-      let healthy = false;
-      try {
-        const res = await this._fetch('/health', { timeoutMs: 2000 });
-        healthy = res.ok;
-      } catch (_) {
-        healthy = false; // not listening yet
+      if (bindFailed) {
+        // whisper-server exits right after this line; do not wait for it.
+        await this._stopChild();
+        throw engineError('BIND_FAILED', 'The speech engine could not open its local connection.');
       }
-      if (healthy && !exited) {
+      // Nothing is sent, not even /health with the secret path, before the
+      // listener is shown to be the child's; it is checked again after
+      // /health answers.
+      const owner = await this._listenerOwner(child, endpoint);
+      if (this.generation !== generation || exited || bindFailed) continue;
+      if (owner === 'foreign') {
+        this.logger.warn('Another program is listening on the speech engine port', { port: endpoint.port });
+        await this._stopChild();
+        throw engineError('BIND_FAILED', 'The speech engine could not open its local connection.');
+      }
+      if (owner === 'unknown') {
+        failedChecks += 1;
+        if (failedChecks >= LISTENER_CHECK_ATTEMPTS) {
+          await this._stopChild();
+          throw engineError('LISTENER_UNVERIFIED',
+            'The speech engine could not check its local connection. Try again.');
+        }
+      } else {
+        failedChecks = 0;
+      }
+      if (owner === 'ours' && answered) {
         ready = true;
         stderrLines.length = 0;
         this.lastStartMs = Date.now() - startedAt;
@@ -519,10 +634,23 @@ class WhisperCppEngine {
         });
         return;
       }
+      if (owner === 'ours') {
+        let healthy = false;
+        try {
+          const res = await this._fetch('/health', { timeoutMs: 2000 });
+          healthy = res.ok;
+        } catch (_) {
+          healthy = false; // not answering yet
+        }
+        if (healthy) {
+          answered = true;
+          continue; // check the listener again, then ready
+        }
+      }
       await Promise.race([exitPromise, new Promise((r) => setTimeout(r, HEALTH_POLL_MS))]);
     }
 
-    // The process ended before it answered.
+    // The process ended before it was ready.
     if (this.generation !== generation) {
       throw engineError('CANCELLED', 'The speech engine was stopped while it started.');
     }
@@ -531,9 +659,9 @@ class WhisperCppEngine {
       throw engineError('SPAWN_FAILED', this._spawnMessage(exited.error), exited.error);
     }
     this.logger.warn('whisper.cpp server exited during start', {
-      code: exited.code, signal: exited.signal, stderr: tail,
+      code: exited.code, signal: exited.signal, stderr: bindFailed ? 'could not bind' : tail,
     });
-    if (/couldn't bind/i.test(tail)) {
+    if (bindFailed || BIND_FAILED_RE.test(tail)) {
       throw engineError('BIND_FAILED', 'The speech engine could not open its local connection.');
     }
     if (exited.code === 3 || /failed to (initialize|load)|invalid model|failed to open/i.test(tail)) {
@@ -550,8 +678,41 @@ class WhisperCppEngine {
       throw engineError('MODEL_LOAD_FAILED',
         'The voice model could not be loaded. Restart Cuewell and try again.');
     }
+    if (answered) {
+      // /health answered, but not from a server that stayed up: treat the
+      // port as taken and try a new one.
+      throw engineError('BIND_FAILED', 'The speech engine could not open its local connection.');
+    }
     throw engineError('SERVER_EXITED',
       `The speech engine stopped while starting (exit ${exited.code === null ? exited.signal : exited.code}).`);
+  }
+
+  /**
+   * Whose listener answered /health: 'ours' when only `child` can be it,
+   * 'pending' when that is not shown yet, 'foreign' when another process
+   * listens on the port, 'unknown' when it cannot be checked.
+   */
+  async _listenerOwner(child, endpoint) {
+    if (endpoint.socketPath) {
+      // bind() creates the socket file, and only this user can create files
+      // in the owner-only folder made for this start.
+      try {
+        return fs.lstatSync(endpoint.socketPath).isSocket() ? 'ours' : 'foreign';
+      } catch (_) {
+        return 'pending';
+      }
+    }
+    let pids;
+    try {
+      pids = await this.listenerPidsFn(endpoint.port);
+    } catch (error) {
+      this.logger.warn('Could not check which program listens on the speech engine port', {
+        error: error && error.message,
+      });
+      return 'unknown';
+    }
+    if (!Array.isArray(pids) || !pids.length) return 'pending';
+    return pids.every((pid) => pid === child.pid) ? 'ours' : 'foreign';
   }
 
   _spawnMessage(error) {
@@ -676,3 +837,6 @@ module.exports = WhisperCppEngine;
 module.exports.WhisperCppEngine = WhisperCppEngine;
 module.exports.cleanTranscript = cleanTranscript;
 module.exports.defaultThreads = defaultThreads;
+module.exports.parseNetstatListeners = parseNetstatListeners;
+module.exports.parseLsofPids = parseLsofPids;
+module.exports.tcpListenerPids = tcpListenerPids;
