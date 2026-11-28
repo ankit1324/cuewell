@@ -21,7 +21,8 @@ const models = require('../src/core/whisper-models');
 const BASE = models.MODELS.find((m) => m.id === 'base-q5_1');
 const FIXTURE = crypto.randomBytes(BASE.bytes);
 const FIXTURE_SHA = crypto.createHash('sha256').update(FIXTURE).digest('hex');
-const URL_BASE = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/';
+const PINNED_COMMIT = '5359861c739e955e79d9a303bcbc70fb988958b1';
+const URL_BASE = `https://huggingface.co/ggerganov/whisper.cpp/resolve/${PINNED_COMMIT}/`;
 const CDN = 'https://cdn-lfs.hf.co/repos/ab/cd/blob';
 
 const realCreateHash = crypto.createHash;
@@ -109,6 +110,9 @@ describe('whisper model catalog', () => {
   it('downloads from huggingface.co over HTTPS', () => {
     assert.equal(models.modelUrl('small-q5_1'), `${URL_BASE}ggml-small-q5_1.bin`);
     assert.equal(models.DOWNLOAD_BASE_URL, URL_BASE);
+    // Pinned to a commit, never a moving branch.
+    assert.equal(models.MODEL_REPO_COMMIT, PINNED_COMMIT);
+    assert.doesNotMatch(models.DOWNLOAD_BASE_URL, /\/resolve\/main\//);
   });
 
   it('only accepts catalog ids, so no path is built from other input', (t) => {

@@ -16,3 +16,25 @@ Bundled icons (assests/icons/ui), from Lucide (https://lucide.dev),
 Copyright (c) 2026 Lucide Icons and Contributors, licensed under the ISC
 License; the icons Lucide derived from Feather are Copyright (c) 2013-present
 Cole Bemis, MIT License (full text in assests/icons/ui/LICENSE-lucide.txt).
+
+Local voice engine (bundled in the app's resources under "whisper"):
+- whisper.cpp and ggml (https://github.com/ggml-org/whisper.cpp, tag b5907),
+  Copyright (c) 2023-2026 The ggml authors, licensed under the MIT License
+  (full text in licenses/whisper.cpp-MIT.txt; also shipped as whisper/LICENSE).
+- Linux builds also bundle libgomp.so.1, the GNU OpenMP runtime from GCC,
+  Copyright Free Software Foundation, Inc., licensed under the GNU General
+  Public License version 3 with the GCC Runtime Library Exception version 3.1
+  (full texts in licenses/GPL-3.0.txt and
+  licenses/GCC-Runtime-Library-Exception-3.1.txt). It is the unmodified
+  library from the build system's GCC package (Ubuntu 22.04); its source code
+  is available from https://gcc.gnu.org/ and from Ubuntu's gcc source
+  packages, and the maintainer will provide the exact source on request.
+- Windows builds also bundle the Microsoft Visual C++ runtime libraries
+  (msvcp140.dll, vcruntime140.dll, vcruntime140_1.dll, vcomp140.dll),
+  Copyright Microsoft Corporation, redistributed unmodified as
+  "Distributable Code" under the Microsoft Visual Studio license terms. They
+  remain Microsoft's property and are not covered by this product's license.
+
+Voice models are not bundled: they are downloaded on request from
+https://huggingface.co/ggerganov/whisper.cpp (OpenAI Whisper weights,
+MIT License, converted to ggml format by the ggml authors).

@@ -28,6 +28,15 @@
 // start even if /health answered; a bind failure or a foreign listener is
 // retried once on a new port.
 //
+// Crash cleanup: each start records { owner app pid, server pid } in an
+// owner-only temp folder, removed when the server stops. The first start of
+// the next run stops servers whose Cuewell is gone. On macOS and Linux the
+// record sits in the socket folder and the process name is checked. On
+// Windows (TCP, no socket folder) the record folder also holds the server's
+// full program path and creation time, and a server is stopped only when its
+// pid, path and creation time all still match, so a later process that got
+// the same pid is never touched.
+//
 // Privacy: the server prints transcripts on stdout, so stdout is discarded
 // and stderr is kept only until the model has loaded (for start errors).
 // Transcript text is never logged.
@@ -57,6 +66,8 @@ const BIND_FAILED_RE = /couldn't bind/i;
 // Server children still running; killed when the main process exits, even
 // if the app never called unload().
 const liveChildren = new Set();
+// Child -> its Windows record folder, removed once the exit hook stopped it.
+const childRecordDirs = new Map();
 let exitHookInstalled = false;
 function trackChild(child) {
   liveChildren.add(child);
@@ -64,7 +75,12 @@ function trackChild(child) {
     exitHookInstalled = true;
     process.once('exit', () => {
       for (const c of liveChildren) {
-        try { c.kill('SIGKILL'); } catch (_) { /* already gone */ }
+        let killed = false;
+        try { killed = c.kill('SIGKILL'); } catch (_) { /* already gone */ }
+        const recordDir = childRecordDirs.get(c);
+        if (killed && recordDir) {
+          try { fs.rmSync(recordDir, { recursive: true, force: true }); } catch (_) { /* swept next run */ }
+        }
       }
     });
   }
@@ -72,13 +88,31 @@ function trackChild(child) {
 
 // Errors carry a `code` and a message written for the user (userFacing).
 // Socket folders are named SOCKET_DIR_PREFIX + random and hold OWNER_FILE:
-// { owner: <app pid>, server: <whisper-server pid> }.
+// { owner: <app pid>, server: <whisper-server pid> }. On Windows a record
+// folder with the same name pattern holds { owner, server, path, created }:
+// the server's full program path and its creation time (see
+// inspectWindowsProcess), or null while not known.
 const SOCKET_DIR_PREFIX = 'cuewell-wcpp-';
 const OWNER_FILE = 'owner.json';
 let staleSwept = false;
+// The Windows sweep of this app run, once started.
+let windowsSweep = null;
+const WINDOWS_SERVER_EXE = 'whisper-server.exe';
+// PowerShell can take a few seconds to start on a slow or busy PC.
+const WINDOWS_INSPECT_TIMEOUT_MS = 10000;
+const WINDOWS_KILL_TIMEOUT_MS = 10000;
+// Leftover servers checked per sweep, so a pile of records cannot keep
+// PowerShell busy for long.
+const MAX_WINDOWS_SWEEP_CHECKS = 5;
+// A folder with no readable record yet may belong to a start in progress.
+const RECORD_GRACE_MS = 5 * 60 * 1000;
+
+function isPid(pid) {
+  return Number.isInteger(pid) && pid > 0;
+}
 
 function isAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
+  if (!isPid(pid)) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -140,6 +174,213 @@ function sweepStaleServers(logger) {
   }
 }
 
+/** A program in Windows' System32 folder, by absolute path (never from PATH). */
+function system32(file) {
+  return path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', file);
+}
+
+/**
+ * Parse inspectWindowsProcess's PowerShell output: "gone", or
+ * "found|<base64 UTF-8 path>|<ISO creation time>". Throws on anything else.
+ */
+function parseWindowsProcessInfo(output) {
+  for (const line of String(output || '').split(/\r?\n/)) {
+    const text = line.trim();
+    if (text === 'gone') return null;
+    const match = /^found\|([A-Za-z0-9+/=]*)\|(\S*)$/.exec(text);
+    if (match) {
+      return { path: Buffer.from(match[1], 'base64').toString('utf8'), created: match[2] };
+    }
+  }
+  throw new Error('Unexpected output from the process check');
+}
+
+/**
+ * Windows: the full program path and creation time of process `pid`, or
+ * null when no such process runs. Uses the system's own PowerShell and
+ * Get-CimInstance; throws when the check cannot run. The path is sent as
+ * base64 so a non-ASCII folder name survives the console code page.
+ */
+async function inspectWindowsProcess(pid) {
+  if (!isPid(pid)) throw new Error('Not a process id');
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$p = Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId=${pid}'`,
+    "if (-not $p) { 'gone'; exit 0 }",
+    '$exe = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$p.ExecutablePath))',
+    "$created = if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString('o') } else { '' }",
+    "'found|' + $exe + '|' + $created",
+  ].join('\n');
+  const powershell = system32(path.join('WindowsPowerShell', 'v1.0', 'powershell.exe'));
+  const { code, stdout } = await runTool(powershell, [
+    '-NoProfile', '-NonInteractive', '-NoLogo',
+    '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64'),
+  ], WINDOWS_INSPECT_TIMEOUT_MS);
+  if (code !== 0) throw new Error(`PowerShell exited with code ${code}`);
+  return parseWindowsProcessInfo(stdout);
+}
+
+/**
+ * Windows: stop process `pid`, only if it still has program path
+ * `expected.path` and creation time `expected.created`. One PowerShell run
+ * opens a handle to the process first (Windows does not reuse a pid while a
+ * handle is open), checks it, and kills through that handle, so a process
+ * that got the pid after the check is never hit. Resolves true when it
+ * stopped the process, false when it was gone or did not match; throws when
+ * the check or kill could not run.
+ */
+async function killWindowsProcess(pid, expected) {
+  if (!isPid(pid)) throw new Error('Not a process id');
+  if (!expected || typeof expected.path !== 'string' || !expected.path ||
+      typeof expected.created !== 'string' || !expected.created) {
+    throw new Error('No process to compare with');
+  }
+  // Values from the record go in as base64, never as script text.
+  const b64 = (value) => Buffer.from(value, 'utf8').toString('base64');
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$wantPath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64(expected.path)}'))`,
+    `$wantCreated = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64(expected.created)}'))`,
+    `$h = Get-Process -Id ${pid} -ErrorAction SilentlyContinue`,
+    "if (-not $h) { 'gone'; exit 0 }",
+    '$null = $h.Handle',
+    `$p = Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId=${pid}'`,
+    "if (-not $p -or $h.HasExited) { 'gone'; exit 0 }",
+    "$created = if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString('o') } else { '' }",
+    '$exe = [string]$p.ExecutablePath',
+    "if (-not $exe -or -not [string]::Equals([IO.Path]::GetFullPath($exe), [IO.Path]::GetFullPath($wantPath), [StringComparison]::OrdinalIgnoreCase) -or $created -cne $wantCreated) { 'mismatch'; exit 0 }",
+    '$h.Kill()',
+    '$null = $h.WaitForExit(3000)',
+    "'killed'",
+  ].join('\n');
+  const powershell = system32(path.join('WindowsPowerShell', 'v1.0', 'powershell.exe'));
+  const { code, stdout } = await runTool(powershell, [
+    '-NoProfile', '-NonInteractive', '-NoLogo',
+    '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64'),
+  ], WINDOWS_KILL_TIMEOUT_MS);
+  if (code !== 0) throw new Error(`PowerShell exited with code ${code}`);
+  const result = String(stdout || '').split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  if (result === 'killed') return true;
+  if (result === 'gone' || result === 'mismatch') return false;
+  throw new Error('Unexpected output from the process stop');
+}
+
+/** Same Windows path, ignoring case and separators. */
+function sameWindowsPath(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  return path.win32.normalize(a).toLowerCase() === path.win32.normalize(b).toLowerCase();
+}
+
+/** A Windows record a server can be checked against: our bundled program, with a creation time. */
+function isCheckableRecord(record) {
+  return isPid(record.server) &&
+    typeof record.path === 'string' && path.win32.isAbsolute(record.path) &&
+    path.win32.basename(record.path).toLowerCase() === WINDOWS_SERVER_EXE &&
+    typeof record.created === 'string' && record.created.length > 0;
+}
+
+/** The record in `dir`, or null when it is missing or malformed. */
+function readServerRecord(dir) {
+  let record;
+  try {
+    record = JSON.parse(fs.readFileSync(path.join(dir, OWNER_FILE), 'utf8'));
+  } catch (_) {
+    return null;
+  }
+  if (!record || typeof record !== 'object' || !isPid(record.owner)) return null;
+  return record;
+}
+
+/** Write `record` into `dir` in one step (a reader never sees half a file). */
+function writeServerRecord(dir, record) {
+  const file = path.join(dir, OWNER_FILE);
+  const temp = `${file}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(record), { mode: 0o600 });
+  fs.renameSync(temp, file);
+}
+
+/**
+ * Windows: stop whisper-server.exe processes whose Cuewell is gone, from the
+ * record folders in `tmpdir`. A server is stopped only when its pid, full
+ * program path and creation time all match the record (checked by
+ * `inspectProcessFn`, then again by `killProcessFn` on the process handle it
+ * kills); never by name. A check that fails is logged and the server left alone. Each handled record
+ * is removed. The inspection and kill functions are injectable for tests.
+ */
+async function sweepWindowsServers({
+  logger, tmpdir = os.tmpdir(), isAliveFn = isAlive,
+  inspectProcessFn = inspectWindowsProcess, killProcessFn = killWindowsProcess, now = Date.now,
+} = {}) {
+  const log = logger || { info() {}, warn() {} };
+  let names;
+  try {
+    names = fs.readdirSync(tmpdir);
+  } catch (_) {
+    return;
+  }
+  let checks = 0;
+  for (const name of names) {
+    if (!name.startsWith(SOCKET_DIR_PREFIX)) continue;
+    const dir = path.join(tmpdir, name);
+    let stats;
+    try {
+      stats = fs.lstatSync(dir);
+    } catch (_) {
+      continue;
+    }
+    if (!stats.isDirectory()) continue;
+    const record = readServerRecord(dir);
+    if (!record) {
+      if (now() - stats.mtimeMs >= RECORD_GRACE_MS) removeRecordDir(dir);
+      continue;
+    }
+    if (isAliveFn(record.owner)) continue; // a running Cuewell owns it
+    if (isCheckableRecord(record)) {
+      if (checks >= MAX_WINDOWS_SWEEP_CHECKS) break;
+      checks += 1;
+      await stopRecordedServer(record, { log, inspectProcessFn, killProcessFn });
+    }
+    removeRecordDir(dir);
+  }
+}
+
+async function stopRecordedServer(record, { log, inspectProcessFn, killProcessFn }) {
+  const pid = record.server;
+  let info;
+  try {
+    info = await inspectProcessFn(pid);
+  } catch (error) {
+    log.warn('Could not check a whisper.cpp server left over from an earlier run', {
+      pid, error: error && error.message,
+    });
+    return;
+  }
+  if (!info) return; // already gone
+  if (!sameWindowsPath(info.path, record.path) || info.created !== record.created) {
+    // Another program, or a later process that got the same pid.
+    log.info('Left a process alone: it is not the whisper.cpp server an earlier run started', { pid });
+    return;
+  }
+  try {
+    // Checked again inside the kill, bound to the process handle.
+    if (await killProcessFn(pid, { path: record.path, created: record.created })) {
+      log.warn('Stopped a whisper.cpp server left over from an earlier run', { pid });
+    } else {
+      log.info('A whisper.cpp server left over from an earlier run had already gone or changed', { pid });
+    }
+  } catch (error) {
+    log.warn('Could not stop a whisper.cpp server left over from an earlier run', {
+      pid, error: error && error.message,
+    });
+  }
+}
+
+function removeRecordDir(dir) {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch (_) { /* the OS cleans temp folders up */ }
+}
+
 function engineError(code, message, cause) {
   const error = new Error(message);
   error.code = code;
@@ -197,11 +438,11 @@ function parseLsofPids(output) {
   return [...pids];
 }
 
-function runTool(file, args) {
+function runTool(file, args, timeout = LISTENER_CHECK_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     execFile(file, args, {
       encoding: 'utf8',
-      timeout: LISTENER_CHECK_TIMEOUT_MS,
+      timeout,
       maxBuffer: 16 * 1024 * 1024,
       windowsHide: true,
     }, (error, stdout) => {
@@ -282,8 +523,23 @@ async function localFetch(url, init = {}) {
 }
 
 // Markers whisper.cpp writes for silence or noise ("[BLANK_AUDIO]",
-// "[ Silence ]", "(music)"), which are not speech.
-const NON_SPEECH_RE = /\[[^\]]{0,40}\]|\((?:[^)]{0,20})(?:music|silence|blank|noise|applause|laugh|inaudible)(?:[^)]{0,20})\)|[♪♫]+/gi;
+// "[ Silence ]", "[MUSIC]", "(upbeat music)", "(coughs)"), which are not
+// speech. Only a bracket or parenthesis that holds nothing but words and a
+// known non-speech word is removed, and not one glued to a name before it, so
+// spoken code such as "arr[i]", "a[0]", "f(x)" or "(n log n)" is kept.
+const NON_SPEECH_WORDS = [
+  'blank_audio', 'blank audio', 'silence', 'silent', 'music', 'musical', 'noise', 'noises',
+  'applause', 'laugh', 'laughs', 'laughing', 'laughter', 'inaudible', 'no speech',
+  'sound', 'sounds', 'beep', 'beeping', 'typing', 'cough', 'coughs', 'coughing',
+  'sigh', 'sighs', 'sighing', 'breath', 'breathing', 'breathes', 'clears throat',
+  'static', 'pause', 'click', 'clicking', 'clicks', 'keyboard', 'rustling', 'wind',
+];
+const NON_SPEECH_RE = new RegExp(
+  String.raw`(?<![\w\])])[\[(]\s*(?:[a-z_ -]{0,30}\s)?(?:` +
+  NON_SPEECH_WORDS.map((w) => w.replace(/ /g, '\\s+')).join('|') +
+  String.raw`)(?:\s[a-z_ -]{0,30})?\s*[\])]|[♪♫]+`,
+  'gi',
+);
 
 function cleanTranscript(text) {
   return String(text || '')
@@ -308,11 +564,16 @@ class WhisperCppEngine {
    * @param {Function} [options.fetchFn] fetch-compatible, for tests
    * @param {(port: number) => Promise<number[]>} [options.listenerPidsFn] PIDs
    *   listening on a TCP port, for tests (default: netstat or lsof)
+   * @param {string} [options.platform] process.platform, for tests
+   * @param {(pid: number) => Promise<{path: string, created: string}|null>} [options.inspectProcessFn]
+   *   Windows: a process's program path and creation time, for tests
+   * @param {(pid: number, expected: {path: string, created: string}) => Promise<boolean>} [options.killProcessFn]
+   *   Windows: stop a leftover server if it still matches, for tests
    */
   constructor({
     serverPath, serverDir, modelPath, threads, idleUnloadMs = 60000,
     logger, isBusy, verifyModel, spawnFn, fetchFn, listenerPidsFn, startTimeoutMs = START_TIMEOUT_MS,
-    requestTimeoutMs = REQUEST_TIMEOUT_MS,
+    requestTimeoutMs = REQUEST_TIMEOUT_MS, platform = process.platform, inspectProcessFn, killProcessFn,
   } = {}) {
     this.serverPath = serverPath;
     this.serverDir = serverDir || (serverPath ? path.dirname(serverPath) : '');
@@ -325,12 +586,15 @@ class WhisperCppEngine {
     this.spawnFn = spawnFn || spawn;
     this.fetchFn = fetchFn || localFetch;
     this.listenerPidsFn = typeof listenerPidsFn === 'function' ? listenerPidsFn : tcpListenerPids;
-    this.useSocket = !fetchFn && process.platform !== 'win32';
+    this.platform = platform;
+    this.inspectProcessFn = typeof inspectProcessFn === 'function' ? inspectProcessFn : inspectWindowsProcess;
+    this.killProcessFn = typeof killProcessFn === 'function' ? killProcessFn : killWindowsProcess;
+    this.useSocket = !fetchFn && platform !== 'win32';
     this.startTimeoutMs = startTimeoutMs;
     this.requestTimeoutMs = requestTimeoutMs;
 
     this.child = null;
-    this.endpoint = null; // { base, socketPath, socketDir }
+    this.endpoint = null; // { base, socketPath, socketDir, recordDir }
     this.starting = null; // promise while a start runs
     this.generation = 0; // bumped by unload() so a start in flight gives up
     this.queue = Promise.resolve();
@@ -493,7 +757,9 @@ class WhisperCppEngine {
 
   async _startOnce(generation) {
     const startedAt = Date.now();
-    sweepStaleServers(this.logger);
+    // Windows: PowerShell is slow to start, so the sweep runs beside the start.
+    if (this.platform === 'win32') this._sweepWindows();
+    else sweepStaleServers(this.logger);
     const endpoint = await this._newEndpoint();
     if (this.generation !== generation) {
       this._removeEndpoint(endpoint);
@@ -534,6 +800,9 @@ class WhisperCppEngine {
         fs.writeFileSync(path.join(endpoint.socketDir, OWNER_FILE),
           JSON.stringify({ owner: process.pid, server: child.pid }), { mode: 0o600 });
       } catch (_) { /* only used to clean up after a crash */ }
+    } else if (this.platform === 'win32' && child.pid) {
+      endpoint.recordDir = this._recordWindowsServer(child);
+      if (endpoint.recordDir) childRecordDirs.set(child, endpoint.recordDir);
     }
 
     // stderr until the model has loaded, for start errors only.
@@ -569,6 +838,7 @@ class WhisperCppEngine {
     });
     exitPromise.then(() => {
       liveChildren.delete(child);
+      childRecordDirs.delete(child);
       this._removeEndpoint(endpoint);
       if (this.child === child) {
         this.child = null;
@@ -747,6 +1017,55 @@ class WhisperCppEngine {
         fs.rmSync(endpoint.socketDir, { recursive: true, force: true });
       } catch (_) { /* temp folder; the OS cleans it up */ }
     }
+    if (endpoint && endpoint.recordDir) removeRecordDir(endpoint.recordDir);
+  }
+
+  /**
+   * Once per app run on Windows: stop servers an earlier, crashed run left
+   * (see sweepWindowsServers). Never rejects; the promise is kept for tests.
+   */
+  _sweepWindows() {
+    if (!windowsSweep) {
+      windowsSweep = sweepWindowsServers({
+        logger: this.logger,
+        inspectProcessFn: this.inspectProcessFn,
+        killProcessFn: this.killProcessFn,
+      }).catch((error) => {
+        this.logger.warn('Could not look for leftover whisper.cpp servers', { error: error && error.message });
+      });
+    }
+    return windowsSweep;
+  }
+
+  /**
+   * Windows: record the server just started, for the next run's sweep. The
+   * record gets the program path and creation time once they are read (a
+   * record without them is never acted on). Returns the record folder, or
+   * null when it could not be made.
+   */
+  _recordWindowsServer(child) {
+    const base = { owner: process.pid, server: child.pid };
+    let dir;
+    try {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), SOCKET_DIR_PREFIX));
+      writeServerRecord(dir, { ...base, path: null, created: null });
+    } catch (_) {
+      if (dir) removeRecordDir(dir);
+      return null; // only used to clean up after a crash
+    }
+    Promise.resolve()
+      .then(() => this.inspectProcessFn(child.pid))
+      .then((info) => {
+        const running = child.exitCode === null && !child.signalCode;
+        if (!info || !running || !fs.existsSync(dir)) return;
+        writeServerRecord(dir, { ...base, path: info.path, created: info.created });
+      })
+      .catch((error) => {
+        this.logger.warn('Could not record the whisper.cpp server for cleanup after a crash', {
+          error: error && error.message,
+        });
+      });
+    return dir;
   }
 
   /** Stop the server process (the next request starts it again). */
@@ -840,3 +1159,14 @@ module.exports.defaultThreads = defaultThreads;
 module.exports.parseNetstatListeners = parseNetstatListeners;
 module.exports.parseLsofPids = parseLsofPids;
 module.exports.tcpListenerPids = tcpListenerPids;
+module.exports.sweepWindowsServers = sweepWindowsServers;
+module.exports.parseWindowsProcessInfo = parseWindowsProcessInfo;
+module.exports.inspectWindowsProcess = inspectWindowsProcess;
+module.exports.killWindowsProcess = killWindowsProcess;
+// Tests only: forget that this run already swept, so a test can sweep again
+// (the sweep is once per app run, and earlier tests in the same process may
+// have used it up, as every start on a real Windows runner does).
+module.exports._resetSweepsForTests = () => {
+  staleSwept = false;
+  windowsSweep = null;
+};

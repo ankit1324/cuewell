@@ -25,7 +25,7 @@ process.env.TEMP = TMP;
 
 const WhisperCppEngine = require('../src/services/whispercpp-engine.service');
 const {
-  cleanTranscript, parseNetstatListeners, parseLsofPids, tcpListenerPids,
+  cleanTranscript, _resetSweepsForTests, parseNetstatListeners, parseLsofPids, tcpListenerPids,
 } = require('../src/services/whispercpp-engine.service');
 
 const FAKE_SERVER = path.join(__dirname, 'helpers', 'fake-whisper-server.js');
@@ -552,6 +552,78 @@ describe('WhisperCppEngine proves the listener is its own child', { concurrency:
   });
 });
 
+describe('WhisperCppEngine on Windows records its server for crash cleanup', () => {
+  // platform: 'win32' with injected process tools, so this runs on any OS.
+  const WIN_EXE = 'C:\\Users\\me\\AppData\\Local\\Programs\\Cuewell\\resources\\whisper\\win32-x64\\whisper-server.exe';
+  const CREATED = '2025-02-03T04:05:06.7000000Z';
+
+  function records() {
+    return fs.readdirSync(TMP)
+      .filter((name) => name.startsWith('cuewell-wcpp-'))
+      .map((name) => {
+        const dir = path.join(TMP, name);
+        try {
+          return { dir, ...JSON.parse(fs.readFileSync(path.join(dir, 'owner.json'), 'utf8')) };
+        } catch (_) {
+          return { dir };
+        }
+      });
+  }
+
+  it('sweeps an earlier crashed run\'s server at the first start, and records the new one until it stops', async (t) => {
+    // A record from a crashed run: its Cuewell is gone. Not the pid of a
+    // child that just exited: Windows hands pids out again almost at once,
+    // so that pid can already belong to a live process. A pid above every
+    // OS's limit is never alive.
+    const deadOwner = 2147480001;
+    // Earlier tests already started servers (on a real Windows runner, each
+    // was a win32 start that used up this run's sweep).
+    _resetSweepsForTests();
+    const stalePid = 2147480000;
+    const staleDir = fs.mkdtempSync(path.join(TMP, 'cuewell-wcpp-'));
+    fs.writeFileSync(path.join(staleDir, 'owner.json'),
+      JSON.stringify({ owner: deadOwner, server: stalePid, path: WIN_EXE, created: CREATED }));
+
+    const inspected = [];
+    const killed = [];
+    const { engine, spawns } = setup(t, {
+      engineOptions: {
+        platform: 'win32',
+        inspectProcessFn: async (pid) => {
+          inspected.push(pid);
+          return { path: WIN_EXE, created: CREATED };
+        },
+        killProcessFn: async (pid) => {
+          killed.push(pid);
+          return true;
+        },
+      },
+    });
+    await engine.warmup();
+    await engine._sweepWindows(); // runs beside the start
+    assert.deepEqual(killed, [stalePid], 'the leftover server was stopped');
+    assert.equal(fs.existsSync(staleDir), false, 'and its record removed');
+
+    const childPid = spawns[0].child.pid;
+    assert.ok(inspected.includes(childPid), 'the new server was inspected right after it started');
+    let mine;
+    await waitFor(() => {
+      mine = records().find((r) => r.server === childPid && r.created);
+      return Boolean(mine);
+    });
+    assert.equal(mine.owner, process.pid);
+    assert.equal(mine.path, WIN_EXE);
+    assert.equal(mine.created, CREATED);
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(path.join(mine.dir, 'owner.json')).mode & 0o077, 0, 'owner-only');
+    }
+
+    await engine.unload();
+    await waitFor(() => !fs.existsSync(mine.dir));
+    assert.deepEqual(killed, [stalePid], 'the sweep runs once per app run');
+  });
+});
+
 describe('WhisperCppEngine privacy', () => {
   before(async () => {
     // One more run that fails a request after a good one, so error paths log too.
@@ -573,5 +645,16 @@ describe('WhisperCppEngine privacy', () => {
     assert.equal(cleanTranscript(' [BLANK_AUDIO] '), '');
     assert.equal(cleanTranscript('(music) hello  [ Silence ]  world ♪'), 'hello world');
     assert.equal(cleanTranscript(null), '');
+    assert.equal(cleanTranscript('[MUSIC] next [ MUSIC PLAYING ] one (upbeat music)'), 'next one');
+    assert.equal(cleanTranscript('(coughs) yes (clears throat) [inaudible] ok [Sound effect]'), 'yes ok');
+  });
+
+  it('cleanTranscript keeps brackets and parentheses that are spoken code', () => {
+    assert.equal(cleanTranscript('arr[i] plus a[0]'), 'arr[i] plus a[0]');
+    assert.equal(cleanTranscript('dp[i][j] is O(n log n)'), 'dp[i][j] is O(n log n)');
+    assert.equal(cleanTranscript('f(x) and (n) items in list(range(10))'), 'f(x) and (n) items in list(range(10))');
+    assert.equal(cleanTranscript('map[key] or [1, 2, 3] or [left, right]'), 'map[key] or [1, 2, 3] or [left, right]');
+    // A marker word glued to a name is code, not a marker.
+    assert.equal(cleanTranscript('arr[music] and sounds(x)'), 'arr[music] and sounds(x)');
   });
 });
