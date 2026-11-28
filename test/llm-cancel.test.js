@@ -405,7 +405,7 @@ describe('LLMService', { timeout: TEST_TIMEOUT_MS }, () => {
     it('a stop while a model is unavailable tries no fallback model', async () => {
       useGemini();
       const models = [];
-      llmService._streamRequestForModel = async (request, model, key, onDelta, signal) => {
+      llmService._streamRequestForModel = async (request, model, _key, _onDelta, _signal) => {
         models.push(model);
         controller.abort(); // the stop lands while this model fails
         throw new Error('HTTP 503: UNAVAILABLE high demand');
