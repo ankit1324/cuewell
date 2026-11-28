@@ -335,4 +335,77 @@ describe('answers in main.js', () => {
       assert.deepEqual(IPC_ALLOWED_WINDOWS['open-screen-recording-settings'], ['llmResponse']);
     });
   });
+
+  describe('voice turn-taking', () => {
+    const startsOf = (scenario) => scenario.started;
+
+    it('ignores thinking aloud while an answer is written, and stores nothing of it', () => {
+      const { events, first, ignored, questions } = out.scenarios.voiceThinkingAloud;
+      assert.deepEqual(startsOf(out.scenarios.voiceThinkingAloud), [first]);
+      assert.equal(events.some((e) => isStopped(e, first)), false, 'the answer was stopped');
+      assert.ok(events.some((e) => e.to !== 'llmResponse' && e.channel === 'transcription-llm-response' && idOf(e) === first));
+      assert.equal(ignored.length, 1);
+      assert.equal(ignored[0].to, 'chat');
+      assert.equal(ignored[0].data.reason, 'self-talk');
+      assert.match(ignored[0].data.message, /Kept the answer on screen/);
+      assert.deepEqual(questions, ['What is a semaphore?']);
+    });
+
+    it('ignores the answer read aloud after it finished, then lets a real question replace it', () => {
+      const { readAloud, second, questions, events } = out.scenarios.voiceAfterFinish;
+      assert.equal(readAloud.started, 0);
+      assert.deepEqual(readAloud.ignored.map((e) => e.data.reason), ['not-a-question']);
+      assert.ok(second);
+      assert.ok(events.some((e) => e.to === 'chat' && e.channel === 'transcription-llm-response' && idOf(e) === second && !e.data.stopped));
+      assert.deepEqual(questions, ['What is a semaphore?', 'Tell me about a time you disagreed with your manager.']);
+    });
+
+    it('answers the rest of a voice question together with its first part', () => {
+      const { events, first, second, questions, fetchCalls } = out.scenarios.voiceMerge;
+      assert.ok(events.some((e) => isStopped(e, first)), 'the half-question answer was not replaced');
+      assert.equal(questions.length, 2);
+      assert.equal(questions[1], 'What is the difference between a process and a thread? And when would you use each?');
+      assert.ok(events.some((e) => e.channel === 'transcription-llm-response' && idOf(e) === second && !e.data.stopped));
+      assert.equal(fetchCalls.length, 2);
+    });
+
+    it('holds a question while someone is still speaking, then sends it once, whole', () => {
+      const { heldStarts, started, questions } = out.scenarios.voiceHold;
+      assert.equal(heldStarts, 0);
+      assert.equal(started.length, 1);
+      assert.deepEqual(questions, ['What is the difference between a process and a thread, and when would you use each?']);
+    });
+
+    it('sends a held question after the hold limit when speech never pauses', () => {
+      const { beforeLimit, started, questions } = out.scenarios.voiceHoldLimit;
+      assert.equal(beforeLimit, 0);
+      assert.equal(started.length, 1);
+      assert.deepEqual(questions, ['Explain how a load balancer works.']);
+    });
+
+    it('counts the pause from the last word, waits longer for unfinished questions and on Long', () => {
+      const t = out.scenarios.voiceTiming;
+      // Clear question: 2.5 s after a last word 2.3 s ago.
+      assert.ok(t.completeMs >= 150 && t.completeMs < 900, `complete ${t.completeMs}`);
+      // Unfinished: 5 s after a last word 4.5 s ago.
+      assert.equal(t.unfinishedAt300, 0);
+      assert.ok(t.unfinishedMs >= 450 && t.unfinishedMs < 1300, `unfinished ${t.unfinishedMs}`);
+      // Stopped listening: at once.
+      assert.ok(t.stoppedMs < 150, `stopped ${t.stoppedMs}`);
+      // Long, clear question: 3.5 s after a last word 3.3 s ago.
+      assert.ok(t.longCompleteMs >= 150 && t.longCompleteMs < 900, `long ${t.longCompleteMs}`);
+    });
+
+    it('lets a typed question replace a voice answer, however short', () => {
+      const { events, first, second } = out.scenarios.typedAfterVoice;
+      assert.ok(second);
+      assert.ok(events.some((e) => isStopped(e, first)));
+    });
+
+    it('lets voice replace an answer the user stopped', () => {
+      const { second, started } = out.scenarios.voiceAfterUserStop;
+      assert.equal(started.length, 2);
+      assert.ok(second);
+    });
+  });
 });

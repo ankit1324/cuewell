@@ -77,20 +77,20 @@ async function run(root) {
   const stopHeld = () => owned.has(STOP);
 
   // main.js keeps its controller to itself. Its constructor assigns
-  // this._utteranceCoalesceMs, which this accessor catches once to learn
+  // this._utteranceDelayScale, which this accessor catches once to learn
   // the instance, then turns into a plain property.
   let controller = null;
-  Object.defineProperty(Object.prototype, '_utteranceCoalesceMs', {
+  Object.defineProperty(Object.prototype, '_utteranceDelayScale', {
     configurable: true,
     set(value) {
       if (!controller) controller = this;
-      Object.defineProperty(this, '_utteranceCoalesceMs', { value, writable: true, configurable: true, enumerable: true });
+      Object.defineProperty(this, '_utteranceDelayScale', { value, writable: true, configurable: true, enumerable: true });
     },
   });
   try {
     require(path.join(ROOT, 'main.js'));
   } finally {
-    delete Object.prototype._utteranceCoalesceMs;
+    delete Object.prototype._utteranceDelayScale;
   }
   if (!controller) throw new Error('main.js controller not found');
 
@@ -117,7 +117,8 @@ async function run(root) {
   speechService.isManualCaptureMode = () => false;
   captureService.captureAndProcess = async () => ({ imageBuffer: Buffer.from('fake png'), mimeType: 'image/png' });
   controller.isReady = true;
-  controller._utteranceCoalesceMs = 40;
+  // End-of-question waits at 1% (25 to 80 ms instead of 2.5 to 8 s).
+  controller._utteranceDelayScale = 0.01;
 
   // The real LLMService and provider code; only the HTTP layer is fake.
   let fetch = null;
@@ -284,7 +285,7 @@ async function run(root) {
   await ipc('send-chat-message', 'chat', 'What is sharding?');
   [first] = startedIds();
   await waitForChunks(first, 2);
-  controller.handleTranscriptionFragment('And replication?');
+  controller.handleTranscriptionFragment('And how does replication work?');
   await waitFor(() => startedIds().length === 2, 'the chat-only voice answer');
   second = startedIds()[1];
   await waitForFinal(second);
@@ -398,6 +399,165 @@ async function run(root) {
   await sleep(20);
   lifecycle.releasedInfo = stopInfo();
   lifecycle.releasedAfter = stopHeld();
+
+  // ---- Voice turn-taking (src/core/voice-turn.js) ----
+  const fresh = () => {
+    reset();
+    controller.clearSessionMemory();
+    events = [];
+    controller._voiceBusy = false;
+    controller._voiceLastSpeechAt = 0;
+    controller._utteranceDelayScale = 0.01;
+  };
+  const voiceQuestions = () => memory().filter((e) => e.role === 'user').map((e) => e.content);
+  const ignoredEvents = () => events.filter((e) => e.channel === 'transcription-ignored');
+
+  // Thinking aloud while a typed answer is written: ignored, the answer
+  // finishes, nothing is stored.
+  fresh();
+  useProvider();
+  await ipc('send-chat-message', 'chat', 'What is a semaphore?');
+  [first] = startedIds();
+  await waitForChunks(first, 2);
+  controller.handleTranscriptionFragment('Umm, let me think.');
+  await sleep(150);
+  await waitForFinal(first);
+  scenarios.voiceThinkingAloud = snapshot({ first, ignored: ignoredEvents(), questions: voiceQuestions() });
+
+  // After that answer finished, the user reads it aloud: still ignored.
+  // Then the interviewer asks a real question: it replaces the answer.
+  events = [];
+  controller.handleTranscriptionFragment('So basically a semaphore is a counter that controls access.');
+  await sleep(150);
+  const readAloud = { started: startedIds().length, ignored: ignoredEvents() };
+  controller.handleTranscriptionFragment('Tell me about a time you disagreed with your manager.');
+  await waitFor(() => startedIds().length === 1, 'the new voice question to start');
+  second = startedIds()[0];
+  await waitForFinal(second);
+  scenarios.voiceAfterFinish = snapshot({ first, second, readAloud, questions: voiceQuestions() });
+
+  // A voice question that looked complete, then the rest of it while its
+  // answer is written: one answer for both parts together.
+  fresh();
+  useProvider();
+  controller.handleTranscriptionFragment('What is the difference between a process and a thread?');
+  await waitFor(() => startedIds().length === 1, 'the first part to be answered');
+  [first] = startedIds();
+  await waitForChunks(first, 2);
+  controller.handleTranscriptionFragment('And when would you use each?');
+  await waitFor(() => startedIds().length === 2, 'the joined question');
+  second = startedIds()[1];
+  await waitForFinal(second);
+  scenarios.voiceMerge = snapshot({ first, second, questions: voiceQuestions() });
+
+  // While the speech service says someone is speaking (or transcribing),
+  // nothing is sent, however long the pause target. When it goes idle,
+  // the whole question is sent once.
+  fresh();
+  useProvider();
+  controller.handleTranscriptionFragment('What is the difference between a process and');
+  controller.handleVoiceActivity({ busy: true, lastVoiceAt: Date.now(), recording: true });
+  await sleep(100); // 2x the scaled 5 s wait for an unfinished question, under the 120 ms hold limit
+  const heldStarts = startedIds().length;
+  controller.handleTranscriptionFragment('a thread, and when would you use each?');
+  controller.handleVoiceActivity({ busy: false, lastVoiceAt: Date.now(), recording: true });
+  await waitFor(() => startedIds().length === 1, 'the held question');
+  [first] = startedIds();
+  await waitForFinal(first);
+  await sleep(100);
+  scenarios.voiceHold = snapshot({ first, heldStarts, questions: voiceQuestions() });
+
+  // Speech that never pauses (a noisy room): the question is sent after
+  // the hold limit (12 s, 120 ms here), even when speech began before it
+  // was heard.
+  fresh();
+  useProvider();
+  controller.handleVoiceActivity({ busy: true, lastVoiceAt: Date.now(), recording: true });
+  controller.handleTranscriptionFragment('Explain how a load balancer works.');
+  await sleep(60);
+  const beforeLimit = startedIds().length;
+  await waitFor(() => startedIds().length === 1, 'the held question after the limit');
+  [first] = startedIds();
+  await waitForFinal(first);
+  controller._voiceBusy = false;
+  scenarios.voiceHoldLimit = snapshot({ first, beforeLimit, questions: voiceQuestions() });
+
+  // Real-time waits (scale 1, but counted from a last word in the past):
+  // a clear question 2.5 s after its last word, an unfinished one 5 s.
+  fresh();
+  useProvider({ intervalMs: 2 });
+  controller._utteranceDelayScale = 1;
+  const timing = {};
+  let askedAt = Date.now();
+  controller.handleVoiceActivity({ busy: true, lastVoiceAt: askedAt - 2300, recording: true });
+  controller.handleTranscriptionFragment('Tell me about yourself.');
+  controller.handleVoiceActivity({ busy: false, lastVoiceAt: askedAt - 2300, recording: true });
+  await waitFor(() => startedIds().length === 1, 'the clear question');
+  timing.completeMs = Date.now() - askedAt;
+  await waitForFinal(startedIds()[0]);
+  controller.clearSessionMemory();
+  events = [];
+  controller._voiceLastSpeechAt = 0;
+  askedAt = Date.now();
+  controller.handleVoiceActivity({ busy: false, lastVoiceAt: askedAt - 4500, recording: true });
+  controller.handleTranscriptionFragment('Can you explain the difference between a process and');
+  await sleep(300);
+  timing.unfinishedAt300 = startedIds().length;
+  await waitFor(() => startedIds().length === 1, 'the unfinished question', 2000);
+  timing.unfinishedMs = Date.now() - askedAt;
+  await waitForFinal(startedIds()[0]);
+  // Listening stopped: what was heard is sent at once.
+  controller.clearSessionMemory();
+  events = [];
+  controller._voiceLastSpeechAt = 0;
+  askedAt = Date.now();
+  controller.handleVoiceActivity({ busy: true, lastVoiceAt: askedAt, recording: true });
+  controller.handleTranscriptionFragment('Explain the CAP theorem and');
+  controller.handleVoiceActivity({ busy: false, lastVoiceAt: askedAt, recording: false });
+  await waitFor(() => startedIds().length === 1, 'the question after stop');
+  timing.stoppedMs = Date.now() - askedAt;
+  await waitForFinal(startedIds()[0]);
+  // Long: the same clear question waits 3.5 s.
+  controller.clearSessionMemory();
+  events = [];
+  process.env.VOICE_PAUSE = "long";
+  controller._voiceLastSpeechAt = 0;
+  askedAt = Date.now();
+  controller.handleVoiceActivity({ busy: false, lastVoiceAt: askedAt - 3300, recording: true });
+  controller.handleTranscriptionFragment('Tell me about yourself.');
+  await waitFor(() => startedIds().length === 1, 'the clear question on Long');
+  timing.longCompleteMs = Date.now() - askedAt;
+  await waitForFinal(startedIds()[0]);
+  delete process.env.VOICE_PAUSE;
+  controller._utteranceDelayScale = 0.01;
+  scenarios.voiceTiming = timing;
+
+  // A screenshot and a typed question still replace a voice answer, however
+  // short.
+  fresh();
+  useProvider();
+  controller.handleTranscriptionFragment('What are your strengths?');
+  await waitFor(() => startedIds().length === 1, 'the voice answer');
+  [first] = startedIds();
+  await waitForChunks(first, 2);
+  await ipc('send-chat-message', 'chat', 'Hmm');
+  second = startedIds()[1];
+  await waitForFinal(second);
+  scenarios.typedAfterVoice = snapshot({ first, second });
+
+  // Stopped by the user: the next voice utterance may replace it.
+  fresh();
+  useProvider();
+  await ipc('send-chat-message', 'chat', 'What is a monitor?');
+  [first] = startedIds();
+  await waitForChunks(first, 2);
+  await ipc('stop-answer', 'chat', first);
+  await sleep(30);
+  controller.handleTranscriptionFragment('So basically a monitor is a lock.');
+  await waitFor(() => startedIds().length === 2, 'the voice answer after a stop');
+  second = startedIds()[1];
+  await waitForFinal(second);
+  scenarios.voiceAfterUserStop = snapshot({ first, second });
 
   // Quitting while an answer is written: everything is released, and the
   // answer ending afterwards registers nothing.

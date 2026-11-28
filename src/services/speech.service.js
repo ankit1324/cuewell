@@ -579,6 +579,16 @@ class SpeechService extends EventEmitter {
     this._pythonCommandCache = null;
     this.isProcessingAudio = false;
     this.manualStopRequested = false;
+    // voice-activity state (see _updateVoiceActivity): whether the last
+    // event said busy, when the last word was heard, and Azure's own
+    // "hearing speech" flag.
+    this.voiceBusy = false;
+    this.voiceLastAt = 0;
+    this.azureSpeaking = false;
+    // Whisper transcriptions running now. Unlike transcriptionInFlight,
+    // _cleanup() does not reset it, so a stop during one stays busy until
+    // its text has been emitted.
+    this.transcriptionsRunning = 0;
     this._resetVadState();
 
     this.initializeClient();
@@ -997,6 +1007,9 @@ class SpeechService extends EventEmitter {
     this.recognizer.recognizing = (s, e) => {
       try {
         if (e.result.reason === sdk.ResultReason.RecognizingSpeech) {
+          this.voiceLastAt = Date.now();
+          this.azureSpeaking = true;
+          this._updateVoiceActivity();
           this.emit('interim-transcription', e.result.text);
         }
       } catch (error) {
@@ -1011,6 +1024,9 @@ class SpeechService extends EventEmitter {
         }
       } catch (error) {
         logger.error('Error in recognized handler', { error: error.message });
+      } finally {
+        this.azureSpeaking = false;
+        this._updateVoiceActivity();
       }
     };
 
@@ -1154,6 +1170,24 @@ class SpeechService extends EventEmitter {
     this.vadPreRoll = [];            // ring of recent pre-speech chunks
     this.vadPreRollMs = 0;           // duration held in the pre-roll ring
     this.vadLastChunkAt = 0;         // timestamp of the last ingested chunk
+    this.vadSegmentVoiceAt = 0;      // when the last voiced chunk of this segment arrived
+  }
+
+  /**
+   * Emit 'voice-activity' { busy, lastVoiceAt, recording } when busy
+   * changes. busy: someone is speaking (automatic capture's VAD or Azure
+   * hears speech) or a segment is being transcribed, so more of the
+   * question may still come. lastVoiceAt: Date.now() of the last word
+   * heard in a segment that was kept. main.js waits for the end of a
+   * question with these (handleVoiceActivity).
+   */
+  _updateVoiceActivity() {
+    const vadSpeaking = this.provider === 'whisper' && this.isRecording && this.vadSpeaking &&
+      !this._isManualCaptureMode() && this._isVadEnabled();
+    const busy = !!(vadSpeaking || this.azureSpeaking || this.transcriptionsRunning > 0);
+    if (busy === this.voiceBusy) return;
+    this.voiceBusy = busy;
+    this.emit('voice-activity', { busy, lastVoiceAt: this.voiceLastAt, recording: !!this.isRecording });
   }
 
   /**
@@ -1305,6 +1339,8 @@ class SpeechService extends EventEmitter {
         this.segmentBuffers.push(buffer);
         this.segmentBytes += buffer.length;
         this.vadSpeechMs += chunkMs;
+        this.vadSegmentVoiceAt = Date.now();
+        this._updateVoiceActivity();
       } else {
         // Background: adapt the noise floor and keep a short pre-roll ring.
         this.vadNoiseFloor = this.vadNoiseFloor * 0.95 + energy * 0.05;
@@ -1326,6 +1362,7 @@ class SpeechService extends EventEmitter {
     if (isVoiced) {
       this.vadSpeechMs += chunkMs;
       this.vadSilenceMs = 0;
+      this.vadSegmentVoiceAt = Date.now();
     } else {
       this.vadSilenceMs += chunkMs;
     }
@@ -1344,6 +1381,7 @@ class SpeechService extends EventEmitter {
       this.vadSpeaking = false;
       this.vadSpeechMs = 0;
       this.vadSilenceMs = 0;
+      this._updateVoiceActivity();
     }
   }
 
@@ -1354,10 +1392,13 @@ class SpeechService extends EventEmitter {
     this.vadSilenceMs = 0;
     this.vadPreRoll = [];
     this.vadPreRollMs = 0;
+    if (this.vadSegmentVoiceAt > this.voiceLastAt) this.voiceLastAt = this.vadSegmentVoiceAt;
+    // Starts transcribing synchronously, so busy stays true until it ends.
     this._flushWhisperSegment({ final: false }).catch((error) => {
       logger.error('Whisper segment transcription failed', { error: error.message });
       this.emit('error', this._whisperErrorMessage(error));
     });
+    this._updateVoiceActivity();
   }
 
   _chunkDurationMs(buffer) {
@@ -1500,6 +1541,8 @@ class SpeechService extends EventEmitter {
     this._resetVadState();
     this._audioDataLogged = false;
     this.useRendererCapture = false;
+    this.azureSpeaking = false;
+    this._updateVoiceActivity();
   }
 
   async recognizeFromFile(audioFilePath) {
@@ -2332,6 +2375,7 @@ class SpeechService extends EventEmitter {
     this.segmentBytes = 0;
 
     this.transcriptionInFlight = true;
+    this.transcriptionsRunning += 1;
 
     try {
       const transcript = await this._transcribeWhisperBuffer(audioBuffer);
@@ -2343,6 +2387,7 @@ class SpeechService extends EventEmitter {
       }
     } finally {
       this.transcriptionInFlight = false;
+      this.transcriptionsRunning = Math.max(0, this.transcriptionsRunning - 1);
 
       if (this.pendingFlush) {
         this.pendingFlush = false;
@@ -2350,6 +2395,7 @@ class SpeechService extends EventEmitter {
         this.pendingFinal = false;
         await this._flushWhisperSegment({ final: runFinal });
       }
+      this._updateVoiceActivity();
     }
   }
 

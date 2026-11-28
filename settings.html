@@ -487,6 +487,20 @@
                                 <div class="sw-status" id="whisperCaptureModeStatus" role="status"></div>
                             </div>
                         </div>
+                        <div class="sw-row" data-search="pause before answering wait thinking silence end of question short normal long">
+                            <div>
+                                <label class="sw-row-label" for="voicePause">Pause before answering</label>
+                                <p class="sw-row-help" id="voicePauseHelp">How long a pause ends a spoken question. Cuewell waits longer when the question sounds unfinished. Choose Long if the interviewer pauses to think mid-question.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <select class="oc-input" id="voicePause" data-setting="voicePause" aria-describedby="voicePauseHelp voicePauseStatus">
+                                    <option value="short">Short</option>
+                                    <option value="normal">Normal</option>
+                                    <option value="long">Long</option>
+                                </select>
+                                <div class="sw-status" id="voicePauseStatus" role="status"></div>
+                            </div>
+                        </div>
                         <div class="sw-row" data-search="voice answers show chat answer panel overlay target">
                             <div>
                                 <label class="sw-row-label" for="whisperResponseTarget">Show voice answers in</label>

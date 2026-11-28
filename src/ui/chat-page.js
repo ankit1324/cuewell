@@ -950,6 +950,17 @@ if (whysperAPI) {
     }
   });
 
+  // Main kept the answer on screen instead of answering what was heard
+  // (it sounded like thinking aloud, not a new question): drop its
+  // "Thinking…" row and say why.
+  if (whysperAPI.onTranscriptionIgnored) {
+    whysperAPI.onTranscriptionIgnored((event, data) => {
+      const waiting = unclaimedThinking('voice');
+      if (waiting) waiting.remove();
+      if (data && typeof data.message === 'string' && data.message) addMessage(data.message, 'system');
+    });
+  }
+
   // Listen for speech status
   whysperAPI.onSpeechStatus((event, data) => {
     // Only a message. Recording state follows recording-started and
