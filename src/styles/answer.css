@@ -470,6 +470,36 @@ body {
   font-weight: 600;
 }
 
+/* Screen Help sections (Problem, Approach, Steps, Dry run, Complexity, Edge
+   cases; for design Steps, Components, Trade-offs): small-caps labels like
+   SAY THIS, in ink-2 after a short pencil dash. normalizeSectionHeadings in
+   answer-page.js turns the labels a model writes into these h4s. One fixed
+   16 px line, so a label that is still streaming in has its final height. */
+.answer-body .markdown-content > h4 {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-5) 0 var(--s-1);
+  font: 700 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.answer-body .markdown-content > h4::before {
+  content: '';
+  flex: none;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--graphite);
+}
+
+/* Text right under a label starts on the label's next line. */
+.answer-body .markdown-content > h4 + p {
+  margin-top: 0;
+}
+
 /* Page extras for markdown. */
 .markdown-content sup,
 .markdown-content sub {
@@ -616,6 +646,17 @@ body {
   white-space: pre;
   color: var(--on-slate);
   background: none;
+}
+
+/* Holds the code panel while a coding answer's text streams (answer-page.js
+   PENDING_CODE_HTML); the real card replaces it in place. */
+.code-block--pending .code-header .oc-label,
+.code-block--pending .code-content code {
+  color: var(--on-slate-3);
+}
+
+.code-block--pending .code-content code {
+  font-style: italic;
 }
 
 .no-code {

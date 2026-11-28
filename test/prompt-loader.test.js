@@ -399,4 +399,139 @@ describe('getImageInstruction', () => {
     }
     assert.equal(loader.getImageInstruction('unknown'), loader.getImageInstruction('auto'));
   });
+
+  it('focuses every mode on the question on screen, not the browser or other windows', () => {
+    for (const mode of MODE_IDS) {
+      const instruction = loader.getImageInstruction(mode, 'cpp');
+      assert.match(instruction, /Ignore browser tabs, the address bar, menus, sidebars/, mode);
+      assert.match(instruction, /other windows/, mode);
+    }
+    assert.match(loader.getImageInstruction('dsa', 'cpp'), /statement, examples, constraints and any code template/);
+  });
+});
+
+// Screen Help: the structured answer to a screenshot question. The sections
+// are "#### <Heading>" lines, which the answer window and chat style as
+// section labels (normalizeSectionHeadings in the page scripts).
+describe('Screen Help format', () => {
+  const HEADING = '## SCREEN HELP FORMAT (internal';
+  const CODING = '### Coding or DSA problem';
+  const DESIGN = '### System design question';
+
+  /** The text of one "### ..." part of the Screen Help section, or null. */
+  function part(prompt, title) {
+    const at = prompt.indexOf(HEADING);
+    if (at < 0) return null;
+    const section = prompt.slice(at).split(/\n(?=## )/)[0];
+    const start = section.indexOf(title);
+    if (start < 0) return null;
+    return section.slice(start).split(/\n(?=### )/)[0];
+  }
+  /** Headings the part asks for ("#### Steps" -> "Steps"), in order. */
+  const headings = (text) => [...text.matchAll(/"#### ([^"]+)"/g)].map((m) => m[1]);
+
+  const CODING_SECTIONS = {
+    short: ['Steps'],
+    standard: ['Problem', 'Approach', 'Steps', 'Dry run', 'Complexity', 'Edge cases'],
+    detailed: ['Problem', 'Approach', 'Steps', 'Dry run', 'Complexity', 'Edge cases'],
+  };
+  const DESIGN_SECTIONS = {
+    short: ['Steps'],
+    standard: ['Problem', 'Steps', 'Components', 'Trade-offs'],
+    detailed: ['Problem', 'Steps', 'Components', 'Data model', 'Scaling', 'Trade-offs'],
+  };
+
+  it('asks coding screenshots for the sections of each answer length, in order', () => {
+    for (const mode of ['auto', 'dsa', 'technical']) {
+      for (const [length, expected] of Object.entries(CODING_SECTIONS)) {
+        const coding = part(build({ mode, channel: 'image', answerLength: length, programmingLanguage: 'cpp' }), CODING);
+        assert.ok(coding, `${mode}/${length}: no coding format`);
+        assert.deepEqual(headings(coding), expected, `${mode}/${length}`);
+      }
+    }
+  });
+
+  it('uses Standard for a screenshot when the length is Auto', () => {
+    for (const mode of ['auto', 'dsa']) {
+      const auto = part(build({ mode, channel: 'image', answerLength: 'auto' }), CODING);
+      assert.deepEqual(headings(auto), CODING_SECTIONS.standard, mode);
+    }
+  });
+
+  it('opens with the line to say and ends with the code, in every length', () => {
+    for (const length of Object.keys(CODING_SECTIONS)) {
+      const coding = part(build({ mode: 'dsa', channel: 'image', answerLength: length, programmingLanguage: 'python' }), CODING);
+      const items = coding.split('\n').filter((line) => /^\d+\. /.test(line));
+      assert.match(items[0], /^1\. Line 1, with no heading or label: the one sentence to say first/, length);
+      assert.match(items[items.length - 1], /complete solution in one fenced code block, last, with no heading before it/, length);
+      assert.equal(items.length, CODING_SECTIONS[length].length + 2, length);
+      assert.match(coding, /comment only/i, length);
+      assert.match(coding, /Use a code fence only for the solution code/, length);
+    }
+  });
+
+  it('keeps the steps short lines the candidate can say while coding', () => {
+    const steps = (length) => part(build({ mode: 'dsa', channel: 'image', answerLength: length }), CODING)
+      .split('\n').find((line) => line.includes('"#### Steps"'));
+    assert.match(steps('short'), /numbered list of 3-5 steps/);
+    assert.match(steps('standard'), /numbered list of 3-6 steps/);
+    assert.match(steps('detailed'), /numbered list of 3-7 steps/);
+    assert.match(steps('standard'), /say while typing the code/);
+  });
+
+  it('names the pattern and compares brute force with optimal in the approach', () => {
+    const coding = part(build({ mode: 'auto', channel: 'image' }), CODING);
+    assert.match(coding, /named pattern \(for example "binary search on a rotated array"\)/);
+    assert.match(coding, /\*\*Brute force:\*\*/);
+    assert.match(coding, /\*\*Optimal:\*\*/);
+    assert.match(coding, /tracing the example shown on screen/);
+    assert.match(coding, /\*\*Time:\*\*[\s\S]*\*\*Space:\*\*/);
+  });
+
+  it('gives system design screenshots a lighter format', () => {
+    for (const mode of ['auto', 'system-design']) {
+      for (const [length, expected] of Object.entries(DESIGN_SECTIONS)) {
+        const design = part(build({ mode, channel: 'image', answerLength: length }), DESIGN);
+        assert.ok(design, `${mode}/${length}: no design format`);
+        assert.deepEqual(headings(design), expected, `${mode}/${length}`);
+      }
+    }
+  });
+
+  it('gives each mode only the formats that fit it', () => {
+    const has = (mode, title) => part(build({ mode, channel: 'image' }), title) !== null;
+    assert.deepEqual(MODE_IDS.filter((mode) => has(mode, CODING)), ['auto', 'dsa', 'technical']);
+    assert.deepEqual(MODE_IDS.filter((mode) => has(mode, DESIGN)), ['auto', 'system-design']);
+  });
+
+  it('is only for screenshots, never for typed or voice questions', () => {
+    for (const mode of MODE_IDS) {
+      for (const channel of ['text', 'voice']) {
+        assert.ok(!build({ mode, channel }).includes(HEADING), `${mode}/${channel}`);
+      }
+    }
+  });
+
+  it('is marked internal and comes after the screenshot input, before the candidate context', () => {
+    const prompt = build({ mode: 'auto', channel: 'image', profile: { company: 'Acme' } });
+    const input = prompt.indexOf('## SCREENSHOT INPUT');
+    const help = prompt.indexOf(HEADING);
+    const context = prompt.indexOf('## CANDIDATE CONTEXT');
+    assert.ok(input > 0 && help > input && context > help, JSON.stringify({ input, help, context }));
+    assert.match(prompt, /## SCREEN HELP FORMAT \(internal, never mention it; the "####" headings below are part of the answer\)/);
+  });
+
+  it('tells the model to read the problem on screen and ignore the browser around it', () => {
+    const prompt = build({ mode: 'dsa', channel: 'image' });
+    assert.match(prompt, /Ignore everything around it: browser tabs, the address bar/);
+    assert.match(prompt, /code template or function signature is shown, use it exactly/);
+    assert.match(prompt, /Never describe the screen or the page/);
+  });
+});
+
+describe('Coding prompt', () => {
+  it('allows comments where they help instead of forbidding them', () => {
+    const prompt = build({ mode: 'dsa', channel: 'image', programmingLanguage: 'cpp' });
+    assert.doesNotMatch(prompt, /must not contain any comments|comment-free/i);
+  });
 });
