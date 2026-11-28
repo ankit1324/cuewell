@@ -11,7 +11,7 @@ const os = require('node:os');
 const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
-const { spawn, spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 
 // The engine sweeps os.tmpdir() for socket folders left by a crashed run.
@@ -571,8 +571,11 @@ describe('WhisperCppEngine on Windows records its server for crash cleanup', () 
   }
 
   it('sweeps an earlier crashed run\'s server at the first start, and records the new one until it stops', async (t) => {
-    // A record from a crashed run: its Cuewell (an exited process) is gone.
-    const deadOwner = spawnSync(process.execPath, ['-e', '']).pid;
+    // A record from a crashed run: its Cuewell is gone. Not the pid of a
+    // child that just exited: Windows hands pids out again almost at once,
+    // so that pid can already belong to a live process. A pid above every
+    // OS's limit is never alive.
+    const deadOwner = 2147480001;
     const stalePid = 2147480000;
     const staleDir = fs.mkdtempSync(path.join(TMP, 'cuewell-wcpp-'));
     fs.writeFileSync(path.join(staleDir, 'owner.json'),
