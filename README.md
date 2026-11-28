@@ -15,7 +15,7 @@ Cuewell is free and open source (Apache-2.0), built on Electron, and maintained 
 - **About you.** Settings > About you holds your name, current title and company, years of experience, skills, projects, education, location, relocation, notice period, expected salary, languages, and the tone and language for answers. Every field is optional. Answers use these real details instead of blanks like [X years] and never make up employers, numbers or degrees. They are stored with the interview context in `profile.json` and sent to your AI provider with every question. **Clear all** removes them.
 - **Three ways to ask.**
   - Screenshot: capture the display under the mouse pointer. The image goes to the AI provider directly, with no OCR step.
-  - Voice: transcribed on your computer by the built-in whisper.cpp engine, or by Azure Speech. Local voice needs no Python and handles English, Hindi and Hinglish (written in Roman script). Capture is automatic (pause detection) or manual start/stop.
+  - Voice: transcribed on your computer by the built-in whisper.cpp engine, or by Azure Speech. Local voice needs no Python and handles English, Hindi and Hinglish (written in Roman script). Capture is automatic (pause detection) or manual start/stop. Automatic capture waits longer when a question sounds unfinished, and Settings > Voice > Pause before answering sets how long. While an answer is on screen, speech that does not sound like a new question ("umm, let me think", or you reading the answer aloud) does not replace it.
   - Chat: type a question. Typed and voice questions include recent conversation history, so follow-ups keep their context.
 - **Live answers.** Answers stream into the answer panel, the chat or both (configurable for voice). Code blocks get syntax highlighting and a copy button.
 - **Your choice of AI provider.** Gemini (default), Claude, OpenAI, OpenRouter, Groq, DeepSeek or a local Ollama model.
@@ -269,6 +269,7 @@ WHISPER_ENGINE=whispercpp    # whispercpp (built in) | python (advanced)
 WHISPER_CPP_MODEL=small-q5_1 # small-q5_1 (Small, 190 MB) | base-q5_1 (Base, 60 MB)
 WHISPER_LANGUAGE=auto        # auto | en | hi | hinglish
 WHISPER_CAPTURE_MODE=vad     # vad (pause detection) | manual
+VOICE_PAUSE=normal           # short | normal | long: pause that ends a spoken question
 WHISPER_RESPONSE_TARGET=both # both | chat | overlay
 WHISPER_MANUAL_MAX_MS=90000
 WHISPER_GPU_IDLE_MS=60000

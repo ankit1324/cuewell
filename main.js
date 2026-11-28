@@ -313,6 +313,7 @@ speechService.setEnvPath(ENV_PATH);
 const llmService = require("./src/services/llm.service");
 const { isCancelledError } = require("./src/services/cancellation");
 const { ActiveAnswer } = require("./src/core/active-answer");
+const voiceTurn = require("./src/core/voice-turn");
 const { promptLoader } = require("./prompt-loader");
 const profileStore = require("./src/core/profile-store");
 const secretStore = require("./src/core/secret-store");
@@ -453,7 +454,7 @@ const SETTINGS_FIELDS_BY_WINDOW = {
     "speechProvider", "azureKey", "azureRegion",
     "whisperCommand", "whisperModel", "whisperLanguage", "whisperDevice",
     "whisperCaptureMode", "whisperResponseTarget", "whisperSegmentMs",
-    "whisperEngine", "whisperCppModel",
+    "whisperEngine", "whisperCppModel", "voicePause",
     "geminiKey", "llmProvider", ...Object.keys(LLM_SETTING_ENV_KEYS),
     "windowGap", "codingLanguage", "activeSkill", "answerLength", "selectedIcon",
     "theme", "windowOpacity", "llmFallback",
@@ -555,6 +556,9 @@ const ANSWER_ID_RE = /^(?:chat|tr|img)-\d{1,16}-\d{1,9}$/;
 // Ends a stopped answer's partial text in session memory, so the next
 // question's history shows the AI that this answer was cut off.
 const STOPPED_ANSWER_NOTE = "[This answer was stopped before it was finished.]";
+// Longest a heard question waits for speech that is still going on (or a
+// segment still being transcribed) before it is sent anyway.
+const VOICE_HOLD_MAX_MS = 12000;
 // Onboarding's Test connection; a cold local Ollama model can take a while.
 const PROVIDER_TEST_TIMEOUT_MS = 60000;
 
@@ -671,14 +675,28 @@ class ApplicationController {
     windowManager.setContentOpacity(parseWindowOpacity(process.env.WINDOW_OPACITY) ?? DEFAULT_WINDOW_OPACITY);
     this.speechAvailable = false;
 
-    // Utterance coalescing: VAD emits a transcript per natural pause, but a
-    // single spoken question can still arrive as a few fragments (mid-thought
-    // pauses). We buffer fragments and debounce so one question yields one LLM
-    // call instead of several slow, half-answered ones.
+    // Utterance coalescing: the speech service emits a transcript per pause,
+    // but one spoken question often arrives as a few fragments (the speaker
+    // pauses to think). Fragments are buffered, and the question is sent once
+    // the speaker has been quiet for as long as src/core/voice-turn.js says
+    // for that transcript and the "Pause before answering" setting.
     this._utteranceBuffer = "";
     this._utteranceTimer = null;
     this._utteranceDispatchInFlight = false;
-    this._utteranceCoalesceMs = 800;
+    // Decision made for the buffer while an answer was still being written
+    // (see dispatchCoalescedUtterance), used when that answer has ended.
+    this._utteranceDecision = null;
+    // Multiplies every end-of-question wait (tests make them short).
+    this._utteranceDelayScale = 1;
+    // From the speech service's voice-activity events: whether someone is
+    // speaking or a segment is still being transcribed (no question is sent
+    // then), and when the last word was heard.
+    this._voiceBusy = false;
+    this._voiceLastSpeechAt = 0;
+    this._voiceHoldTimer = null;
+    // The answer on screen, for the voice replace rule: { id, source,
+    // question, askedAt, endedAt, protect }. null when none.
+    this._shownAnswer = null;
 
     // Encrypted API keys (userData/secrets.bin). Loaded by ensureSecrets()
     // once the app is ready: safeStorage needs that on Windows and Linux.
@@ -1693,6 +1711,10 @@ class ApplicationController {
       this.handleTranscriptionFragment(text);
     });
 
+    speechService.on("voice-activity", (activity) => {
+      this.handleVoiceActivity(activity);
+    });
+
     speechService.on("interim-transcription", (text) => {
       BrowserWindow.getAllWindows().forEach((window) => {
         window.webContents.send("interim-transcription", { text });
@@ -2265,6 +2287,9 @@ class ApplicationController {
   clearSessionMemory() {
     try {
       sessionManager.clear();
+      // A question asked after this starts fresh: nothing to protect or join.
+      this._shownAnswer = null;
+      this._utteranceDecision = null;
       windowManager.broadcastToAllWindows("session-cleared");
       logger.info("Session memory cleared via global shortcut");
     } catch (error) {
@@ -2477,6 +2502,7 @@ class ApplicationController {
       });
     } catch (error) {
       if (this.isStoppedAnswer(answer, error)) return;
+      this.markAnswerFailed(answer);
       const screenAccess = error.isCaptureError ? this.screenAccessStatus() : undefined;
       const captureInfo = error.isCaptureError
         ? describeCaptureError(error.message, {
@@ -2645,6 +2671,7 @@ class ApplicationController {
       });
     } catch (error) {
       if (this.isStoppedAnswer(answer, error)) return;
+      this.markAnswerFailed(answer);
       logger.error("LLM processing failed", {
         error: error.message,
         skill: this.activeSkill,
@@ -2674,10 +2701,11 @@ class ApplicationController {
   }
 
   /**
-   * Buffer a transcribed fragment and (re)arm the coalesce debounce. Fragments
-   * are shown in the UI immediately so speech feels live, but the LLM is only
-   * asked once the speaker has actually paused — this is what stops one spoken
-   * line from producing two separate, slow answers.
+   * Buffer a transcribed fragment and wait for the end of the question.
+   * Fragments are shown in the UI immediately so speech feels live, but the
+   * LLM is only asked once the speaker has been quiet long enough
+   * (scheduleUtteranceDispatch): one spoken question gets one answer, even
+   * when the speaker pauses to think in the middle of it.
    */
   handleTranscriptionFragment(text) {
     const fragment = (text || "").trim();
@@ -2693,35 +2721,171 @@ class ApplicationController {
       ? `${this._utteranceBuffer} ${fragment}`
       : fragment;
 
-    if (this._utteranceTimer) {
-      clearTimeout(this._utteranceTimer);
-      this._utteranceTimer = null;
-    }
-
     // Manual capture emits one complete transcript after the user presses stop,
     // so no debounce/coalescing delay is needed.
     if (speechService.isManualCaptureMode()) {
+      this.clearUtteranceTimer();
       this.dispatchCoalescedUtterance();
       return;
     }
 
-    this._utteranceTimer = setTimeout(() => {
+    this.scheduleUtteranceDispatch();
+  }
+
+  /** "Pause before answering" (VOICE_PAUSE): short, normal (default) or long. */
+  getVoicePause() {
+    return voiceTurn.parseVoicePause(process.env.VOICE_PAUSE) || voiceTurn.DEFAULT_VOICE_PAUSE;
+  }
+
+  clearUtteranceTimer() {
+    if (this._utteranceTimer) {
+      clearTimeout(this._utteranceTimer);
       this._utteranceTimer = null;
-      this.dispatchCoalescedUtterance();
-    }, this._utteranceCoalesceMs);
+    }
   }
 
   /**
-   * Send the coalesced utterance to the LLM. If a previous dispatch is still
-   * running, its answer is stopped (a new question replaces it) and the
-   * buffer is left intact for that dispatch's completion to pick up, so
-   * requests never overlap.
+   * (Re)arm the end-of-question timer for the buffered utterance. Nothing is
+   * armed while someone is speaking or a segment is being transcribed: the
+   * speech service's next idle voice-activity event arms it then. The wait
+   * counts from the last word heard, and is longer when the transcript
+   * looks unfinished (voiceTurn.endOfQuestionDelayMs).
+   */
+  scheduleUtteranceDispatch() {
+    this.clearUtteranceTimer();
+    if (!this._utteranceBuffer.trim()) return;
+    if (this._voiceBusy) {
+      this.armVoiceHold();
+      return;
+    }
+    const target = voiceTurn.endOfQuestionDelayMs(this._utteranceBuffer, this.getVoicePause());
+    const quietFor = this._voiceLastSpeechAt ? Math.max(0, Date.now() - this._voiceLastSpeechAt) : 0;
+    const delay = Math.max(0, Math.round((target - quietFor) * this.utteranceDelayScale()));
+    this._utteranceTimer = setTimeout(() => {
+      this._utteranceTimer = null;
+      this.dispatchCoalescedUtterance();
+    }, delay);
+  }
+
+  /**
+   * The speech service's voice-activity event: { busy, lastVoiceAt,
+   * recording }. busy is true from the first sound of speech until its
+   * segment is transcribed. While busy, the buffered question waits, at
+   * most VOICE_HOLD_MAX_MS (a noisy room can keep the service busy). Once
+   * listening has stopped, what was heard is sent right away: pressing stop
+   * means the question is finished.
+   */
+  handleVoiceActivity(activity) {
+    if (!activity || typeof activity !== "object") return;
+    const lastVoiceAt = Number(activity.lastVoiceAt);
+    if (Number.isFinite(lastVoiceAt) && lastVoiceAt > this._voiceLastSpeechAt) this._voiceLastSpeechAt = lastVoiceAt;
+    this._voiceBusy = activity.busy === true;
+    if (this._voiceBusy) {
+      this.clearUtteranceTimer();
+      if (this._utteranceBuffer.trim()) this.armVoiceHold();
+      return;
+    }
+    if (this._voiceHoldTimer) {
+      clearTimeout(this._voiceHoldTimer);
+      this._voiceHoldTimer = null;
+    }
+    if (activity.recording === false && this._utteranceBuffer.trim()) {
+      this.clearUtteranceTimer();
+      this.dispatchCoalescedUtterance();
+      return;
+    }
+    this.scheduleUtteranceDispatch();
+  }
+
+  utteranceDelayScale() {
+    const scale = this._utteranceDelayScale;
+    return Number.isFinite(scale) && scale >= 0 ? scale : 1;
+  }
+
+  /** Send the buffered question after VOICE_HOLD_MAX_MS even if the speech service stays busy. */
+  armVoiceHold() {
+    if (this._voiceHoldTimer) return;
+    this._voiceHoldTimer = setTimeout(() => {
+      this._voiceHoldTimer = null;
+      if (this._voiceBusy && this._utteranceBuffer.trim() && !this._utteranceTimer) {
+        logger.info("Sending the voice question while speech continues", { heldMs: VOICE_HOLD_MAX_MS });
+        this.dispatchCoalescedUtterance();
+      }
+    }, Math.round(VOICE_HOLD_MAX_MS * this.utteranceDelayScale()));
+  }
+
+  /**
+   * Whether an answer is on screen that voice must not replace lightly:
+   * one being written, or one shown in the last ANSWER_ON_SCREEN_MS that
+   * has text and was not stopped by the user.
+   */
+  answerOnScreen(now = Date.now()) {
+    if (this.answers.current) return true;
+    const shown = this._shownAnswer;
+    if (!shown || !shown.protect || !shown.endedAt) return false;
+    return now - shown.endedAt <= voiceTurn.ANSWER_ON_SCREEN_MS;
+  }
+
+  /** voiceTurn.decideVoiceUtterance for `text`, with this app's state. */
+  decideUtterance(text) {
+    // Manual capture: the user pressed stop to send it, like a typed question.
+    if (speechService.isManualCaptureMode()) return { action: "answer", reason: "manual", question: text };
+    const shown = this._shownAnswer;
+    const now = Date.now();
+    return voiceTurn.decideVoiceUtterance({
+      text,
+      now,
+      onScreen: this.answerOnScreen(now),
+      previous: shown && shown.source === "voice" ? { question: shown.question, askedAt: shown.askedAt } : null,
+    });
+  }
+
+  /**
+   * Keep the answer on screen: `text` did not sound like a new question.
+   * It is not stored or sent; chat says why, so the user can type it.
+   */
+  ignoreUtterance(text, decision) {
+    logger.info("Voice utterance kept from replacing the answer on screen", {
+      reason: decision.reason,
+      words: text.split(/\s+/).filter(Boolean).length,
+    });
+    // Only chat shows heard text (transcription-received), so only chat is told.
+    const target = this.getVoiceResponseTarget();
+    if (target !== "chat" && target !== "both") return;
+    this.sendToChatWindow("transcription-ignored", {
+      reason: decision.reason,
+      message: "Kept the answer on screen: that did not sound like a new question. To ask it, say it again as a question or type it here.",
+    });
+  }
+
+  /**
+   * Send the coalesced utterance to the LLM. While an answer is on screen,
+   * decideUtterance() says whether it replaces that answer, is the rest of
+   * the voice question before it (both are asked together), or is ignored.
+   * If a previous dispatch is still running, its answer is stopped (when
+   * the utterance replaces it) and the buffer is left for that dispatch's
+   * completion to pick up, so requests never overlap.
    */
   async dispatchCoalescedUtterance() {
+    if (this._voiceHoldTimer) {
+      clearTimeout(this._voiceHoldTimer);
+      this._voiceHoldTimer = null;
+    }
     if (this._utteranceDispatchInFlight) {
+      const pending = this._utteranceBuffer.trim();
       // Shorter utterances get no answer (processTranscriptionWithLLM), so
       // they do not stop one either.
-      if (this._utteranceBuffer.trim().length >= 2) {
+      if (pending.length >= 2 && !this._utteranceDecision) {
+        const decision = this.decideUtterance(pending);
+        if (decision.action === "ignore") {
+          this._utteranceBuffer = "";
+          this.ignoreUtterance(pending, decision);
+          return;
+        }
+        // Kept with the question it joins, in case more arrives before the
+        // stopped answer's dispatch ends (see below).
+        const shown = this._shownAnswer;
+        this._utteranceDecision = { ...decision, previousQuestion: shown && shown.source === "voice" ? shown.question : "" };
         this.stopActiveAnswer("replaced", null, this.voiceTargetWindows());
       }
       return;
@@ -2731,6 +2895,27 @@ class ApplicationController {
       return;
     }
     this._utteranceBuffer = "";
+    let question = combined;
+    if (combined.length >= 2) {
+      const decided = this._utteranceDecision;
+      this._utteranceDecision = null;
+      let decision = decided && decided.question.endsWith(combined) ? decided : this.decideUtterance(combined);
+      // More arrived after an answer was already stopped for this question:
+      // it is never ignored then, or nothing would replace that answer.
+      if (decided && decision.action === "ignore") {
+        decision = decided.action === "merge" && decided.previousQuestion
+          ? { action: "merge", reason: "same-question", question: `${decided.previousQuestion} ${combined}` }
+          : { action: "replace", reason: "new-question", question: combined };
+      }
+      if (decision.action === "ignore") {
+        this.ignoreUtterance(combined, decision);
+        return;
+      }
+      if (decision.action === "merge") {
+        logger.info("Voice utterance joined to the question before it", { words: combined.split(/\s+/).length });
+      }
+      question = decision.question || combined;
+    }
     this._utteranceDispatchInFlight = true;
 
     try {
@@ -2738,14 +2923,14 @@ class ApplicationController {
       // actually asked, once, after any answer that was still streaming, and
       // the request builder can drop it as the trailing copy of this message.
       // That answer is stopped first, so its partial text is stored before it.
-      if (combined.length >= 2) this.stopActiveAnswer("replaced", null, this.voiceTargetWindows());
-      sessionManager.addUserInput(combined, 'speech');
+      if (question.length >= 2) this.stopActiveAnswer("replaced", null, this.voiceTargetWindows());
+      sessionManager.addUserInput(question, 'speech');
       const sessionHistory = sessionManager.getOptimizedHistory();
-      await this.processTranscriptionWithLLM(combined, sessionHistory);
+      await this.processTranscriptionWithLLM(question, sessionHistory);
     } catch (error) {
       logger.error("Failed to process transcription with LLM", {
         error: error.message,
-        textLength: combined.length
+        textLength: question.length
       });
       // processTranscriptionWithLLM reports its own errors; this one came
       // before it ran.
@@ -2809,6 +2994,7 @@ class ApplicationController {
         targets: this.voiceTargetWindows(voiceTarget),
         overlay: this.shouldShowVoiceOverlay(voiceTarget),
         programmingLanguage: needsProgrammingLanguage ? this.codingLanguage : null,
+        question: cleanText,
       });
       this.sendToVoiceResponseWindows("transcription-llm-response-start", {
         messageId,
@@ -2875,6 +3061,7 @@ class ApplicationController {
 
     } catch (error) {
       if (this.isStoppedAnswer(answer, error)) return;
+      this.markAnswerFailed(answer);
       logger.error("Transcription LLM processing failed", {
         error: error.message,
         errorStack: error.stack,
@@ -2918,7 +3105,7 @@ class ApplicationController {
    * `targets` are the windows its stream goes to ("chat", "llmResponse");
    * `overlay` is whether the answer window shows it.
    */
-  beginAnswer(messageId, { source, targets, overlay, programmingLanguage = null }) {
+  beginAnswer(messageId, { source, targets, overlay, programmingLanguage = null, question = "" }) {
     this.stopActiveAnswer("replaced", null, targets);
     const answer = this.answers.begin(messageId, {
       source,
@@ -2927,6 +3114,16 @@ class ApplicationController {
       skill: this.activeSkill,
       programmingLanguage,
     });
+    // The answer on screen from now on (see answerOnScreen). `question` is
+    // kept for voice, so the rest of a question can be joined to it.
+    this._shownAnswer = {
+      id: messageId,
+      source,
+      question: typeof question === "string" ? question : "",
+      askedAt: Date.now(),
+      endedAt: 0,
+      protect: true,
+    };
     this.updateStopShortcut();
     return answer;
   }
@@ -2934,7 +3131,14 @@ class ApplicationController {
   /** `answer` ended (answered, failed or stopped); null when it never began. */
   finishAnswer(answer) {
     this.answers.finish(answer);
+    const shown = this._shownAnswer;
+    if (answer && shown && shown.id === answer.id) shown.endedAt = Date.now();
     this.updateStopShortcut();
+  }
+
+  /** `answer` failed: an error is on screen, which voice may replace. */
+  markAnswerFailed(answer) {
+    if (answer && this._shownAnswer && this._shownAnswer.id === answer.id) this._shownAnswer.protect = false;
   }
 
   /**
@@ -2973,6 +3177,12 @@ class ApplicationController {
    * gets the stopped one.
    */
   onAnswerStopped(answer, reason) {
+    // Stopped by the user, or before any text: nothing to keep on screen,
+    // so voice may replace it.
+    const emptyText = !(typeof answer.text === "string" && answer.text.trim());
+    if ((reason === "user" || emptyText) && this._shownAnswer && this._shownAnswer.id === answer.id) {
+      this._shownAnswer.protect = false;
+    }
     try {
       const raw = typeof answer.text === "string" ? answer.text : "";
       const text = raw.trim() && llmService.shouldRetagCode(answer.skill, answer.programmingLanguage)
@@ -3247,6 +3457,7 @@ class ApplicationController {
       whisperCaptureMode: process.env.WHISPER_CAPTURE_MODE ||
         (process.env.WHISPER_MANUAL_CAPTURE === "true" ? "manual" : "vad"),
       whisperResponseTarget: process.env.WHISPER_RESPONSE_TARGET || "both",
+      voicePause: this.getVoicePause(),
       whisperSegmentMs: process.env.WHISPER_SEGMENT_MS || "4000",
       // As saved: "" means Cuewell picks (see speech.service _initializeWhisperClient).
       whisperEngine: process.env.WHISPER_ENGINE || "",
@@ -3739,6 +3950,7 @@ class ApplicationController {
       whisperDevice: [WHISPER_DEVICES, "Compute device must be Auto, CPU or CUDA."],
       whisperCaptureMode: [WHISPER_CAPTURE_MODES, "Capture mode must be Automatic or Manual."],
       whisperResponseTarget: [WHISPER_RESPONSE_TARGETS, "Show voice answers must be Chat and answer panel, Chat only or Answer panel only."],
+      voicePause: [voiceTurn.VOICE_PAUSES, "Pause before answering must be Short, Normal or Long."],
     };
     for (const [field, [options, message]] of Object.entries(whisperOptions)) {
       check(() => {
@@ -3967,6 +4179,9 @@ class ApplicationController {
       }
       if (["chat", "overlay", "both"].includes(settings.whisperResponseTarget)) {
         envUpdates.WHISPER_RESPONSE_TARGET = settings.whisperResponseTarget;
+      }
+      if (voiceTurn.parseVoicePause(settings.voicePause) === settings.voicePause) {
+        envUpdates.VOICE_PAUSE = settings.voicePause;
       }
       if (settings.whisperSegmentMs !== undefined) {
         envUpdates.WHISPER_SEGMENT_MS = String(settings.whisperSegmentMs);

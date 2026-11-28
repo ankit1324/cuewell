@@ -95,6 +95,8 @@ const PAGES = {
     copyToClipboard,
     onTranscriptionReceived: listen('transcription-received'),
     onInterimTranscription: listen('interim-transcription'),
+    // A heard utterance main did not answer, to keep the answer on screen.
+    onTranscriptionIgnored: listen('transcription-ignored'),
     onTranscriptionLlmResponse: listen('transcription-llm-response'),
     onTranscriptionLlmResponseStart: listen('transcription-llm-response-start'),
     onTranscriptionLlmResponseChunk: listen('transcription-llm-response-chunk'),

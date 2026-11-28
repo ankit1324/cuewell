@@ -24,7 +24,7 @@ function stubLogger() {
 
 // Settings the app reads from process.env. Cleared so a key or provider in
 // the shell that runs the tests cannot change the results.
-const APP_ENV_PATTERN = /^(LLM_|GEMINI_|ANTHROPIC_|OPENAI_|OPENROUTER_|GROQ_|DEEPSEEK_|OLLAMA_|AZURE_|SPEECH_|WHISPER_|INTERVIEW_MODE$|ANSWER_LENGTH$)/;
+const APP_ENV_PATTERN = /^(LLM_|GEMINI_|ANTHROPIC_|OPENAI_|OPENROUTER_|GROQ_|DEEPSEEK_|OLLAMA_|AZURE_|SPEECH_|WHISPER_|INTERVIEW_MODE$|ANSWER_LENGTH$|VOICE_PAUSE$)/;
 
 function clearAppEnv(env = process.env) {
   for (const key of Object.keys(env)) {

@@ -131,6 +131,14 @@ describe('main.js IPC', () => {
       { label: 'settings saves theme path', channel: 'save-settings', from: 'settings', args: [{ theme: '../dark' }] },
       { label: 'settings saves theme dark', channel: 'save-settings', from: 'settings', args: [{ theme: 'dark' }] },
       { label: 'settings get after theme', channel: 'get-settings', from: 'settings' },
+      // Pause before answering (voice): Settings only, one of short | normal | long.
+      { label: 'main saves voicePause', channel: 'save-settings', from: 'main', args: [{ voicePause: 'long' }] },
+      { label: 'onboarding saves voicePause', channel: 'save-settings', from: 'onboarding', args: [{ voicePause: 'long' }] },
+      { label: 'settings saves unknown voicePause', channel: 'save-settings', from: 'settings', args: [{ voicePause: 'forever' }] },
+      { label: 'settings saves voicePause as object', channel: 'save-settings', from: 'settings', args: [{ voicePause: { value: 'long' } }] },
+      { label: 'settings saves voicePause as number', channel: 'save-settings', from: 'settings', args: [{ voicePause: 5000 }] },
+      { label: 'settings saves voicePause long', channel: 'save-settings', from: 'settings', args: [{ voicePause: 'long' }] },
+      { label: 'settings get after voicePause', channel: 'get-settings', from: 'settings' },
       // Interview context.
       { label: 'save profile', channel: 'save-profile', from: 'settings', args: [{ role: ' Backend engineer ', company: 'Acme' }] },
       { label: 'save profile unknown field', channel: 'save-profile', from: 'settings', args: [{ role: 'x', salary: '1' }] },
@@ -280,6 +288,55 @@ describe('main.js IPC', () => {
 
     it('keeps .env readable by the owner only', { skip: !isPosix && 'POSIX file modes only' }, () => {
       assert.equal(out.envFile.mode, 0o600);
+    });
+  });
+
+  describe('pause before answering', () => {
+    it('defaults to Normal', () => {
+      assert.equal(out.byLabel['allow get-settings from settings'].value.voicePause, 'normal');
+    });
+
+    it('may be saved only from Settings', () => {
+      for (const label of ['main saves voicePause', 'onboarding saves voicePause']) {
+        const value = out.byLabel[label].value;
+        assert.equal(value.success, false, label);
+        assert.equal(value.field, 'voicePause', label);
+      }
+    });
+
+    it('rejects anything but short, normal or long', () => {
+      for (const label of ['settings saves unknown voicePause', 'settings saves voicePause as object', 'settings saves voicePause as number']) {
+        const value = out.byLabel[label].value;
+        assert.equal(value.success, false, label);
+        assert.equal(value.field, 'voicePause', label);
+        assert.ok(value.error.length > 0 && value.error.length < 200, label);
+      }
+      assert.match(out.byLabel['settings saves unknown voicePause'].value.error, /Short, Normal or Long/);
+      assert.ok(!out.envFile.text.includes('forever'));
+    });
+
+    it('saves VOICE_PAUSE to .env and returns it', () => {
+      assert.equal(out.byLabel['settings saves voicePause long'].value.success, true);
+      assert.match(out.envFile.text, /^VOICE_PAUSE=long$/m);
+      assert.equal((out.envFile.text.match(/^VOICE_PAUSE=/gm) || []).length, 1);
+      assert.equal(out.byLabel['settings get after voicePause'].value.voicePause, 'long');
+    });
+
+    it('is not exposed to the toolbar', () => {
+      assert.ok(!('voicePause' in out.byLabel['main get-settings after save'].value));
+    });
+
+    it('loads the saved VOICE_PAUSE on the next start, and ignores an unknown one', () => {
+      for (const [saved, expected] of [['short', 'short'], ['LONG', 'long'], ['forever', 'normal']]) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuewell-pause-'));
+        try {
+          const restarted = runHarness(dir, [{ label: 'get', channel: 'get-settings', from: 'settings' }],
+            `${ENV_FILE}VOICE_PAUSE=${saved}\n`);
+          assert.equal(restarted.byLabel.get.value.voicePause, expected, saved);
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      }
     });
   });
 
