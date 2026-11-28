@@ -61,7 +61,7 @@ code {
 /* ---------- Window: the desk ---------- */
 
 .wizard {
-  --ob-field-edge: rgba(29, 27, 22, 0.5); /* 3:1 field edge on paper */
+  --ob-field-edge: rgba(var(--ink-rgb), 0.5); /* 3:1 field edge on paper */
   display: flex;
   flex-direction: column;
   padding: var(--s-5) var(--s-6) var(--s-5);
@@ -546,7 +546,7 @@ fieldset.provider-grid {
 .choice-card:has(input:checked) .choice-radio,
 .model-card:has(input:checked) .choice-radio {
   border-color: var(--ink);
-  background: var(--ink) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23f6f1e7' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center;
+  background: var(--ink) var(--img-check-on-ink) no-repeat center;
 }
 
 /* ---------- Status lines (.test-result): a margin note ----------

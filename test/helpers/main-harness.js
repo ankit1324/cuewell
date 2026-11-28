@@ -158,6 +158,7 @@ async function run(request) {
     onChannels: [...listeners.keys()].sort(),
     results,
     envFile: readFile('.env'),
+    nativeThemeSource: electron.nativeTheme.themeSource,
     logs,
     blocked,
   };

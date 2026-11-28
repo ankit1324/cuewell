@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, screen, shell, systemPreferences, nativeTheme } = require('electron');
 const path = require('path');
 // Node's URL on purpose: speech.service.js replaces globalThis.URL with a
 // stand-in that reports every URL as https:.
@@ -23,6 +23,16 @@ const WINDOW_FADE_MS = 160;          // window appear: fade (plus a 4 px rise in
 const ANSWER_REVEAL_TIMEOUT_MS = 150; // longest wait for the answer page's first frame
 const ANSWER_MIN_HEIGHT = 120;       // title bar plus a line or two
 const ANSWER_SCREEN_MARGIN = 12;     // kept free below the answer window
+
+// Color themes (Settings > Privacy & appearance, saved as THEME). The pages
+// get the theme as html[data-theme] from their preload; "system" follows the
+// OS appearance. The paper colors are theme.css's --paper (onboarding:
+// --paper-2, its card) for each variant, used as the native background of
+// the opaque windows so nothing else shows while a window resizes or loads.
+const THEMES = ['light', 'dark', 'system'];
+const DEFAULT_THEME = 'system';
+const PAPER_COLORS = { light: '#f6f1e7', dark: '#211f1a' };
+const RAISED_PAPER_COLORS = { light: '#efe8db', dark: '#2a2822' };
 
 // The one window level of the overlay windows (toolbar, chat, answer,
 // onboarding). On macOS 'screen-saver' keeps them above full-screen apps and
@@ -80,6 +90,7 @@ class WindowManager {
     // Window binding properties
     this.bindWindows = true; // Enable window binding by default
     this.windowGap = 10; // Small gap between windows
+    this.theme = DEFAULT_THEME; // main.js sets the saved one (setTheme)
     this.boundWindowsPosition = { x: 0, y: 0 }; // Track position of bound windows
     
     this.windowConfigs = {
@@ -160,6 +171,7 @@ class WindowManager {
       await this.createSettingsWindow();
       
       this.setupWindowEventHandlers();
+      this.watchNativeTheme();
       this.setupScreenTracking();
 
       // Make windows interactive by default so they are not click-through
@@ -437,8 +449,9 @@ class WindowManager {
       webPreferences: {
         ...config.get('window.webPreferences'),
         preload: PRELOAD_BY_TYPE[type] || config.get('window.webPreferences').preload,
-        // Tells the preload which page's API to expose.
-        additionalArguments: [`--si-window=${type}`],
+        // Tells the preload which page's API to expose, and the theme for
+        // the first frame (later changes arrive as theme-changed).
+        additionalArguments: [`--si-window=${type}`, `--si-theme=${this.theme}`],
         nodeIntegration: false,
         contextIsolation: true,
         sandbox: true,
@@ -488,7 +501,7 @@ class WindowManager {
           : {
             frame: false,
             transparent: false,
-            backgroundColor: '#121317'
+            backgroundColor: this.getPaperColor(type)
           })
       };
   } else if (type === 'onboarding') {
@@ -609,18 +622,19 @@ class WindowManager {
       };
     }
 
-    // macOS native glass for the panel windows. The 'main' toolbar is left
-    // out on purpose: its window has transparent gaps around the pill and the
-    // shortcuts popover, which vibrancy would fill with blur.
-    if (process.platform === 'darwin' &&
-        ['llmResponse', 'chat', 'settings', 'onboarding'].includes(type)) {
+    // The panels are opaque cards (theme.css). On macOS the window itself is
+    // opaque too, with the system's rounded corners and shadow, and its
+    // background is the card's paper so no other color shows while it
+    // resizes. On Windows and Linux they stay transparent: the card's
+    // rounded corners are the only see-through part. The toolbar is
+    // transparent everywhere: its tab has a margin for the shadow, and the
+    // shortcuts popover and notice hang below it.
+    if (this.isOpaqueWindowType(type)) {
       browserWindowOptions = {
         ...browserWindowOptions,
-        vibrancy: 'hud',
-        visualEffectState: 'active',
-        backgroundColor: '#00000000',
-        hasShadow: true,
-        roundedCorners: true,
+        transparent: false,
+        backgroundColor: this.getPaperColor(type),
+        ...(process.platform === 'darwin' && { hasShadow: true, roundedCorners: true }),
       };
     }
 
@@ -654,6 +668,13 @@ class WindowManager {
 
     const webContentsId = window.webContents.id;
     this.webContentsTypes.set(webContentsId, type);
+    // A reload keeps the --si-theme the window was created with; send the
+    // current one again with each new page.
+    window.webContents.on('dom-ready', () => {
+      if (window.isDestroyed()) return;
+      window.webContents.send('theme-changed', { theme: this.theme });
+      if (this.isOpaqueWindowType(type)) window.setBackgroundColor(this.getPaperColor(type));
+    });
     window.webContents.once('destroyed', () => {
       if (this.webContentsTypes.get(webContentsId) === type) {
         this.webContentsTypes.delete(webContentsId);
@@ -1007,9 +1028,10 @@ class WindowManager {
     if (canUseWorkspaces) win.setVisibleOnAllWorkspaces(true, workspaceOptions);
     this.pinOverlayOnTop(win);
 
-    // The chat and answer windows fade in. On macOS the native glass is drawn
-    // by the system, so the fade is done on the window; the pages add the
-    // 4 px rise (and, on Windows and Linux, the fade) in CSS.
+    // The chat and answer windows fade in. On macOS the window is opaque (its
+    // background would show through a CSS fade), so the fade is done on the
+    // window; the pages add the 4 px rise (and, on Windows and Linux, the
+    // fade) in CSS.
     const fade = process.platform === 'darwin' &&
       (type === 'llmResponse' || type === 'chat') && !this.prefersReducedMotion();
     if (fade) win.setOpacity(0);
@@ -1907,6 +1929,90 @@ class WindowManager {
       gap: this.windowGap,
       position: this.boundWindowsPosition
     };
+  }
+
+  /** True for window types drawn on an opaque native window (see createWindow). */
+  isOpaqueWindowType(type) {
+    if (type === 'settings') return true;
+    return process.platform === 'darwin' && ['llmResponse', 'chat', 'onboarding'].includes(type);
+  }
+
+  /** 'light' or 'dark': the variant the pages show for the current theme. */
+  getResolvedTheme() {
+    if (this.theme === 'light' || this.theme === 'dark') return this.theme;
+    try {
+      return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+    } catch (_) {
+      return 'light';
+    }
+  }
+
+  /** The native background for an opaque window: its card's paper in the current variant. */
+  getPaperColor(type = null) {
+    const colors = type === 'onboarding' ? RAISED_PAPER_COLORS : PAPER_COLORS;
+    return colors[this.getResolvedTheme()];
+  }
+
+  /**
+   * [type, window] for every app window, including one whose page is still
+   * loading (created, not yet in `windows`).
+   */
+  themedWindows() {
+    const found = new Map();
+    this.windows.forEach((win, type) => { if (win) found.set(win, type); });
+    try {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (found.has(win) || !win || win.isDestroyed()) continue;
+        const type = this.webContentsTypes.get(win.webContents.id);
+        if (type) found.set(win, type);
+      }
+    } catch (_) {}
+    return [...found].map(([win, type]) => [type, win]);
+  }
+
+  /**
+   * Use `theme` ('light' | 'dark' | 'system') from now on: windows created
+   * later get it, every open page gets theme-changed, and the opaque windows
+   * get the matching background. Returns the theme in effect; an unknown
+   * value changes nothing.
+   */
+  setTheme(theme) {
+    if (!THEMES.includes(theme)) return this.theme;
+    this.theme = theme;
+    this.themedWindows().forEach(([, win]) => {
+      if (win.isDestroyed()) return;
+      try {
+        win.webContents.send('theme-changed', { theme });
+      } catch (error) {
+        logger.debug('Could not send the theme to a window', { error: error.message });
+      }
+    });
+    this.refreshWindowBackgrounds();
+    logger.debug('Theme updated', { theme, resolved: this.getResolvedTheme() });
+    return this.theme;
+  }
+
+  /** Repaint the native background of the opaque windows (theme or OS appearance changed). */
+  refreshWindowBackgrounds() {
+    this.themedWindows().forEach(([type, win]) => {
+      if (win.isDestroyed() || !this.isOpaqueWindowType(type)) return;
+      try {
+        win.setBackgroundColor(this.getPaperColor(type));
+      } catch (error) {
+        logger.debug('Could not set a window background', { type, error: error.message });
+      }
+    });
+  }
+
+  /** Follow OS appearance changes while the theme is "system". Once. */
+  watchNativeTheme() {
+    if (this._watchingNativeTheme) return;
+    this._watchingNativeTheme = true;
+    try {
+      nativeTheme.on('updated', () => this.refreshWindowBackgrounds());
+    } catch (error) {
+      logger.debug('Could not watch the system appearance', { error: error.message });
+    }
   }
 
   setWindowGap(gap) {

@@ -381,6 +381,22 @@ function parseWindowGap(raw) {
   return gap <= MAX_WINDOW_GAP ? gap : null;
 }
 
+// Color theme, saved as THEME: light, dark, or the system appearance (the
+// default, so the overlay matches the apps around it). Each value is also
+// the nativeTheme.themeSource that makes native menus, dialogs and
+// scrollbars, and prefers-color-scheme in the pages, match.
+const THEMES = ["light", "dark", "system"];
+const DEFAULT_THEME = "system";
+/** `raw` as a theme, or null when it is not one. */
+function parseTheme(raw) {
+  const value = String(raw === undefined || raw === null ? "" : raw).trim().toLowerCase();
+  return THEMES.includes(value) ? value : null;
+}
+/** nativeTheme.themeSource for a theme setting: the same word, "system" when unknown. */
+function nativeThemeSourceFor(theme) {
+  return THEMES.includes(theme) ? theme : "system";
+}
+
 const WHISPER_DEVICES = ["auto", "cpu", "cuda"];
 const WHISPER_CAPTURE_MODES = ["vad", "manual"];
 const WHISPER_RESPONSE_TARGETS = ["both", "chat", "overlay"];
@@ -420,6 +436,7 @@ const SETTINGS_FIELDS_BY_WINDOW = {
     "whisperEngine", "whisperCppModel",
     "geminiKey", "llmProvider", ...Object.keys(LLM_SETTING_ENV_KEYS),
     "windowGap", "codingLanguage", "activeSkill", "answerLength", "selectedIcon",
+    "theme",
   ],
   // whisperModelDownload is recorded by the wizard but not stored.
   onboarding: [
@@ -624,6 +641,9 @@ class ApplicationController {
     // Saved window gap (WINDOW_GAP); the window manager's default otherwise.
     const savedWindowGap = parseWindowGap(process.env.WINDOW_GAP);
     if (savedWindowGap !== null) windowManager.setWindowGap(savedWindowGap);
+    // Color theme (THEME); applied to nativeTheme in onAppReady.
+    this.theme = parseTheme(process.env.THEME) || DEFAULT_THEME;
+    windowManager.setTheme(this.theme);
     this.speechAvailable = false;
 
     // Utterance coalescing: VAD emits a transcript per natural pause, but a
@@ -807,12 +827,8 @@ class ApplicationController {
     }
     this.starting = true;
 
-    // The UI is dark-only: make native materials (vibrancy) render dark.
-    try {
-      nativeTheme.themeSource = "dark";
-    } catch (e) {
-      logger.warn("Failed to set dark native theme", { error: e.message });
-    }
+    // Native menus, dialogs and scrollbars follow the saved theme.
+    this.applyTheme(this.theme);
 
     // Force stealth mode IMMEDIATELY when app is ready
     app.setName("Terminal ");
@@ -3048,6 +3064,21 @@ class ApplicationController {
   }
 
   /**
+   * Use color theme `theme` (a THEMES value, checked by the caller): native
+   * menus, dialogs and scrollbars through nativeTheme.themeSource, and every
+   * window through the window manager (theme-changed, no restart).
+   */
+  applyTheme(theme) {
+    this.theme = parseTheme(theme) || DEFAULT_THEME;
+    try {
+      nativeTheme.themeSource = nativeThemeSourceFor(this.theme);
+    } catch (e) {
+      logger.warn("Failed to set the native theme", { error: e.message });
+    }
+    windowManager.setTheme(this.theme);
+  }
+
+  /**
    * Settings for the renderer. Secrets are only returned masked
    * ({ set, last4 }); their values never leave the main process. The toolbar
    * only gets the values it reads (language, mode and the mode list).
@@ -3082,6 +3113,7 @@ class ApplicationController {
       appIcon: this.appIcon || "cuewell",
       selectedIcon: this.appIcon || "cuewell",
       windowGap: windowManager.windowGap,
+      theme: this.theme || DEFAULT_THEME,
 
       speechProvider: speechService.provider || "whisper",
       azureKey: maskSecret(process.env.AZURE_SPEECH_KEY),
@@ -3521,6 +3553,15 @@ class ApplicationController {
       }
     });
     check(() => {
+      if (has("theme")) {
+        const value = parseTheme(text("theme"));
+        if (!value) {
+          throw new SettingsValidationError("theme", "Theme must be Light, Dark or Match system.");
+        }
+        clean.theme = value;
+      }
+    });
+    check(() => {
       if (has("windowGap")) {
         const gap = parseWindowGap(text("windowGap"));
         if (gap === null) {
@@ -3713,6 +3754,9 @@ class ApplicationController {
       if (settings.windowGap !== undefined) {
         windowManager.setWindowGap(settings.windowGap);
       }
+      if (settings.theme) {
+        this.applyTheme(settings.theme);
+      }
 
       // ── Persist provider / API-key fields back to .env ──
       // The settings UI is now the source of truth for these values.
@@ -3728,6 +3772,9 @@ class ApplicationController {
       }
       if (settings.windowGap !== undefined) {
         envUpdates.WINDOW_GAP = String(settings.windowGap);
+      }
+      if (settings.theme) {
+        envUpdates.THEME = settings.theme;
       }
       if (settings.speechProvider === "azure" || settings.speechProvider === "whisper") {
         envUpdates.SPEECH_PROVIDER = settings.speechProvider;

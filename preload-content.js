@@ -7,10 +7,20 @@ const { contextBridge, ipcRenderer } = require('electron')
 // passes the window type as --si-window=<type>, and main.js checks the
 // sender of every IPC message against its own list as well.
 
-// Platform hook for CSS: html[data-platform="darwin" | "win32" | "linux"].
+// Platform and theme hooks for CSS: html[data-platform] and html[data-theme].
 // Same as in preload.js (a sandboxed preload cannot require a shared file).
 ;(() => {
+  const THEMES = ['light', 'dark', 'system']
+  const isTheme = (value) => typeof value === 'string' && THEMES.includes(value)
+  const argTheme = argValue('--si-theme=')
+  let theme = isTheme(argTheme) ? argTheme : 'system'
   let applied = false
+  const setTheme = () => {
+    try {
+      const root = document.documentElement
+      if (root) root.dataset.theme = theme
+    } catch (_) {}
+  }
   const apply = () => {
     if (applied) return true
     try {
@@ -18,10 +28,19 @@ const { contextBridge, ipcRenderer } = require('electron')
       if (!root) return false
       const platform = typeof process !== 'undefined' && process.platform
       if (typeof platform === 'string' && platform) root.dataset.platform = platform
+      root.dataset.theme = theme
       applied = true
     } catch (_) {}
     return applied
   }
+  try {
+    ipcRenderer.on('theme-changed', (_event, data) => {
+      const next = data && typeof data === 'object' ? data.theme : null
+      if (!isTheme(next)) return
+      theme = next
+      if (applied) setTheme()
+    })
+  } catch (_) {}
   try {
     if (apply()) return
     const onReady = () => {
@@ -34,11 +53,15 @@ const { contextBridge, ipcRenderer } = require('electron')
   } catch (_) {}
 })()
 
-function windowType() {
-  const prefix = '--si-window='
+// Value of the --<name>=<value> argument the window manager passed, or ''.
+function argValue(prefix) {
   const argv = (typeof process !== 'undefined' && Array.isArray(process.argv)) ? process.argv : []
   const arg = argv.find((a) => typeof a === 'string' && a.startsWith(prefix))
   return arg ? arg.slice(prefix.length) : ''
+}
+
+function windowType() {
+  return argValue('--si-window=')
 }
 
 const invoke = (channel) => (...args) => ipcRenderer.invoke(channel, ...args)
