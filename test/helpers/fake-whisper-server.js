@@ -128,8 +128,12 @@ const server = http.createServer((req, res) => {
 
 function bind() {
   server.once('error', (error) => {
-    process.stderr.write(`\ncouldn't bind to server socket: hostname=${host} port=${port}\n\n`);
+    // The event goes to the log before the stderr line: the engine stops
+    // the server as soon as it reads that line, and on Windows that kill is
+    // TerminateProcess, which ends this process at once (no SIGTERM handler
+    // runs), so anything written after the line could be lost.
     log({ event: 'bind-failed', port, code: error.code });
+    process.stderr.write(`\ncouldn't bind to server socket: hostname=${host} port=${port}\n\n`);
     process.exit(1);
   });
   server.listen(port, host, () => {
