@@ -36,7 +36,8 @@ function clearAppEnv(env = process.env) {
 /** A new temp folder, removed when the test (or suite) `t` ends. */
 function tempDir(t, prefix = 'cuewell-test-') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  const cleanup = () => fs.rmSync(dir, { recursive: true, force: true });
+  // Retries: on Windows a virus scanner can still hold a file for a moment.
+  const cleanup = () => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   if (t && typeof t.after === 'function') t.after(cleanup);
   else process.on('exit', cleanup);
   return dir;

@@ -178,7 +178,8 @@ after(async () => {
       await once(child, 'exit');
     }
   }
-  fs.rmSync(ROOT, { recursive: true, force: true });
+  // Retries: on Windows a virus scanner can still hold a file for a moment.
+  fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe('WhisperCppEngine server lifecycle', { concurrency: true }, () => {
@@ -488,7 +489,10 @@ describe('WhisperCppEngine proves the listener is its own child', { concurrency:
     await waitFor(() => checks >= 3, 5000);
     assert.equal(done, false, 'not ready while the listener is unproven');
     assert.equal(exited(spawns[0].child), false);
-    assert.ok(events().some((e) => e.event === 'listening'), 'the child printed its listening line');
+    // Waited for, not assumed: a new node process can take longer than
+    // three polls to start (Windows runners in particular).
+    await waitFor(() => events().some((e) => e.event === 'listening'), 5000);
+    assert.equal(done, false, 'still not ready once the child is listening');
     assert.deepEqual(urls, [], 'not even /health is sent before the proof');
 
     proven = true;

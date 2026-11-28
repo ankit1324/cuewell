@@ -168,7 +168,7 @@ class MainWindowUI {
                 this.speechAvailable = await window.electronAPI.getSpeechAvailability();
                 this.applyMicVisibility();
             }
-        } catch (e) {
+        } catch (_) {
             this.speechAvailable = false;
             this.applyMicVisibility();
         }
@@ -678,7 +678,6 @@ class MainWindowUI {
                         this.navigateSkill(-1); // Previous skill
                     } else if (e.key === 'ArrowDown') {
                         this.navigateSkill(1); // Next skill
-                    } else {
                     }
                     // Left/Right arrows do nothing in interactive mode
                 } else {

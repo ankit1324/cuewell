@@ -88,7 +88,7 @@ function assertAccepted(result) {
 describe('main.js IPC', () => {
   let out;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cuewell-main-'));
-  after(() => fs.rmSync(root, { recursive: true, force: true }));
+  after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
   before(() => {
     // What get-settings returns for a saved key; Settings sends it back unchanged.

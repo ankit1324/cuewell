@@ -188,6 +188,23 @@ describe('createProvider (no network)', () => {
   });
 });
 
+describe('nodeRuntimeClientOptions', () => {
+  const NodeURL = require('node:url').URL;
+  const options = loadFunction('src/services/providers/index.js', 'nodeRuntimeClientOptions', { NodeURL });
+
+  it('waives the SDK browser guard only while browser stand-ins are installed', (t) => {
+    assert.equal(typeof globalThis.window, 'undefined');
+    assert.deepEqual(options(), {});
+
+    globalThis.window = {};
+    t.after(() => { delete globalThis.window; });
+    assert.deepEqual(options(), {}, 'window without a document');
+
+    globalThis.window.document = {};
+    assert.deepEqual(options(), { dangerouslyAllowBrowser: true });
+  });
+});
+
 describe('resolveIdleTimeoutMs', () => {
   it('uses the value when positive and 60 s otherwise', () => {
     assert.equal(resolveIdleTimeoutMs('5000'), 5000);

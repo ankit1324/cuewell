@@ -124,8 +124,8 @@ function nodeRuntimeClientOptions() {
   }
   const inMainProcess = typeof process !== 'undefined' && !!(process.versions && process.versions.node) &&
     process.type !== 'renderer';
-  const browserGuardTripped = typeof window !== 'undefined' &&
-    typeof window.document !== 'undefined' && typeof navigator !== 'undefined';
+  const browserGuardTripped = typeof globalThis.window !== 'undefined' &&
+    typeof globalThis.window.document !== 'undefined' && typeof navigator !== 'undefined';
   return inMainProcess && browserGuardTripped ? { dangerouslyAllowBrowser: true } : {};
 }
 

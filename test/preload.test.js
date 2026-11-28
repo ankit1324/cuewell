@@ -39,7 +39,6 @@ function runPreload(file, type) {
   const fakeDocument = { documentElement: { dataset: {} }, addEventListener: () => {}, removeEventListener: () => {} };
   const fakeConsole = { log: () => {}, warn: () => {}, error: (...args) => errors.push(args.join(' ')) };
   const body = readSource(file);
-  // eslint-disable-next-line no-new-func
   new Function('require', 'process', 'document', 'console', body)(fakeRequire, fakeProcess, fakeDocument, fakeConsole);
   return { exposed, calls, handlers, errors, document: fakeDocument };
 }

@@ -38,13 +38,12 @@ function trayIconFile(platform) {
  * @param {string} options.appName              name the app shows now
  * @param {boolean} options.updatesConfigured   UPDATE_REPO is set
  * @param {boolean} [options.setupNeeded]       onboarding is not finished
- * @param {boolean} [options.screenShared]      windows are hidden for screen sharing
  * @param {Function} [options.isShortcutRegistered] globalShortcut.isRegistered
  * @param {object} options.actions              toggleWindows, screenshot, openChat,
  *                                              settings, checkForUpdates, finishSetup, quit
  */
 function buildTrayMenuTemplate({
-  appName, updatesConfigured, setupNeeded = false, screenShared = false,
+  appName, updatesConfigured, setupNeeded = false,
   isShortcutRegistered = () => false, actions,
 }) {
   const name = String(appName || '').trim() || 'Cuewell';
@@ -63,19 +62,15 @@ function buildTrayMenuTemplate({
       { type: 'separator' },
     );
   } else {
-    if (screenShared) {
-      template.push({ label: 'Hidden while your screen is shared', enabled: false });
-    }
     template.push(
       {
         label: `Show/Hide ${name}`,
-        enabled: !screenShared,
         click: call('toggleWindows'),
         ...shortcut('CommandOrControl+Shift+V'),
       },
       { type: 'separator' },
       { label: 'Take Screenshot', click: call('screenshot'), ...shortcut('CommandOrControl+Shift+S') },
-      { label: 'Open Chat', enabled: !screenShared, click: call('openChat'), ...shortcut('CommandOrControl+Shift+C') },
+      { label: 'Open Chat', click: call('openChat'), ...shortcut('CommandOrControl+Shift+C') },
       { type: 'separator' },
     );
   }

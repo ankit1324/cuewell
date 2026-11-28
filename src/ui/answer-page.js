@@ -75,8 +75,7 @@ function initAnswerWindow() {
     api.onTranscriptionLlmResponseChunk((_event, data) => onStreamChunk(data));
 
     // Final answer and errors tied to the current request. They arrive
-    // before (or, while the screen is shared, instead of) the
-    // display-llm-response below.
+    // before the display-llm-response below.
     api.onTranscriptionLlmResponse((_event, data) => {
         if (!data || !isOpenStream(data.messageId)) return;
         const response = typeof data.response === 'string' ? data.response : '';
@@ -524,7 +523,7 @@ function renderAnswer(response, { isError = false, final = true, fresh = false, 
 // and the blank lines around it are dropped and the text on either side is
 // rejoined. A fence that is never closed, as in a cut-off answer, runs to
 // the end.
-// Keep in sync with splitCodeBlocks in src/ui/chat-page.js and src/ui/chat-window.js.
+// Keep in sync with splitCodeBlocks in src/ui/chat-page.js.
 function splitCodeBlocks(text) {
     const prose = [];
     const blocks = [];

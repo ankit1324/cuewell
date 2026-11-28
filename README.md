@@ -376,7 +376,7 @@ Issues and pull requests are welcome.
 
 - Run from source with `./setup.sh`, then `npm start`.
 - Keep changes small and focused, and match the existing style.
-- There is no automated test suite or linter yet. Test your change by hand on the platforms it touches. `npm run test-speech` checks the Whisper setup.
+- Run `npm test` (the automated test suite, Node's built-in test runner) and `npm run lint` before you open a pull request; CI runs both on macOS, Windows and Linux. Also try your change by hand on the platforms it touches. `npm run test-speech` checks a Python Whisper setup.
 - Do not commit `.env`, API keys or files from the app data folder.
 
 Planned: export of conversation history to Markdown or PDF.

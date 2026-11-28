@@ -17,7 +17,7 @@ let electronPath;
 try {
   // In Node, the electron package exports the path to its binary.
   electronPath = require('electron');
-} catch (error) {
+} catch (_) {
   console.error('Electron is not installed. Run "npm install" in the project folder, then try again.');
   process.exit(1);
 }

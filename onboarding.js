@@ -1,4 +1,3 @@
-/* eslint-disable no-undef */
 /**
  * Onboarding wizard controller.
  *
@@ -28,7 +27,6 @@
   const backBtn = $('#backBtn');
   const nextBtn = $('#nextBtn');
   const skipBtn = $('#skipBtn');
-  const nav = $('#wizard .nav'); // the centered nav container
 
   // ── State ─────────────────────────────────────────────────────────
   const state = {
@@ -105,15 +103,7 @@
     else nextBtn.innerHTML = 'Continue <i class="fas fa-arrow-right"></i>';
     // Continue on the AI step waits for a passing test of the current inputs.
     if (name === 'provider') nextBtn.disabled = !providerTestPassed();
-  }
-
-  function navigate(direction) {
-    const order = computeScreenOrder();
-    const idx = order.indexOf(currentScreenName());
-    const next = direction === 'next' ? idx + 1 : idx - 1;
-    if (next < 0 || next >= order.length) return;
-    state.step = orderScreenToStep(order[next]);
-    showScreen(order[next]);
+    refreshSkipVisibility();
   }
 
   function currentScreenName() {
@@ -1087,14 +1077,6 @@
       !state.voiceSaving && !!choiceNeedingDownload();
     skipBtn.style.display = show ? 'inline-flex' : 'none';
   }
-
-  // Hook into showScreen to keep skip visibility in sync
-  const _origShowScreen = showScreen;
-  showScreen = function (name) {
-    _origShowScreen(name);
-    refreshSkipVisibility();
-    refreshStepper();
-  };
 
   skipBtn.addEventListener('click', () => {
     if (state.activeDownload || state.voiceSaving) return;

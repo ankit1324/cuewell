@@ -1,5 +1,7 @@
 const path = require('path');
 const os = require('os');
+// The one source of the app version (electron-builder and app.getVersion() read it too).
+const { version: APP_VERSION } = require('../../package.json');
 
 class ConfigManager {
   constructor() {
@@ -12,7 +14,7 @@ class ConfigManager {
     this.config = {
       app: {
         name: 'Cuewell',
-        version: '1.0.0',
+        version: APP_VERSION,
         processTitle: 'Cuewell',
         dataDir: this.appDataDir,
         isDevelopment: this.env === 'development',

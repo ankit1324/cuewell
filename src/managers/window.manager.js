@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, desktopCapturer, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, screen, shell, systemPreferences } = require('electron');
 const path = require('path');
 // Node's URL on purpose: speech.service.js replaces globalThis.URL with a
 // stand-in that reports every URL as https:.
@@ -68,15 +68,6 @@ class WindowManager {
     this.screenWatcher = null;
     this.desktopWatcher = null;
     this.lastActiveSpace = null;
-    this.screenCaptureAvailabilityWatcher = null;
-    this.isScreenBeingShared = false;
-    this.wasVisibleBeforeSharing = false;
-    this.screenCaptureStatus = {
-      available: null,
-      lastError: null,
-      lastCheckedAt: null
-    };
-    this.isCheckingScreenCaptureStatus = false;
     this.isInitialized = false;
     this.isInitializing = false;
     this.isRecording = false;
@@ -170,7 +161,6 @@ class WindowManager {
       
       this.setupWindowEventHandlers();
       this.setupScreenTracking();
-      this.setupScreenCaptureAvailabilityWatcher();
 
       // Make windows interactive by default so they are not click-through
       this.setInteractive(true);
@@ -306,7 +296,7 @@ class WindowManager {
   applySettingsWindowMeasures(window) {
     try {
       window.setContentProtection(true);
-    } catch (error) {
+    } catch (_) {
       logger.debug('Content protection not supported on this platform');
     }
     window.setSkipTaskbar(true);
@@ -727,7 +717,7 @@ class WindowManager {
             const maxW = this.windowConfigs.main.width;
             const desiredW = Math.max(minW, Math.min(maxW, Math.round(newBounds.width || minW)));
             window.setContentSize(desiredW, Math.max(1, currentContentHeight));
-          } catch (e) {
+          } catch (_) {
             // Fallback: lock window height using window size
             try {
               const [__w, currentWindowHeight] = window.getSize();
@@ -826,7 +816,7 @@ class WindowManager {
         this._warnedNoContentProtection = true;
         logger.warn('Screen-capture protection is unavailable on Linux (Electron limitation). The overlay WILL be visible in screen shares. This stealth feature only works on macOS and Windows.');
       }
-    } catch (error) {
+    } catch (_) {
       logger.debug('Content protection not supported on this platform');
     }
     
@@ -845,7 +835,7 @@ class WindowManager {
 
   positionWindow(window, type) {
     const display = this.currentDisplay || screen.getPrimaryDisplay();
-    const { x: displayX, y: displayY, width: screenWidth, height: screenHeight } = display.workArea || display.workAreaSize;
+    const { x: displayX, y: displayY, width: screenWidth } = display.workArea || display.workAreaSize;
     
     if (this.bindWindows && (type === 'main' || type === 'llmResponse')) {
       // Position bound windows together
@@ -883,10 +873,10 @@ class WindowManager {
     if (!mainWindow || !llmWindow) return;
     
     const display = this.currentDisplay || screen.getPrimaryDisplay();
-    const { x: displayX, y: displayY, width: screenWidth, height: screenHeight } = display.workArea;
+    const { x: displayX, y: displayY, width: screenWidth } = display.workArea;
     
     const [mainWidth, mainHeight] = mainWindow.getSize();
-    const [llmWidth, llmHeight] = llmWindow.getSize();
+    const [llmWidth] = llmWindow.getSize();
     
     // Always position at the top of the screen with small margin
     const topMargin = 20;
@@ -938,7 +928,7 @@ class WindowManager {
     
     // Get current positions and sizes
     const [mainX, mainY] = mainWindow.getPosition();
-    const [llmX, llmY] = llmWindow.getPosition();
+    const [llmX] = llmWindow.getPosition();
     const [mainWidth, mainHeight] = mainWindow.getSize();
     const [llmWidth, llmHeight] = llmWindow.getSize();
     
@@ -1159,109 +1149,6 @@ class WindowManager {
     });
   }
 
-  setupScreenCaptureAvailabilityWatcher() {
-    // Avoid screencast portal errors on Linux/Wayland by disabling periodic detection
-    if (process.platform === 'linux') {
-      logger.info('Skipping screen capture availability watcher on Linux to avoid portal screencast errors');
-      return;
-    }
-
-    if (this.screenCaptureAvailabilityWatcher) {
-      clearInterval(this.screenCaptureAvailabilityWatcher);
-    }
-
-    // This is only a capture availability probe. desktopCapturer.getSources()
-    // cannot tell whether another app is currently sharing the screen.
-    this.screenCaptureAvailabilityWatcher = setInterval(async () => {
-      await this.checkScreenCaptureAvailability();
-    }, 5000); // Check every 5 seconds instead of 1
-
-    logger.info('Screen capture availability watcher initialized');
-  }
-
-  async checkScreenCaptureAvailability() {
-    if (this.isCheckingScreenCaptureStatus) {
-      logger.debug('Skipping overlapping screen capture availability check');
-      return;
-    }
-
-    this.isCheckingScreenCaptureStatus = true;
-    const previousAvailability = this.screenCaptureStatus.available;
-    const checkedAt = new Date().toISOString();
-
-    try {
-      await desktopCapturer.getSources({
-        types: ['screen', 'window'],
-        thumbnailSize: { width: 1, height: 1 }
-      });
-
-      this.screenCaptureStatus = {
-        available: true,
-        lastError: null,
-        lastCheckedAt: checkedAt
-      };
-
-      if (previousAvailability === false) {
-        logger.info('Screen capture enumeration recovered');
-      }
-    } catch (error) {
-      this.screenCaptureStatus = {
-        available: false,
-        lastError: error.message,
-        lastCheckedAt: checkedAt
-      };
-
-      const logContext = {
-        error: error.message,
-        isScreenBeingShared: this.isScreenBeingShared
-      };
-
-      if (previousAvailability === false) {
-        logger.debug('Screen capture enumeration still unavailable', logContext);
-      } else {
-        logger.warn('Screen capture enumeration unavailable; leaving screen sharing mode unchanged', logContext);
-      }
-    } finally {
-      this.isCheckingScreenCaptureStatus = false;
-    }
-  }
-
-  startScreenSharingMode() {
-    if (!this.isScreenBeingShared) {
-      this.isScreenBeingShared = true;
-      this.wasVisibleBeforeSharing = this.isVisible;
-      this.handleScreenSharingStarted();
-    }
-  }
-
-  stopScreenSharingMode() {
-    if (this.isScreenBeingShared) {
-      this.isScreenBeingShared = false;
-      this.handleScreenSharingStopped();
-    }
-  }
-
-  handleScreenSharingStarted() {
-    logger.info('Screen sharing mode enabled - hiding windows');
-    this.rememberVisibleWindows();
-
-    this.windows.forEach((window, type) => {
-      if (!window.isDestroyed()) {
-        window.hide();
-        window.setPosition(-10000, -10000);
-      }
-    });
-  }
-
-  handleScreenSharingStopped() {
-    logger.info('Screen sharing mode disabled - restoring windows');
-    
-    if (this.wasVisibleBeforeSharing) {
-      this.moveWindowsToActiveScreen();
-      this.showAllWindows();
-    }
-  }
-
   switchToWindow(windowType) {
     if (this.windows.has('chat') && this.windows.get('chat').isVisible()) {
       this.hideChatWindow();
@@ -1270,10 +1157,6 @@ class WindowManager {
 
     if (!this.windowConfigs[windowType]) {
       logger.warn('Attempted to switch to unknown window type', { windowType });
-      return;
-    }
-
-    if (this.isScreenBeingShared) {
       return;
     }
 
@@ -1292,15 +1175,11 @@ class WindowManager {
 
   /**
    * Restore the windows that were visible when they were last hidden (by the
-   * hide shortcut or by screen sharing), without taking focus. With no record,
+   * hide shortcut), without taking focus. With no record,
    * only the toolbar comes back; Settings, Chat and onboarding are never
    * opened by this.
    */
   showAllWindows() {
-    if (this.isScreenBeingShared) {
-      return;
-    }
-
     const types = this.hiddenWindowTypes && this.hiddenWindowTypes.length
       ? this.hiddenWindowTypes
       : ['main'];
@@ -1343,10 +1222,6 @@ class WindowManager {
   }
 
   toggleVisibility() {
-    if (this.isScreenBeingShared) {
-      return this.isVisible;
-    }
-
     if (this.isVisible) {
       this.hideAllWindows();
     } else {
@@ -1564,8 +1439,8 @@ class WindowManager {
     const state = this.answerState();
     const hiddenMeanwhile = state.revealWhileVisible && !this.isVisible;
     this.cancelAnswerReveal();
-    // Screen sharing began, or every window was hidden, while the page drew.
-    if (this.isScreenBeingShared || hiddenMeanwhile) return;
+    // Every window was hidden while the page drew.
+    if (hiddenMeanwhile) return;
     const llmWindow = this.windows.get('llmResponse');
     if (!llmWindow || llmWindow.isDestroyed()) return;
     this.showOnCurrentDesktop(llmWindow, { focus: false });
@@ -1573,15 +1448,9 @@ class WindowManager {
 
   showLLMResponse(content, metadata = {}) {
     logger.debug('showLLMResponse called', {
-      isScreenBeingShared: this.isScreenBeingShared,
       contentLength: content.length,
       skill: metadata.skill
     });
-
-    if (this.isScreenBeingShared) {
-      logger.warn('LLM response blocked due to screen sharing mode');
-      return;
-    }
 
     const llmWindow = this.windows.get('llmResponse');
     if (!llmWindow || llmWindow.isDestroyed()) {
@@ -1608,11 +1477,6 @@ class WindowManager {
   }
 
   showLLMLoading() {
-    if (this.isScreenBeingShared) {
-      logger.warn('LLM loading blocked due to screen sharing mode');
-      return;
-    }
-
     const llmWindow = this.windows.get('llmResponse');
     if (!llmWindow || llmWindow.isDestroyed()) {
       logger.error('LLM window not available for loading state');
@@ -1687,8 +1551,6 @@ class WindowManager {
    * reloads its values on settings-window-shown.
    */
   showSettings() {
-    if (this.isScreenBeingShared) return;
-
     const settingsWindow = this.windows.get('settings');
     if (!settingsWindow || settingsWindow.isDestroyed()) {
       logger.warn('Settings window not available');
@@ -1712,8 +1574,6 @@ class WindowManager {
   }
 
   async showOnboarding() {
-    if (this.isScreenBeingShared) return null;
-
     let onboardingWindow = this.windows.get('onboarding');
     if (!onboardingWindow) {
       // A second call while the page loads (startup, the tray, a second
@@ -1754,8 +1614,8 @@ class WindowManager {
 
   centerWindow(window) {
     const display = this.currentDisplay || screen.getPrimaryDisplay();
-    const { x: displayX, y: displayY, width: screenWidth, height: screenHeight } = display.workArea || display.workAreaSize;
-    const [windowWidth, windowHeight] = window.getSize();
+    const { x: displayX, y: displayY, width: screenWidth } = display.workArea || display.workAreaSize;
+    const [windowWidth] = window.getSize();
     
     // Center horizontally but position at top
     const topMargin = 20;
@@ -1822,9 +1682,7 @@ class WindowManager {
       windows: stats,
       activeWindow: this.activeWindow,
       isInteractive: this.isInteractive,
-      isVisible: this.isVisible,
-      isScreenBeingShared: this.isScreenBeingShared,
-      screenCaptureStatus: { ...this.screenCaptureStatus }
+      isVisible: this.isVisible
     };
   }
 
@@ -1847,11 +1705,6 @@ class WindowManager {
     if (this.desktopWatcher) {
       clearInterval(this.desktopWatcher);
       this.desktopWatcher = null;
-    }
-
-    if (this.screenCaptureAvailabilityWatcher) {
-      clearInterval(this.screenCaptureAvailabilityWatcher);
-      this.screenCaptureAvailabilityWatcher = null;
     }
     
     logger.info('All windows destroyed');
@@ -1898,8 +1751,6 @@ class WindowManager {
   }
 
   trackActiveScreen() {
-    if (this.isScreenBeingShared) return;
-
     const cursorPoint = screen.getCursorScreenPoint();
     const activeDisplay = screen.getDisplayNearestPoint(cursorPoint);
     
@@ -1915,9 +1766,9 @@ class WindowManager {
   }
 
   moveWindowsToActiveScreen() {
-    if (!this.currentDisplay || this.isScreenBeingShared) return;
+    if (!this.currentDisplay) return;
 
-    const { x: displayX, y: displayY, width: displayWidth, height: displayHeight } = this.currentDisplay.workArea;
+    const { x: displayX, y: displayY, width: displayWidth } = this.currentDisplay.workArea;
     
     // Handle bound windows specially
     if (this.bindWindows) {
@@ -1943,7 +1794,7 @@ class WindowManager {
           return;
         }
         
-        const [windowWidth, windowHeight] = window.getSize();
+        const [windowWidth] = window.getSize();
         
         let newX, newY;
         
@@ -2004,8 +1855,6 @@ class WindowManager {
   }
 
   trackDesktopChanges() {
-    if (this.isScreenBeingShared) return;
-
     // Simplified tracking - just log changes
     if (process.platform === 'darwin') {
       const cursorPoint = screen.getCursorScreenPoint();
@@ -2026,19 +1875,6 @@ class WindowManager {
   // - enforceWindowProperties()
   // - enforceAllWindowProperties()
   // - enforceAlwaysOnTop()
-
-  // Public methods for manual screen sharing control
-  enableScreenSharingMode() {
-    this.startScreenSharingMode();
-  }
-
-  disableScreenSharingMode() {
-    this.stopScreenSharingMode();
-  }
-
-  isInScreenSharingMode() {
-    return this.isScreenBeingShared;
-  }
 
   // Window binding management methods
   setWindowBinding(enabled) {
@@ -2117,7 +1953,7 @@ class WindowManager {
   }
 
   broadcastSkillChange(skill) {
-    this.windows.forEach((window, type) => {
+    this.windows.forEach((window) => {
       if (!window.isDestroyed()) {
         window.webContents.send('skill-changed', { skill });
       }

@@ -212,11 +212,11 @@ class LLMService {
    * @param {Buffer} imageBuffer - PNG/JPEG image bytes
    * @param {string} mimeType - e.g., 'image/png' or 'image/jpeg'
    * @param {string} activeSkill - current skill (e.g. 'dsa')
-   * @param {Array} sessionMemory - optional (not required for image)
+   * @param {Array} _sessionMemory - unused: images are sent without history
    * @param {string|null} programmingLanguage - optional language context for skills that need it
    * @returns {Promise<{response: string, metadata: object}>}
    */
-  async processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null) {
+  async processImageWithSkill(imageBuffer, mimeType, activeSkill, _sessionMemory = [], programmingLanguage = null) {
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
     }
@@ -1449,7 +1449,7 @@ class LLMService {
     }
   }
 
-  async testNetworkConnection({ host, port, name }) {
+  async testNetworkConnection({ host, port }) {
     return new Promise((resolve, reject) => {
       const net = require('net');
       const socket = new net.Socket();
@@ -1837,7 +1837,6 @@ class LLMService {
       return this.executeProviderRequest(geminiRequest, null);
     }
 
-    const https = require('https');
     const apiKey = config.getApiKey('GEMINI');
     // Same model as the SDK path (honors GEMINI_MODEL); identical to the
     // config default when GEMINI_MODEL is unset.

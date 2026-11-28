@@ -5,19 +5,13 @@
 // are meant to stay in sync, so every case runs against each of them.
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const { loadFunction, repoPath } = require('./helpers/source');
+const { loadFunction } = require('./helpers/source');
 
 const F = '```';
 const IMPLEMENTATIONS = {
   'src/ui/chat-page.js': loadFunction('src/ui/chat-page.js', 'splitCodeBlocks'),
   'src/ui/answer-page.js': loadFunction('src/ui/answer-page.js', 'splitCodeBlocks'),
 };
-// A method on the older chat window class, which no page loads today. Checked
-// while the file exists so its copy cannot drift.
-if (fs.existsSync(repoPath('src/ui/chat-window.js'))) {
-  IMPLEMENTATIONS['src/ui/chat-window.js'] = loadFunction('src/ui/chat-window.js', 'splitCodeBlocks');
-}
 
 const CASES = [
   {
