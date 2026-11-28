@@ -590,7 +590,7 @@ function handleTranscription(text) {
 // and the blank lines around it are dropped and the text on either side is
 // rejoined. A fence that is never closed, as in a cut-off answer, runs to
 // the end.
-// Keep in sync with splitCodeBlocks in src/ui/chat-window.js and src/ui/answer-page.js.
+// Keep in sync with splitCodeBlocks in src/ui/answer-page.js.
 function splitCodeBlocks(text) {
   const prose = [];
   const blocks = [];

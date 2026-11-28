@@ -524,7 +524,7 @@ function renderAnswer(response, { isError = false, final = true, fresh = false, 
 // and the blank lines around it are dropped and the text on either side is
 // rejoined. A fence that is never closed, as in a cut-off answer, runs to
 // the end.
-// Keep in sync with splitCodeBlocks in src/ui/chat-page.js and src/ui/chat-window.js.
+// Keep in sync with splitCodeBlocks in src/ui/chat-page.js.
 function splitCodeBlocks(text) {
     const prose = [];
     const blocks = [];

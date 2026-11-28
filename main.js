@@ -2530,34 +2530,11 @@ class ApplicationController {
     }
   }
 
-  broadcastOCRSuccess(ocrResult) {
-    windowManager.broadcastToAllWindows("ocr-completed", {
-      text: ocrResult.text,
-      metadata: ocrResult.metadata,
-    });
-  }
-
   broadcastOCRError(errorMessage) {
     windowManager.broadcastToAllWindows("ocr-error", {
       error: errorMessage,
       timestamp: new Date().toISOString(),
     });
-  }
-
-  broadcastLLMSuccess(llmResult) {
-    const broadcastData = {
-      response: llmResult.response,
-      metadata: llmResult.metadata,
-      skill: this.activeSkill, // Add the current active skill to the top level
-    };
-
-    logger.info("Broadcasting LLM success to all windows", {
-      responseLength: llmResult.response.length,
-      skill: this.activeSkill,
-      dataKeys: Object.keys(broadcastData),
-    });
-
-    windowManager.broadcastToAllWindows("llm-response", broadcastData);
   }
 
   broadcastLLMError(errorMessage, messageId = null) {
@@ -3633,12 +3610,6 @@ class ApplicationController {
       logger.warn("AI provider test failed", { provider: id, error: error.message });
       return fail(error.message || "Connection failed.");
     }
-  }
-
-  persistSettings(settings) {
-    // You can extend this to save to a file or database
-    // For now, we'll just keep them in memory
-    logger.debug("Settings persisted", { fields: Object.keys(settings || {}) });
   }
 
   /**
