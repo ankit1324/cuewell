@@ -320,6 +320,7 @@ const {
   getActiveProviderId, getProviderConfig, listProviders, isPlaceholderKey,
   isConfigured, getApiKey, getModel, getBaseURL, createProvider,
 } = require("./src/services/providers");
+const providerFallback = require("./src/services/providers/fallback");
 
 // AI-provider fields the Settings window edits, mapped to their .env keys.
 // geminiKey (GEMINI_API_KEY) and llmProvider (LLM_PROVIDER) are handled
@@ -385,6 +386,19 @@ function parseWindowGap(raw) {
 // default, so the overlay matches the apps around it). Each value is also
 // the nativeTheme.themeSource that makes native menus, dialogs and
 // scrollbars, and prefers-color-scheme in the pages, match.
+// Answer and chat window opacity in percent, saved as WINDOW_OPACITY. Never
+// below 40 so the text stays readable; 100 (opaque) by default.
+const MIN_WINDOW_OPACITY = 40;
+const MAX_WINDOW_OPACITY = 100;
+const DEFAULT_WINDOW_OPACITY = 100;
+/** The opacity as a whole percentage, or null when `raw` is not one in range. */
+function parseWindowOpacity(raw) {
+  const text = String(raw === undefined || raw === null ? "" : raw).trim();
+  if (!/^\d{1,3}$/.test(text)) return null;
+  const percent = Number(text);
+  return percent >= MIN_WINDOW_OPACITY && percent <= MAX_WINDOW_OPACITY ? percent : null;
+}
+
 const THEMES = ["light", "dark", "system"];
 const DEFAULT_THEME = "system";
 /** `raw` as a theme, or null when it is not one. */
@@ -442,7 +456,7 @@ const SETTINGS_FIELDS_BY_WINDOW = {
     "whisperEngine", "whisperCppModel",
     "geminiKey", "llmProvider", ...Object.keys(LLM_SETTING_ENV_KEYS),
     "windowGap", "codingLanguage", "activeSkill", "answerLength", "selectedIcon",
-    "theme",
+    "theme", "windowOpacity", "llmFallback",
   ],
   // whisperModelDownload is recorded by the wizard but not stored.
   onboarding: [
@@ -650,6 +664,8 @@ class ApplicationController {
     // Color theme (THEME); applied to nativeTheme in onAppReady.
     this.theme = parseTheme(process.env.THEME) || DEFAULT_THEME;
     windowManager.setTheme(this.theme);
+    // Answer and chat window opacity (WINDOW_OPACITY); opaque when unset or invalid.
+    windowManager.setContentOpacity(parseWindowOpacity(process.env.WINDOW_OPACITY) ?? DEFAULT_WINDOW_OPACITY);
     this.speechAvailable = false;
 
     // Utterance coalescing: VAD emits a transcript per natural pause, but a
@@ -2448,6 +2464,8 @@ class ApplicationController {
         skill: this.activeSkill,
         processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
+        // Set when a backup provider answered (llm.service.js).
+        providerNote: llmResult.metadata.providerNote,
         isImageAnalysis: true,
         messageId
       });
@@ -2589,6 +2607,8 @@ class ApplicationController {
         skill: this.activeSkill,
         processingTime: llmResult.metadata.processingTime,
         usedFallback: llmResult.metadata.usedFallback,
+        // Set when a backup provider answered (llm.service.js).
+        providerNote: llmResult.metadata.providerNote,
         messageId,
       });
     } catch (error) {
@@ -2807,6 +2827,8 @@ class ApplicationController {
           skill: this.activeSkill,
           processingTime: llmResult.metadata.processingTime,
           usedFallback: llmResult.metadata.usedFallback,
+          // Set when a backup provider answered (llm.service.js).
+          providerNote: llmResult.metadata.providerNote,
           isTranscriptionResponse: true,
           messageId
         });
@@ -3181,6 +3203,7 @@ class ApplicationController {
       selectedIcon: this.appIcon || "cuewell",
       windowGap: windowManager.windowGap,
       theme: this.theme || DEFAULT_THEME,
+      windowOpacity: windowManager.getContentOpacityPercent(),
 
       speechProvider: speechService.provider || "whisper",
       azureKey: maskSecret(process.env.AZURE_SPEECH_KEY),
@@ -3201,6 +3224,12 @@ class ApplicationController {
       geminiKey: maskSecret(process.env.GEMINI_API_KEY),
       llmProvider: getActiveProviderId(),
       llmProviders: listProviders(),
+      // Backup providers in order: on/off, and whether each can be used
+      // (a saved key, or an Ollama URL or model). Never a key.
+      llmFallback: providerFallback.getFallbackSettings().map((item) => ({
+        ...item,
+        available: providerFallback.isFallbackCandidate(item.id),
+      })),
       ...llmSettings,
 
       azureConfigured: !!process.env.AZURE_SPEECH_KEY && !!process.env.AZURE_SPEECH_REGION,
@@ -3251,6 +3280,8 @@ class ApplicationController {
       },
       // setContentProtection only has an effect on macOS and Windows.
       contentProtection: process.platform === "darwin" || process.platform === "win32",
+      // BrowserWindow.setOpacity: macOS and Windows; Linux ignores it.
+      windowOpacity: windowManager.supportsWindowOpacity(),
       shortcuts,
       paths: { settingsFile: ENV_PATH, profile: this.profilePath, logs },
       // Where API keys are kept (booleans and labels, never a key).
@@ -3645,6 +3676,23 @@ class ApplicationController {
         clean.windowGap = gap;
       }
     });
+    check(() => {
+      if (has("windowOpacity")) {
+        const percent = parseWindowOpacity(text("windowOpacity"));
+        if (percent === null) {
+          throw new SettingsValidationError("windowOpacity",
+            `Window opacity must be a whole number from ${MIN_WINDOW_OPACITY} to ${MAX_WINDOW_OPACITY}.`);
+        }
+        clean.windowOpacity = percent;
+      }
+    });
+    check(() => {
+      if (has("llmFallback")) {
+        const result = providerFallback.validateFallbackSettings(settings.llmFallback);
+        if (result.error) throw new SettingsValidationError("llmFallback", result.error);
+        clean.llmFallback = result.list;
+      }
+    });
 
     check(() => {
       if (has("speechProvider")) {
@@ -3832,6 +3880,9 @@ class ApplicationController {
       if (settings.theme) {
         this.applyTheme(settings.theme);
       }
+      if (settings.windowOpacity !== undefined) {
+        windowManager.setContentOpacity(settings.windowOpacity);
+      }
 
       // ── Persist provider / API-key fields back to .env ──
       // The settings UI is now the source of truth for these values.
@@ -3850,6 +3901,13 @@ class ApplicationController {
       }
       if (settings.theme) {
         envUpdates.THEME = settings.theme;
+      }
+      if (settings.windowOpacity !== undefined) {
+        envUpdates.WINDOW_OPACITY = String(settings.windowOpacity);
+      }
+      if (settings.llmFallback) {
+        // Read at every question (llm.service.js), so no re-init is needed.
+        Object.assign(envUpdates, providerFallback.fallbackEnvValues(settings.llmFallback));
       }
       if (settings.speechProvider === "azure" || settings.speechProvider === "whisper") {
         envUpdates.SPEECH_PROVIDER = settings.speechProvider;

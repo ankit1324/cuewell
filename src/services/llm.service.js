@@ -12,6 +12,7 @@ const {
   createProvider
 } = require('./providers');
 const { fromGeminiRequest } = require('./providers/convert');
+const { getFallbackChain, classifyFailure, fallbackNote, shortLabel } = require('./providers/fallback');
 const { MAX_TOKENS_NO_TEXT } = require('./providers/errors');
 const {
   cancelledError,
@@ -22,8 +23,17 @@ const {
   cancellableDelay
 } = require('./cancellation');
 
+// How long a backup Ollama server may take to accept a connection.
+const OLLAMA_PROBE_TIMEOUT_MS = 1500;
+
 class LLMService {
-  constructor() {
+  /**
+   * `providerId` (optional) pins the service to that provider instead of
+   * LLM_PROVIDER. Such a service answers one request as the backup for the
+   * selected provider (see _withProviderFallback) and never falls back itself.
+   */
+  constructor({ providerId = null } = {}) {
+    this.fixedProviderId = providerId;
     this.client = null;
     this.model = null;
     this.isInitialized = false;
@@ -70,8 +80,170 @@ class LLMService {
     });
   }
 
+  // ---------- Questions, with provider fallback ----------
+  //
+  // Each public method below asks the selected provider. When that fails
+  // for a reason on the provider's side, _withProviderFallback asks the next
+  // configured backup provider once (Settings > AI provider). Their
+  // arguments and results are those of the _-prefixed methods; options may
+  // also hold providerFallback: false, which asks the selected provider only.
+
+  processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, options = {}) {
+    return this._withProviderFallback(options, { needsImages: true }, (service) =>
+      service._processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory, programmingLanguage, options));
+  }
+
+  processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
+    const live = this._trackLiveText(onDelta, onReset);
+    return this._withProviderFallback(options, { needsImages: true, beforeFallback: live.clear }, (service) =>
+      service._processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory, programmingLanguage, live.onDelta, live.onReset, options));
+  }
+
+  processTextWithSkill(text, activeSkill, sessionMemory = [], programmingLanguage = null, options = {}) {
+    return this._withProviderFallback(options, {}, (service) =>
+      service._processTextWithSkill(text, activeSkill, sessionMemory, programmingLanguage, options));
+  }
+
+  processTextWithSkillStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
+    const live = this._trackLiveText(onDelta, onReset);
+    return this._withProviderFallback(options, { beforeFallback: live.clear }, (service) =>
+      service._processTextWithSkillStream(text, activeSkill, sessionMemory, programmingLanguage, live.onDelta, live.onReset, options));
+  }
+
+  processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory = [], programmingLanguage = null, options = {}) {
+    return this._withProviderFallback(options, {}, (service) =>
+      service._processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory, programmingLanguage, options));
+  }
+
+  processTranscriptionWithIntelligentResponseStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
+    const live = this._trackLiveText(onDelta, onReset);
+    return this._withProviderFallback(options, { beforeFallback: live.clear }, (service) =>
+      service._processTranscriptionWithIntelligentResponseStream(text, activeSkill, sessionMemory, programmingLanguage, live.onDelta, live.onReset, options));
+  }
+
+  /**
+   * The caller's onDelta/onReset, plus clear(): calls onReset when text is
+   * on screen, so a backup provider's answer never follows the failed
+   * provider's partial text.
+   */
+  _trackLiveText(onDelta, onReset) {
+    let shown = false;
+    const reset = () => {
+      shown = false;
+      if (typeof onReset === 'function') onReset();
+    };
+    return {
+      onDelta: (delta) => {
+        if (delta) shown = true;
+        if (typeof onDelta === 'function') onDelta(delta);
+      },
+      onReset: reset,
+      clear: () => {
+        if (!shown) return;
+        try {
+          reset();
+        } catch (error) {
+          logger.warn('Live text reset failed', { error: error.message });
+        }
+      }
+    };
+  }
+
+  /**
+   * Run `run(this)`. When it fails for a reason on the provider's side
+   * (classifyFailure), run it once more on the first backup provider that
+   * is on, configured, able to read images when `needsImages`, and (for
+   * Ollama) reachable. A stop, a refusal, or no backup rethrows the first
+   * error. The backup's result names it in metadata.providerFallback and
+   * metadata.providerNote. `beforeFallback` runs just before the backup.
+   */
+  /**
+   * Attempts for one model: all of `configured` normally, at most 2 (one
+   * retry) while a backup provider is ready to take over.
+   */
+  _retryBudget(configured) {
+    const max = Math.max(1, Number(configured) || 1);
+    return this._backupAvailable ? Math.min(max, 2) : max;
+  }
+
+  async _withProviderFallback(options, { needsImages = false, beforeFallback = null } = {}, run) {
+    const signal = (options && options.signal) || null;
+    if ((options && options.providerFallback === false) || this.fixedProviderId) {
+      return run(this);
+    }
+    // With a backup ready, the selected provider gives up sooner (see
+    // _retryBudget) so the backup answers in seconds, not after every retry.
+    this._backupAvailable = getFallbackChain(this.providerId, process.env, { needsImages }).length > 0;
+    try {
+      return await run(this);
+    } catch (error) {
+      this._rethrowIfCancelled(error, signal);
+      const failure = classifyFailure(error);
+      const primaryId = this.providerId;
+      if (!failure.fallback) throw error;
+
+      for (const id of getFallbackChain(primaryId, process.env, { needsImages })) {
+        if (id === 'ollama' && !(await this._isOllamaReachable())) {
+          logger.info('Skipping the Ollama backup: its server is not reachable', { from: primaryId });
+          continue;
+        }
+        throwIfCancelled(signal);
+        const backup = this._createFallbackService(id);
+        if (!backup || !backup.isInitialized) continue;
+
+        logger.warn('AI provider failed; asking the backup provider', {
+          from: primaryId, to: id, kind: failure.kind
+        });
+        if (typeof beforeFallback === 'function') beforeFallback();
+        try {
+          const result = await run(backup);
+          throwIfCancelled(signal);
+          result.metadata = {
+            ...(result.metadata || {}),
+            provider: id,
+            providerFallback: { from: primaryId, to: id, kind: failure.kind, reason: failure.reason },
+            providerNote: fallbackNote(primaryId, id, failure.reason)
+          };
+          return result;
+        } catch (backupError) {
+          this._rethrowIfCancelled(backupError, signal);
+          logger.warn('Backup AI provider failed too', {
+            from: primaryId, to: id, error: backupError && backupError.message
+          });
+          // One backup per question: say both failed, with the selected
+          // provider's reason first.
+          const both = new Error(`${error.message} ${shortLabel(id)} was tried instead and failed too.`);
+          both.cause = error;
+          both.backupError = backupError;
+          both.isUserFacing = true;
+          throw both;
+        }
+      }
+      throw error;
+    }
+  }
+
+  /** A service pinned to provider `id`, sharing this one's prompt settings. */
+  _createFallbackService(id) {
+    const backup = new LLMService({ providerId: id });
+    backup.promptContext = this.promptContext;
+    return backup;
+  }
+
+  /** True when the Ollama server accepts a connection within OLLAMA_PROBE_TIMEOUT_MS. */
+  async _isOllamaReachable() {
+    try {
+      const url = new NodeURL(getBaseURL('ollama'));
+      const port = Number(url.port) || (url.protocol === 'http:' ? 80 : 443);
+      const host = url.hostname.replace(/^\[(.*)\]$/, '$1');
+      return await this.testNetworkConnection({ host, port, timeoutMs: OLLAMA_PROBE_TIMEOUT_MS });
+    } catch (_) {
+      return false;
+    }
+  }
+
   initializeClient() {
-    const providerId = getActiveProviderId();
+    const providerId = this.fixedProviderId || getActiveProviderId();
     const previousProviderId = this.providerId;
     this.providerId = providerId;
 
@@ -225,7 +397,7 @@ class LLMService {
    * @param {{signal?: AbortSignal}} options - `signal` stops the request (see ./cancellation.js)
    * @returns {Promise<{response: string, metadata: object}>}
    */
-  async processImageWithSkill(imageBuffer, mimeType, activeSkill, _sessionMemory = [], programmingLanguage = null, options = {}) {
+  async _processImageWithSkill(imageBuffer, mimeType, activeSkill, _sessionMemory = [], programmingLanguage = null, options = {}) {
     const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
@@ -332,7 +504,7 @@ class LLMService {
     }
   }
 
-  async processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
+  async _processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
     const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
@@ -402,7 +574,7 @@ class LLMService {
         requestId: this.requestCount
       });
       live.onAttemptStart();
-      return this.processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory, programmingLanguage, { signal });
+      return this.processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory, programmingLanguage, { signal, providerFallback: false });
     }
   }
 
@@ -410,7 +582,7 @@ class LLMService {
     return promptLoader.getImageInstruction(activeSkill, programmingLanguage);
   }
 
-  async processTextWithSkill(text, activeSkill, sessionMemory = [], programmingLanguage = null, options = {}) {
+  async _processTextWithSkill(text, activeSkill, sessionMemory = [], programmingLanguage = null, options = {}) {
     const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
@@ -497,7 +669,7 @@ class LLMService {
     }
   }
 
-  async processTextWithSkillStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
+  async _processTextWithSkillStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
     const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
@@ -542,11 +714,11 @@ class LLMService {
         requestId: this.requestCount
       });
       live.onAttemptStart();
-      return this.processTextWithSkill(text, activeSkill, sessionMemory, programmingLanguage, { signal });
+      return this.processTextWithSkill(text, activeSkill, sessionMemory, programmingLanguage, { signal, providerFallback: false });
     }
   }
 
-  async processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory = [], programmingLanguage = null, options = {}) {
+  async _processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory = [], programmingLanguage = null, options = {}) {
     const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
@@ -969,7 +1141,7 @@ class LLMService {
       return this.executeProviderRequest(geminiRequest, null, { signal });
     }
 
-    const maxRetries = config.get('llm.gemini.maxRetries');
+    const maxRetries = this._retryBudget(config.get('llm.gemini.maxRetries'));
     const timeout = config.get('llm.gemini.timeout');
     const primaryModel = this.model;
     const fallbackModels = config.get('llm.gemini.fallbackModels') || [];
@@ -1042,6 +1214,8 @@ class LLMService {
           this._rethrowIfCancelled(error, signal);
           const errorInfo = this.analyzeError(error);
           lastError = error;
+          // A rejected key fails the same way on every attempt and model.
+          if (errorInfo.type === 'AUTH_ERROR') throw error;
 
           // Enhanced error logging for fetch failures
           if (errorInfo.type === 'NETWORK_ERROR') {
@@ -1116,7 +1290,7 @@ class LLMService {
    * {response, metadata} shape. Falls back to the non-streaming path on any
    * streaming failure so reliability is never worse than before.
    */
-  async processTranscriptionWithIntelligentResponseStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
+  async _processTranscriptionWithIntelligentResponseStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
     const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
@@ -1165,7 +1339,7 @@ class LLMService {
       // single final response. The partial text of the failed stream is
       // cleared first so it does not stay on screen while this runs.
       live.onAttemptStart();
-      return this.processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory, programmingLanguage, { signal });
+      return this.processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory, programmingLanguage, { signal, providerFallback: false });
     }
   }
 
@@ -1228,7 +1402,7 @@ class LLMService {
       return this.executeProviderRequest(geminiRequest, onDelta, { onAttemptStart, signal });
     }
 
-    const maxRetries = config.get('llm.gemini.maxRetries');
+    const maxRetries = this._retryBudget(config.get('llm.gemini.maxRetries'));
     const apiKey = config.getApiKey('GEMINI');
     const primaryModel = this.model;
     const fallbackModels = config.get('llm.gemini.fallbackModels') || [];
@@ -1258,6 +1432,8 @@ class LLMService {
           this._rethrowIfCancelled(error, signal);
           const errorInfo = this.analyzeError(error);
           lastError = error;
+          // A rejected key fails the same way on every attempt and model.
+          if (errorInfo.type === 'AUTH_ERROR') throw error;
 
           logger.warn(`Gemini streaming attempt ${attempt} failed for model ${modelName}`, {
             error: error.message,
@@ -1435,6 +1611,9 @@ class LLMService {
     // API key errors
     if (errorMessage.includes('unauthorized') || 
         errorMessage.includes('invalid api key') ||
+        errorMessage.includes('api key not valid') ||
+        errorMessage.includes('api_key_invalid') ||
+        errorMessage.includes('api key expired') ||
         errorMessage.includes('forbidden')) {
       return {
         type: 'AUTH_ERROR',
@@ -1509,7 +1688,7 @@ class LLMService {
     }
   }
 
-  async testNetworkConnection({ host, port }) {
+  async testNetworkConnection({ host, port, timeoutMs = 5000 }) {
     return new Promise((resolve, reject) => {
       const net = require('net');
       const socket = new net.Socket();
@@ -1517,7 +1696,7 @@ class LLMService {
       const timeout = setTimeout(() => {
         socket.destroy();
         reject(new Error(`Connection timeout to ${host}:${port}`));
-      }, 5000);
+      }, timeoutMs);
 
       socket.on('connect', () => {
         clearTimeout(timeout);
@@ -1752,7 +1931,7 @@ class LLMService {
     }
 
     const streaming = typeof onDelta === 'function';
-    const maxAttempts = Math.max(1, Number(options.maxAttempts) || config.get('llm.gemini.maxRetries') || 1);
+    const maxAttempts = Math.max(1, Number(options.maxAttempts) || this._retryBudget(config.get('llm.gemini.maxRetries')) || 1);
     const signal = options.signal || null;
     let lastError = null;
 

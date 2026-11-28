@@ -20,6 +20,10 @@ const PRELOAD_BY_TYPE = {
 
 // Motion and sizing for the chat and answer windows.
 const WINDOW_FADE_MS = 160;          // window appear: fade (plus a 4 px rise in the page)
+// The answer and chat windows can be made see-through (Settings, saved as
+// WINDOW_OPACITY), never below 40% so their text stays readable.
+const CONTENT_OPACITY_TYPES = ['llmResponse', 'chat'];
+const MIN_CONTENT_OPACITY_PERCENT = 40;
 const ANSWER_REVEAL_TIMEOUT_MS = 150; // longest wait for the answer page's first frame
 const ANSWER_MIN_HEIGHT = 120;       // title bar plus a line or two
 const ANSWER_SCREEN_MARGIN = 12;     // kept free below the answer window
@@ -91,6 +95,7 @@ class WindowManager {
     this.bindWindows = true; // Enable window binding by default
     this.windowGap = 10; // Small gap between windows
     this.theme = DEFAULT_THEME; // main.js sets the saved one (setTheme)
+    this.contentOpacity = 1; // answer and chat windows; main.js sets the saved one (setContentOpacity)
     this.boundWindowsPosition = { x: 0, y: 0 }; // Track position of bound windows
     
     this.windowConfigs = {
@@ -239,6 +244,7 @@ class WindowManager {
     }
     const window = await this.createWindow('chat');
     this.windows.set('chat', window);
+    this.applyContentOpacity(window, 'chat');
     window.hide();
     return window;
   }
@@ -249,6 +255,7 @@ class WindowManager {
     }
     const window = await this.createWindow('llmResponse');
     this.windows.set('llmResponse', window);
+    this.applyContentOpacity(window, 'llmResponse');
     
     // Forward the answer page's own debug lines to the main log. Electron 35+
     // passes the details on the event object; the positional
@@ -1078,9 +1085,10 @@ class WindowManager {
   }
 
   /**
-   * Fade a window's opacity from 0 to 1 over WINDOW_FADE_MS with the theme's
-   * ease-out curve. A hide or close during the fade ends it at full opacity,
-   * so the next show never starts from an invisible window.
+   * Fade a window's opacity from 0 to its own opacity (windowOpacityFor)
+   * over WINDOW_FADE_MS with the theme's ease-out curve. A hide or close
+   * during the fade ends it at that opacity, so the next show never starts
+   * from an invisible window.
    */
   fadeInWindow(win) {
     this.stopWindowFade(win);
@@ -1088,7 +1096,9 @@ class WindowManager {
     const step = () => {
       if (win.isDestroyed()) return;
       const t = Math.min(1, (Date.now() - start) / WINDOW_FADE_MS);
-      win.setOpacity(1 - Math.pow(1 - t, 3));
+      // Read every frame, so a change made during the fade is where it ends.
+      const target = this.windowOpacityFor(this.getWindowTypeForWebContents(win.webContents));
+      win.setOpacity(target * (1 - Math.pow(1 - t, 3)));
       if (t < 1) {
         this.windowFades.set(win.id, setTimeout(step, 16));
       } else {
@@ -1103,7 +1113,51 @@ class WindowManager {
     if (!timer) return;
     clearTimeout(timer);
     this.windowFades.delete(win.id);
-    if (!win.isDestroyed()) win.setOpacity(1);
+    if (!win.isDestroyed()) win.setOpacity(this.windowOpacityFor(this.getWindowTypeForWebContents(win.webContents)));
+  }
+
+  /** Whether BrowserWindow.setOpacity works here: macOS and Windows (a no-op on Linux). */
+  supportsWindowOpacity() {
+    return process.platform === 'darwin' || process.platform === 'win32';
+  }
+
+  /** The opacity (0 to 1) a window of `type` is shown at: the setting for answer and chat, else 1. */
+  windowOpacityFor(type) {
+    return CONTENT_OPACITY_TYPES.includes(type) ? this.contentOpacity : 1;
+  }
+
+  /** The answer and chat window opacity as a whole percentage (40 to 100). */
+  getContentOpacityPercent() {
+    return Math.round(this.contentOpacity * 100);
+  }
+
+  /**
+   * Show the answer and chat windows at `percent` opacity (a whole number,
+   * clamped to 40 to 100) from now on, including open and hidden ones.
+   * Other windows keep full opacity. Returns the percentage in effect; a
+   * value that is not a number changes nothing.
+   */
+  setContentOpacity(percent) {
+    const value = Number(percent);
+    if (!Number.isFinite(value)) return this.getContentOpacityPercent();
+    this.contentOpacity = Math.min(100, Math.max(MIN_CONTENT_OPACITY_PERCENT, Math.round(value))) / 100;
+    CONTENT_OPACITY_TYPES.forEach((type) => {
+      const win = this.windows.get(type);
+      if (win && !win.isDestroyed()) this.applyContentOpacity(win, type);
+    });
+    logger.debug('Answer and chat window opacity updated', { percent: this.getContentOpacityPercent() });
+    return this.getContentOpacityPercent();
+  }
+
+  /** Give `win` (of `type`) its opacity, unless a fade in progress will end there. */
+  applyContentOpacity(win, type) {
+    if (!this.supportsWindowOpacity() || !win || win.isDestroyed()) return;
+    if (this.windowFades && this.windowFades.has(win.id)) return;
+    try {
+      win.setOpacity(this.windowOpacityFor(type));
+    } catch (error) {
+      logger.debug('Could not set a window opacity', { type, error: error.message });
+    }
   }
 
   /**

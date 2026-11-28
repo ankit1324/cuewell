@@ -1,6 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const logger = require('../../core/logger').createServiceLogger('LLM');
-const { normalizeSdkError, noTextAtLimitError } = require('./errors');
+const { normalizeSdkError, noTextAtLimitError, refusedError } = require('./errors');
 const { resolveIdleTimeoutMs, startIdleTimeout } = require('./idle-timeout');
 const { cancelledError, isAborted, throwIfCancelled, raceCancel, anySignal } = require('../cancellation');
 
@@ -118,7 +118,7 @@ class AnthropicProvider {
 
   _finish(message, maxTokens) {
     if (message && message.stop_reason === 'refusal') {
-      throw new Error('Claude declined this request');
+      throw refusedError('Claude declined this request');
     }
     const text = textOf(message);
     if (!text && message && message.stop_reason === 'max_tokens') {

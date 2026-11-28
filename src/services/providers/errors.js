@@ -7,6 +7,8 @@
  */
 
 const MAX_TOKENS_NO_TEXT = 'MAX_TOKENS_NO_TEXT';
+// A refusal on content grounds: another provider is never asked instead.
+const CONTENT_REFUSED = 'CONTENT_REFUSED';
 
 const STATUS_TEXT = {
   400: 'bad request',
@@ -107,4 +109,11 @@ function noTextAtLimitError(label, maxTokens) {
   return err;
 }
 
-module.exports = { normalizeSdkError, noTextAtLimitError, MAX_TOKENS_NO_TEXT };
+/** The model declined the request (a safety or content refusal). */
+function refusedError(message) {
+  const err = new Error(message);
+  err.code = CONTENT_REFUSED;
+  return err;
+}
+
+module.exports = { normalizeSdkError, noTextAtLimitError, refusedError, MAX_TOKENS_NO_TEXT, CONTENT_REFUSED };

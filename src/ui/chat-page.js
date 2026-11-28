@@ -42,6 +42,8 @@ const FINISHED_ID_LIMIT = 100;
 const EMPTY_ANSWER_MESSAGE = 'No answer came back from the AI provider. Try asking again.';
 // A stopped answer keeps its text; this shows when none had arrived yet.
 const STOPPED_EMPTY_MESSAGE = 'Stopped before any text arrived.';
+// Longest provider note shown with an answer ("Answered by Claude because ...").
+const MAX_NOTE_LENGTH = 200;
 
 function hashString(str) {
   try {
@@ -473,11 +475,29 @@ function patchChildren(target, html, { math = false } = {}) {
   for (let i = same; i < next.length; i++) target.appendChild(next[i]);
 }
 
+// The note main adds when a backup provider answered, or ''.
+function providerNoteOf(metadata) {
+  const note = metadata && typeof metadata.providerNote === 'string' ? metadata.providerNote.trim() : '';
+  return note.slice(0, MAX_NOTE_LENGTH);
+}
+
+// The provider note under an answer row's head (plain text).
+function addRowNote(row, note) {
+  if (!row || !note || row.querySelector('.message-note')) return;
+  const head = row.querySelector('.message-head');
+  const p = document.createElement('p');
+  p.className = 'message-note';
+  p.textContent = note;
+  if (head) head.after(p);
+  else row.prepend(p);
+}
+
 // The final answer for messageId: the row keeps its place and becomes the
 // answer's prose, and its snippet cards get copy buttons and highlighting.
 // A stopped answer (`stopped`) keeps the text received so far and is
-// marked "Stopped".
-function finishStream(messageId, response, { stopped = false } = {}) {
+// marked "Stopped". `note` says which provider answered when the selected
+// one failed.
+function finishStream(messageId, response, { stopped = false, note = '' } = {}) {
   const entry = closeStream(messageId);
   if (!entry) {
     // No row for this request (e.g. the page loaded mid-answer).
@@ -485,6 +505,7 @@ function finishStream(messageId, response, { stopped = false } = {}) {
       hideThinkingIndicator();
       rememberFinished(messageId);
       renderAssistantResponse(response);
+      if (note) addMessage(note, 'system');
     }
     return;
   }
@@ -525,6 +546,7 @@ function finishStream(messageId, response, { stopped = false } = {}) {
   showRowProse(entry, prose, blocks.length > 0);
   syncCards(entry, blocks);
   if (stopped) markStopped(entry.el);
+  addRowNote(entry.el, note);
   if (prose && prose.trim()) {
     chatHistory.push({ kind: 'message', type: 'assistant', text: prose });
   }
@@ -927,7 +949,10 @@ if (whysperAPI) {
   whysperAPI.onTranscriptionLlmResponse((event, data) => {
     if (!data) return;
     if (typeof data.messageId === 'string' && data.messageId) {
-      finishStream(data.messageId, data.response, { stopped: data.stopped === true });
+      finishStream(data.messageId, data.response, {
+        stopped: data.stopped === true,
+        note: providerNoteOf(data.metadata)
+      });
     } else if (data.response) {
       try { hideThinkingIndicator(); } catch (_) {}
       renderAssistantResponse(data.response);

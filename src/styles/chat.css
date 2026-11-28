@@ -169,6 +169,14 @@ body {
   color: var(--ink-3);
 }
 
+/* Under an answer's head: which provider answered when the selected one
+   failed (chat-page.js). */
+.chat-messages .message-note {
+  margin: calc(-1 * var(--s-1)) 0 var(--s-2);
+  font: 400 var(--fs-12) / var(--lh-16) var(--font-ui);
+  color: var(--ink-3);
+}
+
 /* ---------- Heard (voice) ---------- */
 
 .message.transcription .message-head .oc-label::before {
