@@ -1,5 +1,6 @@
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 // Node's URL on purpose: speech.service.js replaces globalThis.URL with a
 // stand-in that reports every URL as https:.
 const { URL, fileURLToPath } = require("url");
@@ -221,6 +222,10 @@ const {
   friendlySpeechError, friendlyCaptureError, friendlyLlmError, microphoneBlockedMessage,
   isMediaAccessBlocked, buildProblemReportUrl,
 } = require("./src/core/error-reporter");
+const {
+  CRASH_RECORD_FILE, createCrashRecorder, createFatalErrorHandler, isRecoverableRecorderError, errorFields,
+  isAppCodeError, processCrashFields, crashOfferText, crashOfferPlan,
+} = require("./src/core/crash-report");
 const { buildAppMenuTemplate, buildToolbarMenuTemplate } = require("./src/core/app-menu");
 const { AppTray } = require("./src/core/tray");
 
@@ -237,24 +242,63 @@ const QUIT_FLUSH_TIMEOUT_MS = 1000;
 const QUIT_FORCE_EXIT_MS = QUIT_FLUSH_TIMEOUT_MS + 3000;
 // A tray click closes the menu first; the screenshot waits for it to fade.
 const TRAY_SCREENSHOT_DELAY_MS = 250;
+// The offer to report the last run's crash waits until startup has settled.
+const CRASH_OFFER_DELAY_MS = 4000;
 
 // ── Global crash guard ──
-// The speech path spawns external processes (Whisper CLI, and on macOS/Linux
-// the sox/rec/arecord recorders via node-record-lpcm16). A missing recorder
-// binary makes that library emit an 'error' on its child process with no
-// listener, which would otherwise become an uncaughtException and quit the
-// entire app the moment the user clicks the mic. We log and stay alive — the
-// speech service surfaces a friendly status to the UI instead.
+// The speech path spawns the sox/arecord recorders via node-record-lpcm16.
+// A missing recorder binary makes that library emit an 'error' on its child
+// process with no listener, which would otherwise become an uncaughtException
+// the moment the user clicks the mic. That one case (spawn ENOENT for a
+// recorder program, see isRecoverableRecorderError) is logged and the app
+// stays alive: the speech service shows a friendly status instead. Any other
+// uncaught exception leaves the main process in an unknown state, so it is
+// fatal: logged with its stack, saved as a scrubbed crash record
+// (userData/last-crash.json) and the user is asked to restart or quit.
+//
+// Unhandled rejections never stop the app: the promise chain that failed has
+// already unwound, so the rest of the app is unaffected, and most come from a
+// network or IPC request whose caller already told the user. Each is logged
+// with its stack. One from the app's own code (not a library) is a bug worth
+// reporting, so the first per run is also saved as a crash record and offered
+// for reporting on the next launch.
+const crashRecorder = createCrashRecorder({
+  filePath: path.join(app.getPath("userData"), CRASH_RECORD_FILE),
+  context: {
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    homeDir: os.homedir(),
+    username: (() => { try { return os.userInfo().username; } catch (_) { return ""; } })(),
+  },
+  logger,
+});
+// Set once the controller exists, so a fatal error while quitting skips the dialog.
+let appController = null;
+const handleFatalError = createFatalErrorHandler({
+  app,
+  dialog,
+  logger,
+  saveCrash: (kind, fields) => crashRecorder.save(kind, fields),
+  beforeDialog: () => {
+    // The overlay floats above other apps' windows, and on macOS the app has
+    // no Dock icon, so hide the overlay and bring the app forward first.
+    try { require("./src/managers/window.manager").hideAllWindows(); } catch (_) { /* show the dialog anyway */ }
+    if (process.platform === "darwin") app.focus({ steal: true });
+  },
+  isQuitting: () => !!(appController && appController.isQuitting),
+});
 process.on("uncaughtException", (err) => {
-  logger.error("Uncaught exception (kept alive)", {
-    error: err && err.message,
-    stack: err && err.stack,
-  });
+  if (isRecoverableRecorderError(err)) {
+    logger.warn("Audio recorder is not installed (kept alive)", { error: err.message, program: err.path });
+    return;
+  }
+  handleFatalError(err);
 });
 process.on("unhandledRejection", (reason) => {
-  logger.error("Unhandled rejection (kept alive)", {
-    reason: String((reason && reason.message) || reason),
-  });
+  const fields = errorFields(reason);
+  logger.error("Unhandled rejection (kept alive)", { reason: fields.message, name: fields.name, stack: fields.stack });
+  if (isAppCodeError(reason, __dirname)) crashRecorder.save("error", fields);
 });
 
 // Services
@@ -643,6 +687,10 @@ class ApplicationController {
     });
     // Held so the click handler is not garbage collected with it.
     this.updateNotification = null;
+    // The last run's crash record (read and deleted now, before this run
+    // can write one), offered once for reporting after startup.
+    this.previousCrash = crashRecorder.takePrevious();
+    this.crashNotification = null;
     // Last speech error shown in the answer window, to avoid repeats.
     this._lastSpeechError = { message: "", at: 0 };
     // webContents id -> reload times, for crashed-window recovery.
@@ -829,6 +877,7 @@ class ApplicationController {
 
       sessionManager.addEvent("Application started");
       this.scheduleLaunchUpdateCheck();
+      this.scheduleCrashReportOffer();
     } catch (error) {
       this.starting = false;
       logger.error("Application initialization failed", {
@@ -1193,19 +1242,29 @@ class ApplicationController {
     }
   }
 
-  /** Prefilled new-issue page, or null while UPDATE_REPO is the placeholder. */
-  problemReportUrl() {
+  /**
+   * Prefilled new-issue page, or null while UPDATE_REPO is the placeholder.
+   * `crash`: a crash record whose error and stack go in the body.
+   */
+  problemReportUrl({ crash } = {}) {
     return buildProblemReportUrl(UPDATE_REPO, {
       appVersion: app.getVersion(),
       platform: process.platform,
       osVersion: typeof process.getSystemVersion === "function" ? process.getSystemVersion() : "",
       arch: process.arch,
       electronVersion: process.versions.electron,
+      crash,
     });
   }
 
-  reportProblem() {
-    const url = this.problemReportUrl();
+  reportProblem({ crash } = {}) {
+    let url;
+    try {
+      url = this.problemReportUrl({ crash });
+    } catch (e) {
+      logger.warn("Could not build the problem report link", { error: e.message });
+      return;
+    }
     if (!url) return;
     try {
       const parsed = new URL(url);
@@ -1216,6 +1275,71 @@ class ApplicationController {
     shell.openExternal(url).catch((e) => {
       logger.warn("Could not open the problem report page", { error: e.message });
     });
+  }
+
+  /**
+   * If the last run crashed, offer once to report it: a notification that
+   * opens the prefilled issue when clicked, or a dialog where notifications
+   * are not supported. Skipped when reporting is not set up. Otherwise the record was deleted
+   * when it was read, so declining or ignoring the offer is final.
+   */
+  scheduleCrashReportOffer() {
+    const record = this.previousCrash;
+    if (!record) return;
+    logger.info("The last run crashed", { kind: record.kind, name: record.name, time: record.time });
+    setTimeout(() => {
+      if (this.previousCrash !== record || this.isQuitting) return;
+      this.previousCrash = null;
+      this.offerCrashReport(record);
+    }, CRASH_OFFER_DELAY_MS);
+  }
+
+  /** On quit: a record that was never offered (startup failed, quit early) is kept for the next launch. */
+  keepUnofferedCrashRecord() {
+    const record = this.previousCrash;
+    this.previousCrash = null;
+    if (record && crashRecorder.restore(record)) logger.info("Crash report offer kept for the next launch");
+  }
+
+  offerCrashReport(record) {
+    let notificationsSupported = false;
+    try { notificationsSupported = Notification.isSupported(); } catch (_) { /* use the dialog */ }
+    const plan = crashOfferPlan(record, {
+      reportConfigured: !!this.problemReportUrl(),
+      notificationsSupported,
+    });
+    if (plan === "none") {
+      logger.info("Crash report offer skipped: reporting is not set up");
+      return;
+    }
+    const { title, body, notificationBody } = crashOfferText(record);
+    const report = () => this.reportProblem({ crash: record });
+    if (plan === "notification") {
+      try {
+        const notification = new Notification({ title, body: notificationBody, silent: true });
+        notification.on("click", report);
+        notification.on("close", () => {
+          if (this.crashNotification === notification) this.crashNotification = null;
+        });
+        this.crashNotification = notification;
+        notification.show();
+        return;
+      } catch (e) {
+        logger.warn("Could not show the crash report notification", { error: e.message });
+      }
+    }
+    dialog.showMessageBox({
+      type: "question",
+      title: "Cuewell",
+      message: title,
+      detail: body,
+      buttons: ["Report a Problem", "Not Now"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    }).then(({ response }) => {
+      if (response === 0) report();
+    }).catch((e) => logger.warn("Could not show the crash report dialog", { error: e.message }));
   }
 
   async openLogsFolder() {
@@ -1252,6 +1376,8 @@ class ApplicationController {
       if (this.isQuitting || reason === "clean-exit") return;
       const type = windowManager.getWindowTypeForWebContents(webContents) || "unknown";
       logger.error("Window process stopped", { windowType: type, reason, exitCode: details && details.exitCode });
+      const crash = processCrashFields({ source: "window", type, reason, exitCode: details && details.exitCode });
+      if (crash) crashRecorder.save("renderer", crash);
       if (type === "unknown" || !webContents || webContents.isDestroyed()) return;
       const now = Date.now();
       const history = this._rendererReloads.get(webContents.id);
@@ -1284,6 +1410,10 @@ class ApplicationController {
     app.on("child-process-gone", (_event, details) => {
       if (this.isQuitting || !details || details.reason === "clean-exit") return;
       logger.warn("Helper process stopped", { type: details.type, reason: details.reason, name: details.name });
+      const crash = processCrashFields({
+        source: "helper", type: details.type, name: details.name, reason: details.reason, exitCode: details.exitCode,
+      });
+      if (crash) crashRecorder.save("helper", crash);
     });
   }
 
@@ -1580,7 +1710,13 @@ class ApplicationController {
     if (!IPC_ALLOWED_WINDOWS[channel]) throw new Error(`No window list for IPC channel ${channel}`);
     ipcMain.on(channel, (event, ...args) => {
       if (!this.authorizeIpc(channel, event)) return;
-      handler(event, ...args);
+      // A bad message from a window must not take down the main process
+      // (an uncaught exception is fatal, see the crash guard above).
+      try {
+        handler(event, ...args);
+      } catch (error) {
+        logger.error("IPC message handler failed", { channel, error: error.message, stack: error.stack });
+      }
     });
   }
 
@@ -2676,6 +2812,7 @@ class ApplicationController {
   }
 
   onWillQuit() {
+    this.keepUnofferedCrashRecord();
     if (this.tray) {
       this.tray.destroy();
       this.tray = null;
@@ -4052,5 +4189,6 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   const controller = new ApplicationController();
+  appController = controller;
   app.on("second-instance", () => controller.handleSecondInstance());
 }
