@@ -221,7 +221,7 @@ An empty value or a template value such as `your_gemini_api_key_here` counts as 
 
 ## Configuration
 
-Settings writes provider, voice, mode, answer length, coding language, app icon and window gap values to `.env` for you, and API keys to `secrets.bin` where the system has secure storage (see [Where keys are stored](#where-keys-are-stored)). The main keys:
+Settings writes provider, voice, mode, answer length, coding language, app icon, window gap and theme values to `.env` for you, and API keys to `secrets.bin` where the system has secure storage (see [Where keys are stored](#where-keys-are-stored)). The main keys:
 
 ```bash
 # AI provider: gemini | anthropic | openai | openrouter | groq | deepseek | ollama
@@ -238,6 +238,7 @@ ANSWER_LENGTH=auto           # auto | short | standard | detailed
 CODING_LANGUAGE=cpp          # cpp | c | python | java | javascript
 APP_ICON=terminal            # terminal | activity | settings | cuewell
 WINDOW_GAP=10                # pixels, 0 to 100
+THEME=system                 # system (match the computer) | light | dark
 
 # Set to off to turn off the automatic update check
 # UPDATE_CHECKS=off
@@ -262,6 +263,7 @@ Settings also has:
 - **Interview context:** role, company, job description, resume and notes, saved to `profile.json` in the app data folder (not in `.env`).
 - **App icon:** the name and icon the app shows to the system: its process title (as Activity Monitor shows it), its window titles and the menu bar or tray icon's tooltip. Choose Terminal (the default), Activity Monitor, System Settings or Cuewell.
 - **Window gap:** spacing in pixels between the toolbar and the answer panel.
+- **Theme:** light or dark cards for every window, or Match system (the default), which follows the computer's appearance. It changes right away, including native menus and dialogs.
 
 Settings saves each change as you make it. Quitting waits up to a second for a change that is still being saved.
 

@@ -1096,8 +1096,8 @@ class MainWindowUI {
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
+            background: var(--ink);
+            color: var(--paper);
             padding: 8px 16px;
             border-radius: 6px;
             font-size: 14px;

@@ -16,7 +16,7 @@ const PRELOAD_BY_TYPE = {
   llmResponse: 'preload-content.js',
 };
 
-function runPreload(file, type) {
+function runPreload(file, type, extraArgs = []) {
   const exposed = {};
   const calls = []; // { kind: 'invoke' | 'send' | 'on', channel }
   const handlers = new Map();
@@ -35,7 +35,7 @@ function runPreload(file, type) {
     if (name !== 'electron') throw new Error(`preload may not require ${name}`);
     return electron;
   };
-  const fakeProcess = { platform: 'darwin', argv: ['electron', '.', ...(type ? [`--si-window=${type}`] : [])] };
+  const fakeProcess = { platform: 'darwin', argv: ['electron', '.', ...(type ? [`--si-window=${type}`] : []), ...extraArgs] };
   const fakeDocument = { documentElement: { dataset: {} }, addEventListener: () => {}, removeEventListener: () => {} };
   const fakeConsole = { log: () => {}, warn: () => {}, error: (...args) => errors.push(args.join(' ')) };
   const body = readSource(file);
@@ -130,10 +130,13 @@ describe('preloads', () => {
   it('window.api only receives its own channels and sends nothing', () => {
     const run = runPreload('preload.js', 'main');
     assert.deepEqual(Object.keys(run.exposed.api), ['receive']);
+    // Only the preload's own theme listener is registered before the page asks.
+    assert.deepEqual(run.calls, [{ kind: 'on', channel: 'theme-changed' }]);
+    const before = run.calls.length;
     run.exposed.api.receive('install-progress', () => {});
     run.exposed.api.receive('skill-updated', 'not a function');
     run.exposed.api.receive('skill-updated', () => {});
-    assert.deepEqual(run.calls, [{ kind: 'on', channel: 'skill-updated' }]);
+    assert.deepEqual(run.calls.slice(before), [{ kind: 'on', channel: 'skill-updated' }]);
     for (const type of ['settings', 'onboarding']) assert.equal(runPreload('preload.js', type).exposed.api, undefined, type);
   });
 
@@ -201,5 +204,45 @@ describe('preloads', () => {
 
   it('sets the platform hook for CSS', () => {
     assert.equal(runPreload('preload.js', 'main').document.documentElement.dataset.platform, 'darwin');
+  });
+
+  describe('theme hook for CSS', () => {
+    const PAGES = [['preload.js', 'main'], ['preload.js', 'settings'], ['preload.js', 'onboarding'],
+      ['preload-content.js', 'chat'], ['preload-content.js', 'llmResponse']];
+    const themeOf = (run) => run.document.documentElement.dataset.theme;
+
+    for (const [file, type] of PAGES) {
+      it(`${file} as ${type} sets html[data-theme] from --si-theme and follows theme-changed`, () => {
+        const run = runPreload(file, type, ['--si-theme=dark']);
+        assert.equal(themeOf(run), 'dark');
+        const onTheme = run.handlers.get('theme-changed');
+        assert.equal(typeof onTheme, 'function');
+        onTheme({ sender: {} }, { theme: 'light' });
+        assert.equal(themeOf(run), 'light');
+        onTheme({ sender: {} }, { theme: 'system' });
+        assert.equal(themeOf(run), 'system');
+      });
+    }
+
+    for (const file of ['preload.js', 'preload-content.js']) {
+      it(`${file} ignores unknown themes and defaults to system`, () => {
+        assert.equal(themeOf(runPreload(file, 'main')), 'system', 'no --si-theme');
+        assert.equal(themeOf(runPreload(file, 'main', ['--si-theme=sepia'])), 'system');
+        const run = runPreload(file, 'chat', ['--si-theme=light']);
+        const onTheme = run.handlers.get('theme-changed');
+        for (const bad of [null, 'dark', { theme: 'Dark' }, { theme: 'dark" onload="x' }, { theme: ['dark'] }, { id: 1 }]) {
+          onTheme({ sender: {} }, bad);
+          assert.equal(themeOf(run), 'light', JSON.stringify(bad));
+        }
+      });
+    }
+
+    it('exposes nothing for the theme to the page', () => {
+      for (const [file, type] of PAGES) {
+        for (const api of Object.values(runPreload(file, type).exposed)) {
+          assert.ok(!Object.keys(api).some((name) => /theme/i.test(name)), `${type} exposes a theme method`);
+        }
+      }
+    });
   });
 });

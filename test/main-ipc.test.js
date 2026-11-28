@@ -45,9 +45,9 @@ const SECRET_FIELDS = ['geminiKey', 'azureKey', 'anthropicKey', 'openaiKey', 'op
 // no child processes, no installs).
 const SAFE_ALLOWED_CHANNELS = ['get-settings', 'get-profile', 'get-first-run-status', 'get-speech-availability', 'get-window-stats'];
 
-function runHarness(root, calls) {
+function runHarness(root, calls, envText = ENV_FILE) {
   fs.mkdirSync(path.join(root, 'userData'));
-  fs.writeFileSync(path.join(root, 'userData', '.env'), ENV_FILE, { mode: 0o644 });
+  fs.writeFileSync(path.join(root, 'userData', '.env'), envText, { mode: 0o644 });
   if (isPosix) fs.chmodSync(path.join(root, 'userData', '.env'), 0o644);
   const requestPath = path.join(root, 'request.json');
   fs.writeFileSync(requestPath, JSON.stringify({ root, calls }));
@@ -123,6 +123,14 @@ describe('main.js IPC', () => {
       { label: 'settings saves a new Groq key', channel: 'save-settings', from: 'settings', args: [{ groqKey: NEW_GROQ_KEY }] },
       { label: 'settings get after new key', channel: 'get-settings', from: 'settings' },
       { label: 'onboarding status', channel: 'get-first-run-status', from: 'onboarding' },
+      // Color theme: Settings only, one of light | dark | system.
+      { label: 'main saves theme', channel: 'save-settings', from: 'main', args: [{ theme: 'dark' }] },
+      { label: 'onboarding saves theme', channel: 'save-settings', from: 'onboarding', args: [{ theme: 'dark' }] },
+      { label: 'settings saves unknown theme', channel: 'save-settings', from: 'settings', args: [{ theme: 'sepia' }] },
+      { label: 'settings saves theme as object', channel: 'save-settings', from: 'settings', args: [{ theme: { value: 'dark' } }] },
+      { label: 'settings saves theme path', channel: 'save-settings', from: 'settings', args: [{ theme: '../dark' }] },
+      { label: 'settings saves theme dark', channel: 'save-settings', from: 'settings', args: [{ theme: 'dark' }] },
+      { label: 'settings get after theme', channel: 'get-settings', from: 'settings' },
       // Interview context.
       { label: 'save profile', channel: 'save-profile', from: 'settings', args: [{ role: ' Backend engineer ', company: 'Acme' }] },
       { label: 'save profile unknown field', channel: 'save-profile', from: 'settings', args: [{ role: 'x', salary: '1' }] },
@@ -272,6 +280,54 @@ describe('main.js IPC', () => {
 
     it('keeps .env readable by the owner only', { skip: !isPosix && 'POSIX file modes only' }, () => {
       assert.equal(out.envFile.mode, 0o600);
+    });
+  });
+
+  describe('theme', () => {
+    it('defaults to Match system', () => {
+      assert.equal(out.byLabel['allow get-settings from settings'].value.theme, 'system');
+    });
+
+    it('may be saved only from Settings', () => {
+      for (const label of ['main saves theme', 'onboarding saves theme']) {
+        const value = out.byLabel[label].value;
+        assert.equal(value.success, false, label);
+        assert.equal(value.field, 'theme', label);
+      }
+    });
+
+    it('rejects anything but light, dark or system', () => {
+      for (const label of ['settings saves unknown theme', 'settings saves theme as object', 'settings saves theme path']) {
+        const value = out.byLabel[label].value;
+        assert.equal(value.success, false, label);
+        assert.equal(value.field, 'theme', label);
+        assert.match(value.error, /Light, Dark or Match system|must be text/, label);
+      }
+    });
+
+    it('saves THEME to .env, returns it, and sets nativeTheme.themeSource', () => {
+      assert.equal(out.byLabel['settings saves theme dark'].value.success, true);
+      assert.match(out.envFile.text, /^THEME=dark$/m);
+      assert.equal((out.envFile.text.match(/^THEME=/gm) || []).length, 1);
+      assert.equal(out.byLabel['settings get after theme'].value.theme, 'dark');
+      assert.equal(out.nativeThemeSource, 'dark');
+    });
+
+    it('is not exposed to the toolbar', () => {
+      assert.ok(!('theme' in out.byLabel['main get-settings after save'].value));
+    });
+
+    it('loads the saved THEME on the next start, and ignores an unknown one', () => {
+      for (const [saved, expected] of [['light', 'light'], ['DARK', 'dark'], ['sepia', 'system']]) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cuewell-theme-'));
+        try {
+          const restarted = runHarness(dir, [{ label: 'get', channel: 'get-settings', from: 'settings' }],
+            `${ENV_FILE}THEME=${saved}\n`);
+          assert.equal(restarted.byLabel.get.value.theme, expected, saved);
+        } finally {
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      }
     });
   });
 

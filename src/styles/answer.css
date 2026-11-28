@@ -89,8 +89,8 @@ body {
 }
 
 @keyframes answer-live {
-  0% { box-shadow: 0 0 0 0 rgba(212, 64, 42, 0.45); }
-  70%, 100% { box-shadow: 0 0 0 5px rgba(212, 64, 42, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(var(--red-rgb), 0.45); }
+  70%, 100% { box-shadow: 0 0 0 5px rgba(var(--red-rgb), 0); }
 }
 
 .main-container:has(#loading:not(.is-off)) .answer-status.oc-label {
@@ -570,7 +570,7 @@ body {
   background-color: var(--steel);
   -webkit-mask: var(--icon-paperclip) center / contain no-repeat;
   mask: var(--icon-paperclip) center / contain no-repeat;
-  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.6));
+  filter: drop-shadow(0 1px 0 var(--glint));
   pointer-events: none;
 }
 

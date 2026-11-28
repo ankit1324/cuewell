@@ -639,6 +639,23 @@
                         </ul>
                     </div>
 
+                    <div class="sw-group" data-search="theme appearance dark light mode system color colour night">
+                        <div class="sw-row">
+                            <div>
+                                <label class="sw-row-label" for="theme">Theme</label>
+                                <p class="sw-row-help" id="themeHelp">Light or dark cards for every Cuewell window. Match system follows your computer's appearance setting.</p>
+                            </div>
+                            <div class="sw-row-control">
+                                <select class="oc-input" id="theme" data-setting="theme" aria-describedby="themeHelp themeStatus">
+                                    <option value="system">Match system</option>
+                                    <option value="light">Light</option>
+                                    <option value="dark">Dark</option>
+                                </select>
+                                <div class="sw-status" id="themeStatus" role="status"></div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="sw-group" data-search="app icon dock name disguise terminal activity monitor system settings appearance">
                         <div class="sw-group-head">
                             <h3 class="sw-group-title" id="iconGroupTitle">App icon</h3>

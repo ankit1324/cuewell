@@ -57,8 +57,8 @@ body {
   border-radius: var(--r-1) var(--r-1) var(--r-tab) var(--r-tab);
   /* Fits inside the 8 px margin below and 6 px at the sides. */
   box-shadow:
-    0 1px 1px rgba(29, 27, 22, 0.08),
-    0 4px 8px -4px rgba(29, 27, 22, 0.32);
+    0 1px 1px rgba(var(--shadow-rgb), 0.08),
+    0 4px 8px -4px rgba(var(--shadow-rgb), 0.32);
 }
 
 /* Row 1: brand, app controls and status. It comes second in the DOM (see
@@ -133,7 +133,7 @@ body {
 .status-dot.interactive { color: var(--ink); }
 .status-dot.interactive::before {
   background: var(--ink);
-  box-shadow: 0 0 0 3px rgba(29, 27, 22, 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--ink-rgb), 0.12);
 }
 .status-dot.interactive::after { content: 'Interactive'; }
 
@@ -380,8 +380,8 @@ body {
   border: 1px solid var(--line);
   border-radius: var(--r-3);
   box-shadow:
-    0 1px 1px rgba(29, 27, 22, 0.08),
-    0 4px 8px -4px rgba(29, 27, 22, 0.32);
+    0 1px 1px rgba(var(--shadow-rgb), 0.08),
+    0 4px 8px -4px rgba(var(--shadow-rgb), 0.32);
 }
 
 .shortcuts-popover.is-open {

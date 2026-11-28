@@ -8,9 +8,15 @@
  *
  * Look: each overlay is an opaque warm-paper index card with ink text,
  * blue-grey ruled lines and one red-pencil accent. Every surface is opaque, so
- * text contrast never depends on what is behind the window or on native blur.
+ * text contrast never depends on what is behind the window.
  * Fraunces for display, Instrument Sans for UI and prose, JetBrains Mono for
  * code and key hints.
+ *
+ * Two variants of the same tokens: light (the default, below in :root) and
+ * dark (warm charcoal paper, cream ink; see "Dark variant"). The preloads set
+ * html[data-theme] to "light", "dark" or "system" from the THEME setting;
+ * "system" follows prefers-color-scheme, which the main process keeps in step
+ * with the setting through nativeTheme.themeSource.
  */
 
 /* ---------- Fonts ---------- */
@@ -79,6 +85,12 @@
   --line-2: rgba(29, 27, 22, 0.24); /* keycaps, ghost buttons */
   --graphite: rgba(29, 27, 22, 0.55); /* pencil line while drafting */
   --steel: #7f8790;            /* paperclip (3.2:1, decorative) */
+  --glint: rgba(255, 255, 255, 0.6); /* 1 px edge under the paperclip */
+  /* The ink, shadow and red-pencil colors as r, g, b, for one-off washes:
+     rgba(var(--ink-rgb), 0.12). Each variant sets its own. */
+  --ink-rgb: 29, 27, 22;
+  --shadow-rgb: 29, 27, 22;
+  --red-rgb: 212, 64, 42;
 
   /* ---- Color: red pencil (sparingly: live, "Say this", primary) ---- */
   --red: #d4402a;              /* marks, dots, caret (non-text, 4.1:1) */
@@ -117,6 +129,11 @@
   --code-str: #3d6b22;         /* 5.2:1 */
   --code-num: #5b3fa0;         /* 6.5:1 */
   --code-com: var(--ink-3);    /* 4.6:1 */
+
+  /* Images that carry a color (a CSS background cannot take currentColor). */
+  --img-select-chevron: url('../../assests/icons/ui/chevron-down.svg');
+  /* The check inside a chosen radio ring: paper on an ink dot. */
+  --img-check-on-ink: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23f6f1e7' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 
   /* ---- Type ---- */
   --font-display: 'Fraunces Cue', 'Iowan Old Style', Georgia, serif;
@@ -181,10 +198,168 @@
   --t-blink: 1060ms;
 }
 
-/* macOS rounds vibrancy windows with a 10 px corner mask; the card follows it
-   so no glass shows in the corners. preload.js sets html[data-platform]. */
+/* macOS rounds the panel windows with a 10 px corner; the card follows it.
+   preload.js sets html[data-platform]. */
 html[data-platform="darwin"] {
   --r-window: 10px;
+}
+
+/* ---------- Dark variant ----------
+   The same tokens, redefined. Only colors, shadows and color images change;
+   type, space, radius and motion are shared. Both blocks must stay identical
+   (test/theme.test.js checks this, and that every color token of the
+   light variant is redefined here). */
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* ---- Color: paper (warm charcoal, the app icon's ink family) ---- */
+  --paper: #211f1a;
+  --paper-2: #2a2822;
+  --paper-3: #34312a;
+  --paper-field: #1a1915;      /* inputs and wells sit a step darker */
+  --ink: #ede6d7;              /* cream             13.3:1 on paper */
+  --ink-2: #bcb3a2;            /*                    8.0:1 on paper */
+  --ink-3: #9c9383;            /*                    5.5:1 on paper */
+  --rule: #3a4149;             /* ruled lines (decorative) */
+  --rule-2: #4c555f;
+  --line: rgba(237, 230, 215, 0.14);
+  --line-2: rgba(237, 230, 215, 0.24);
+  --graphite: rgba(237, 230, 215, 0.55);
+  --steel: #8d949c;
+  --glint: rgba(0, 0, 0, 0.45);
+  --ink-rgb: 237, 230, 215;
+  --shadow-rgb: 0, 0, 0;
+  --red-rgb: 236, 106, 80;
+
+  /* ---- Color: red pencil, lifted for charcoal ---- */
+  --red: #ec6a50;              /* marks, dots, caret (non-text, 5.3:1) */
+  --red-ink: #f08b72;          /* red text            6.8:1 on paper */
+  --red-fill: #e8654c;         /* primary fill, paper (charcoal) text 5.0:1 */
+  --red-fill-2: #f07a60;       /* primary hover: lighter on dark */
+  --red-soft: rgba(236, 106, 80, 0.14);
+  --red-ring: rgba(236, 106, 80, 0.40);
+
+  /* ---- Color: status text other than red ---- */
+  --warn-ink: #e3a857;         /* 7.8:1 on paper */
+  --warn-soft: rgba(227, 168, 87, 0.14);
+  --info-ink: #93bddc;         /* 8.3:1 on paper */
+
+  /* ---- Color: ink card (code), a darker well than the paper ---- */
+  --slate: #12110e;
+  --slate-2: #1b1a16;
+  --slate-line: rgba(237, 230, 215, 0.16);
+  --on-slate: #f6f1e7;         /* 16.8:1 */
+  --on-slate-2: #b9b0a0;       /*  8.8:1 */
+  --on-slate-3: #8f8676;       /*  5.3:1 */
+  --syn-key: #f0a35e;
+  --syn-type: #9ccfd8;
+  --syn-fn: #e6c07b;
+  --syn-str: #a9c98a;
+  --syn-num: #c8b6f0;
+  --syn-com: #a39a89;
+
+  /* Code on paper (wells, inline) uses the dark-card colors. */
+  --code-text: var(--ink);
+  --code-punct: var(--ink-2);
+  --code-key: var(--syn-key);
+  --code-type: var(--syn-type);
+  --code-fn: var(--syn-fn);
+  --code-str: var(--syn-str);
+  --code-num: var(--syn-num);
+  --code-com: var(--ink-3);
+
+  --img-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23ede6d7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --img-check-on-ink: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23211f1a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+  /* ---- Shadow: black, deeper, since the desktop behind is often dark ---- */
+  --shadow-card:
+    0 1px 1px rgba(0, 0, 0, 0.24),
+    0 4px 8px -2px rgba(0, 0, 0, 0.36),
+    0 16px 32px -8px rgba(0, 0, 0, 0.56);
+  --shadow-tab:
+    0 1px 1px rgba(0, 0, 0, 0.28),
+    0 8px 16px -8px rgba(0, 0, 0, 0.60);
+  --shadow-code:
+    0 2px 4px rgba(0, 0, 0, 0.36),
+    0 12px 24px -8px rgba(0, 0, 0, 0.60);
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-theme="system"] {
+    color-scheme: dark;
+
+    /* ---- Color: paper (warm charcoal, the app icon's ink family) ---- */
+    --paper: #211f1a;
+    --paper-2: #2a2822;
+    --paper-3: #34312a;
+    --paper-field: #1a1915;      /* inputs and wells sit a step darker */
+    --ink: #ede6d7;              /* cream             13.3:1 on paper */
+    --ink-2: #bcb3a2;            /*                    8.0:1 on paper */
+    --ink-3: #9c9383;            /*                    5.5:1 on paper */
+    --rule: #3a4149;             /* ruled lines (decorative) */
+    --rule-2: #4c555f;
+    --line: rgba(237, 230, 215, 0.14);
+    --line-2: rgba(237, 230, 215, 0.24);
+    --graphite: rgba(237, 230, 215, 0.55);
+    --steel: #8d949c;
+    --glint: rgba(0, 0, 0, 0.45);
+    --ink-rgb: 237, 230, 215;
+    --shadow-rgb: 0, 0, 0;
+    --red-rgb: 236, 106, 80;
+
+    /* ---- Color: red pencil, lifted for charcoal ---- */
+    --red: #ec6a50;              /* marks, dots, caret (non-text, 5.3:1) */
+    --red-ink: #f08b72;          /* red text            6.8:1 on paper */
+    --red-fill: #e8654c;         /* primary fill, paper (charcoal) text 5.0:1 */
+    --red-fill-2: #f07a60;       /* primary hover: lighter on dark */
+    --red-soft: rgba(236, 106, 80, 0.14);
+    --red-ring: rgba(236, 106, 80, 0.40);
+
+    /* ---- Color: status text other than red ---- */
+    --warn-ink: #e3a857;         /* 7.8:1 on paper */
+    --warn-soft: rgba(227, 168, 87, 0.14);
+    --info-ink: #93bddc;         /* 8.3:1 on paper */
+
+    /* ---- Color: ink card (code), a darker well than the paper ---- */
+    --slate: #12110e;
+    --slate-2: #1b1a16;
+    --slate-line: rgba(237, 230, 215, 0.16);
+    --on-slate: #f6f1e7;         /* 16.8:1 */
+    --on-slate-2: #b9b0a0;       /*  8.8:1 */
+    --on-slate-3: #8f8676;       /*  5.3:1 */
+    --syn-key: #f0a35e;
+    --syn-type: #9ccfd8;
+    --syn-fn: #e6c07b;
+    --syn-str: #a9c98a;
+    --syn-num: #c8b6f0;
+    --syn-com: #a39a89;
+
+    /* Code on paper (wells, inline) uses the dark-card colors. */
+    --code-text: var(--ink);
+    --code-punct: var(--ink-2);
+    --code-key: var(--syn-key);
+    --code-type: var(--syn-type);
+    --code-fn: var(--syn-fn);
+    --code-str: var(--syn-str);
+    --code-num: var(--syn-num);
+    --code-com: var(--ink-3);
+
+    --img-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23ede6d7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    --img-check-on-ink: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 3l2 2 4-4' fill='none' stroke='%23211f1a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+    /* ---- Shadow: black, deeper, since the desktop behind is often dark ---- */
+    --shadow-card:
+      0 1px 1px rgba(0, 0, 0, 0.24),
+      0 4px 8px -2px rgba(0, 0, 0, 0.36),
+      0 16px 32px -8px rgba(0, 0, 0, 0.56);
+    --shadow-tab:
+      0 1px 1px rgba(0, 0, 0, 0.28),
+      0 8px 16px -8px rgba(0, 0, 0, 0.60);
+    --shadow-code:
+      0 2px 4px rgba(0, 0, 0, 0.36),
+      0 12px 24px -8px rgba(0, 0, 0, 0.60);
+  }
 }
 
 /* ---------- Base ---------- */
@@ -198,7 +373,7 @@ body {
 }
 
 ::selection {
-  background: rgba(212, 64, 42, 0.2);
+  background: rgba(var(--red-rgb), 0.2);
   color: var(--ink);
 }
 
@@ -206,13 +381,13 @@ body {
 ::-webkit-scrollbar-track,
 ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(29, 27, 22, 0.22);
+  background: rgba(var(--ink-rgb), 0.22);
   background-clip: padding-box;
   border: 2px solid transparent;
   border-radius: var(--r-round);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(29, 27, 22, 0.36);
+  background: rgba(var(--ink-rgb), 0.36);
   background-clip: padding-box;
   border: 2px solid transparent;
 }
@@ -225,8 +400,8 @@ body {
 /* ---------- Window surface ---------- */
 
 /* Root surface of a panel window: one opaque card that fills the window.
-   `oc-window--native` marks windows that get macOS vibrancy; the card covers
-   it, so the blur never carries contrast. */
+   `oc-window--native` marks the windows the main process fades in on macOS
+   (see .oc-appear). */
 .oc-window {
   position: relative;
   width: 100vw;
@@ -389,7 +564,7 @@ html[data-platform="linux"] .oc-kbd-group > :is(.oc-mod, .oc-alt) { margin-right
   background: var(--red-soft);
   border-color: var(--red-ring);
 }
-.oc-btn--danger:hover { background: rgba(212, 64, 42, 0.16); }
+.oc-btn--danger:hover { background: rgba(var(--red-rgb), 0.16); }
 
 /* Square icon button; combine with .oc-btn (and usually .oc-btn--ghost). */
 .oc-icon-btn {
@@ -434,7 +609,7 @@ html[data-platform="linux"] .oc-kbd-group > :is(.oc-mod, .oc-alt) { margin-right
   border-radius: var(--r-2);
   white-space: nowrap;
 }
-.oc-chip--accent { color: var(--ink); background: rgba(29, 27, 22, 0.08); border-color: var(--line-2); }
+.oc-chip--accent { color: var(--ink); background: rgba(var(--ink-rgb), 0.08); border-color: var(--line-2); }
 .oc-chip--live { color: var(--red-ink); background: var(--red-soft); border-color: var(--red-ring); }
 
 .oc-input {
@@ -451,12 +626,12 @@ html[data-platform="linux"] .oc-kbd-group > :is(.oc-mod, .oc-alt) { margin-right
   transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
 .oc-input::placeholder { color: var(--ink-3); }
-.oc-input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(29, 27, 22, 0.1); }
+.oc-input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(var(--ink-rgb), 0.1); }
 textarea.oc-input { height: auto; padding: var(--s-2) var(--s-3); resize: none; }
 select.oc-input {
   appearance: none;
   padding-right: var(--s-8);
-  background-image: url('../../assests/icons/ui/chevron-down.svg');
+  background-image: var(--img-select-chevron);
   background-repeat: no-repeat;
   background-position: right var(--s-3) center;
   background-size: 12px 12px;
@@ -479,7 +654,7 @@ select.oc-input {
   border-radius: 50%;
   background: var(--ink-3);
 }
-.oc-dot--ok { background: var(--ink); box-shadow: 0 0 0 3px rgba(29, 27, 22, 0.12); }
+.oc-dot--ok { background: var(--ink); box-shadow: 0 0 0 3px rgba(var(--ink-rgb), 0.12); }
 
 /* Live: a red-pencil dot with a ring that keeps pulsing out. */
 .oc-dot--live { background: var(--red); }
@@ -541,9 +716,9 @@ select.oc-input {
 
 /* A panel window appearing: 160 ms fade and 4 px rise. Put .oc-appear on the
    root surface; .is-held keeps the first frame until the window is on
-   screen. On macOS the main process fades the whole window (a vibrancy
-   window cannot be faded from CSS), so the page only adds the rise, on the
-   surface's children. */
+   screen. On macOS the main process fades the whole window (an opaque
+   window would show its background color through a CSS fade), so the page
+   only adds the rise, on the surface's children. */
 @keyframes oc-appear {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
