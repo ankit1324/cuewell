@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { getActiveProviderId, isConfigured } = require('../services/providers');
+const { isUsableSecret } = require('./secret-store');
 
 const SENTINEL_NAME = '.cuewell-firstrun-completed';
 // Builds released under the old names (Super Interview, OpenCluely) wrote
@@ -61,6 +62,10 @@ class FirstRunManager {
       ...(options.legacySentinelPaths || []),
     ];
     this.logger = options.logger || console;
+    // Keys saved in the encrypted store (src/core/secret-store.js): a
+    // function returning { ENV_KEY: value }. They count wherever .env has no
+    // real value for that key, the same precedence main.js applies.
+    this.readSecrets = typeof options.readSecrets === 'function' ? options.readSecrets : null;
   }
 
   /**
@@ -70,7 +75,7 @@ class FirstRunManager {
   needsOnboarding() {
     if (!this._sentinelExists()) return true;
     if (!fs.existsSync(this.envPath)) return true;
-    return !this._isLlmConfigured(this._readEnv());
+    return !this._isLlmConfigured(this._readSettings());
   }
 
   /** A first-run marker exists, under the current or the old name. */
@@ -126,7 +131,7 @@ class FirstRunManager {
    * Get a snapshot of the current setup state for UI / logging.
    */
   getStatus() {
-    const env = this._readEnv();
+    const env = this._readSettings();
     const gemini = (env.GEMINI_API_KEY || '').trim();
     return {
       envExists: fs.existsSync(this.envPath),
@@ -139,6 +144,22 @@ class FirstRunManager {
       whisperConfigured: !!(env.WHISPER_COMMAND || '').trim(),
       needsOnboarding: this.needsOnboarding()
     };
+  }
+
+  /** .env values, with keys from the encrypted store filling the ones .env leaves empty. */
+  _readSettings() {
+    const env = this._readEnv();
+    if (!this.readSecrets) return env;
+    let secrets = {};
+    try {
+      secrets = this.readSecrets() || {};
+    } catch (e) {
+      this.logger.warn && this.logger.warn('Could not read saved API keys for the setup check', { error: e.message });
+    }
+    for (const [key, value] of Object.entries(secrets)) {
+      if (isUsableSecret(value) && !isUsableSecret(env[key])) env[key] = value;
+    }
+    return env;
   }
 
   _readEnv() {

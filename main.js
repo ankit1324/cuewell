@@ -3,7 +3,7 @@ const fs = require("fs");
 // Node's URL on purpose: speech.service.js replaces globalThis.URL with a
 // stand-in that reports every URL as https:.
 const { URL, fileURLToPath } = require("url");
-const { app, BrowserWindow, Menu, Tray, nativeImage, globalShortcut, session, ipcMain, nativeTheme, dialog, shell, Notification, net, systemPreferences, powerMonitor } = require("electron");
+const { app, BrowserWindow, Menu, Tray, nativeImage, globalShortcut, session, ipcMain, nativeTheme, dialog, shell, Notification, net, systemPreferences, powerMonitor, safeStorage } = require("electron");
 
 // ── Carry data over from the folders used before the renames ──
 // Electron names the userData folder after package.json, so each rename gave
@@ -111,6 +111,13 @@ const userDataMigrationLog = migrateLegacyUserData();
 // project-local .env is still preferred so the dev workflow is unchanged.
 // Both onboarding (FirstRunManager) and persistEnvUpdates() write to this
 // same path so settings survive restarts on every platform.
+//
+// API keys are kept out of this file where the system has secure storage
+// (src/core/secret-store.js, userData/secrets.bin). Where a key is set in
+// more than one place, the first of these wins: the shell environment, this
+// .env file, the encrypted store. Keys in the userData .env are moved into
+// the store at startup; a project .env (running from source) is never
+// rewritten by that move, so its keys keep working as written.
 function resolveEnvPath() {
   try {
     const userDataEnv = path.join(app.getPath("userData"), ".env");
@@ -136,6 +143,15 @@ function resolveEnvPath() {
 }
 const ENV_PATH = resolveEnvPath();
 require("dotenv").config({ path: ENV_PATH });
+// Whether ENV_PATH is the userData .env, the only one whose keys are moved
+// into the encrypted store.
+const ENV_IS_USER_DATA = (() => {
+  try {
+    return path.resolve(ENV_PATH) === path.resolve(app.getPath("userData"), ".env");
+  } catch (_) {
+    return false;
+  }
+})();
 
 // .env holds API keys, so only the current user may read it. Files made by
 // `cp env.example .env` or by older builds are 0644; tighten them once here.
@@ -253,6 +269,7 @@ speechService.setEnvPath(ENV_PATH);
 const llmService = require("./src/services/llm.service");
 const { promptLoader } = require("./prompt-loader");
 const profileStore = require("./src/core/profile-store");
+const secretStore = require("./src/core/secret-store");
 const {
   getActiveProviderId, getProviderConfig, listProviders, isPlaceholderKey,
   isConfigured, getApiKey, getModel, getBaseURL, createProvider,
@@ -289,6 +306,11 @@ const SECRET_SETTING_ENV_KEYS = {
   groqKey: "GROQ_API_KEY",
   deepseekKey: "DEEPSEEK_API_KEY",
 };
+
+// The .env names of those secrets: saved in the encrypted store when the
+// system has secure storage (src/core/secret-store.js), else in .env.
+const SECRET_ENV_KEYS = Object.freeze(Object.values(SECRET_SETTING_ENV_KEYS));
+const LLM_SECRET_ENV_KEYS = SECRET_ENV_KEYS.filter((key) => key !== "AZURE_SPEECH_KEY");
 
 const MODEL_SETTING_FIELDS = [
   "geminiModel", "anthropicModel", "openaiModel", "openrouterModel",
@@ -558,6 +580,15 @@ class ApplicationController {
     this._utteranceDispatchInFlight = false;
     this._utteranceCoalesceMs = 800;
 
+    // Encrypted API keys (userData/secrets.bin). Loaded by ensureSecrets()
+    // once the app is ready: safeStorage needs that on Windows and Linux.
+    this.secretStore = new secretStore.SecretStore({
+      filePath: path.join(app.getPath("userData"), secretStore.SECRETS_FILE),
+      safeStorage,
+      logger,
+    });
+    this._secretsInitialized = false;
+
     // First-run onboarding: detects missing .env / API key and triggers
     // a settings-window prompt on first launch so users don't have to
     // dig through docs to figure out they need a Gemini API key.
@@ -574,6 +605,8 @@ class ApplicationController {
       legacySentinelPaths: legacyFirstRunMarkerPaths(),
       // Packaged builds never read env.example from the launch folder.
       allowLaunchFolder: !app.isPackaged,
+      // Keys moved out of .env into the encrypted store still count.
+      readSecrets: () => (this._secretsInitialized ? this.secretStore.all() : {}),
     });
     // Lazily-initialised in getWhisperInstaller() so tests can mock
     // the constructor without polluting main-process startup.
@@ -736,6 +769,9 @@ class ApplicationController {
 
       // Small delay to ensure desktop/space detection is accurate
       await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Saved API keys first: the first-run check and the AI client need them.
+      this.ensureSecrets();
 
       // First-run onboarding: ensure .env exists and read status once
       // so we can decide whether to defer showing the main overlay.
@@ -1732,6 +1768,7 @@ class ApplicationController {
     // that is already saved; the key itself is only returned masked.
     this.handleIpc("get-first-run-status", () => {
       try {
+        this.ensureSecrets();
         return {
           ...this.firstRunManager.getStatus(),
           geminiKey: maskSecret(process.env.GEMINI_API_KEY),
@@ -2692,6 +2729,8 @@ class ApplicationController {
       };
     }
 
+    // Saved keys are in process.env once loaded (normally at startup).
+    this.ensureSecrets();
     // Surface every value the settings UI can edit, reading the live source
     // of truth (process.env) so the UI shows exactly what the running app is
     // using. Empty strings are returned rather than skipped so the UI can
@@ -2741,7 +2780,8 @@ class ApplicationController {
   /**
    * Read-only facts for the Settings window: app version, platform, whether
    * screen-capture protection exists here, every shortcut with its scope and
-   * whether it registered, and where settings, the profile and logs live.
+   * whether it registered, where settings, the profile and logs live, and
+   * whether API keys are encrypted.
    */
   getSettingsInfo() {
     const global = this.globalShortcutStatus || {};
@@ -2774,6 +2814,8 @@ class ApplicationController {
       contentProtection: process.platform === "darwin" || process.platform === "win32",
       shortcuts,
       paths: { settingsFile: ENV_PATH, profile: this.profilePath, logs },
+      // Where API keys are kept (booleans and labels, never a key).
+      keyStorage: this.getKeyStorageStatus(),
     };
   }
 
@@ -3423,7 +3465,7 @@ class ApplicationController {
       const persistedKeys = this.persistEnvUpdates(envUpdates);
       // persistEnvUpdates logs and returns [] when .env cannot be written.
       // The values apply now but would be lost on restart: say so.
-      const notSavedToDisk = Object.keys(envUpdates).length > 0 && persistedKeys.length === 0;
+      const notSavedToDisk = persistedKeys.length < Object.keys(envUpdates).length;
 
       // Reinitialize the LLM service when the Gemini key was saved (as
       // before) or any other AI-provider setting changed, so the new client
@@ -3483,7 +3525,7 @@ class ApplicationController {
 
       // persistEnvUpdates already applied the values to process.env; only
       // writing the file failed, so they last until the app restarts.
-      if (Object.keys(envUpdates).length > 0 && persistedKeys.length === 0) {
+      if (notSavedToDisk) {
         return {
           success: true,
           persisted: false,
@@ -3611,19 +3653,178 @@ class ApplicationController {
   }
 
   /**
-   * Write key=value pairs to the project's .env file. Existing keys are
-   * replaced in-place; new keys are appended. Comments and unrelated lines
-   * are preserved. Uses an atomic write (temp file + rename) so a crash
-   * mid-write cannot corrupt .env.
+   * Load the encrypted API keys once the app is ready: move the keys in the
+   * userData .env into the store (never a project .env), then fill
+   * process.env with the saved keys .env does not set. Without secure
+   * storage nothing changes and keys stay in .env. Safe to call again.
+   */
+  ensureSecrets() {
+    if (this._secretsInitialized) return;
+    // safeStorage only works after the ready event on Windows and Linux.
+    if (!app.isReady()) return;
+    this._secretsInitialized = true;
+    let result;
+    try {
+      result = secretStore.initializeSecrets({
+        store: this.secretStore,
+        envPath: ENV_PATH,
+        migrate: ENV_IS_USER_DATA,
+        keys: SECRET_ENV_KEYS,
+        logger,
+      });
+    } catch (e) {
+      logger.warn("Could not load the saved API keys", { error: e.message });
+      return;
+    }
+    const status = this.secretStore.status();
+    // Key names only, never values.
+    logger.info("API key storage", {
+      encrypted: status.encrypted,
+      backend: status.backend,
+      unreadable: status.unreadable,
+      moved: result.migrated,
+      leftInEnv: result.kept,
+      loaded: result.applied,
+    });
+    if (result.applied.some((key) => LLM_SECRET_ENV_KEYS.includes(key))) {
+      try {
+        llmService.initializeClient();
+      } catch (e) {
+        logger.warn("LLM service reinitialization after loading saved keys failed", { error: e.message });
+      }
+    }
+    // Without SPEECH_PROVIDER the speech service picks Azure when its key is
+    // set, and it chose before the key was loaded, so it checks again.
+    const speechChoice = String(process.env.SPEECH_PROVIDER || "").trim().toLowerCase();
+    if (result.applied.includes("AZURE_SPEECH_KEY") && (speechChoice === "" || speechChoice === "azure")) {
+      this.reinitializeSpeech("saved Azure key loaded");
+    }
+  }
+
+  /**
+   * Where API keys are kept, for Settings: booleans and labels only, never a
+   * key. plainTextKeys: a key is still set in the .env file in use.
+   */
+  getKeyStorageStatus() {
+    this.ensureSecrets();
+    const status = this.secretStore.status();
+    let fileValues = {};
+    try {
+      fileValues = require("dotenv").parse(fs.readFileSync(ENV_PATH, "utf8"));
+    } catch (_) { /* no .env: nothing in plain text */ }
+    return {
+      encrypted: status.encrypted,
+      backend: status.backend,
+      label: status.label,
+      message: status.message,
+      unreadable: status.unreadable,
+      plainTextKeys: SECRET_ENV_KEYS.some((key) => secretStore.isUsableSecret(fileValues[key])),
+      projectEnv: !ENV_IS_USER_DATA,
+    };
+  }
+
+  /**
+   * Save settings. API keys go to the encrypted store when the system has
+   * secure storage, and their lines leave the userData .env so a stale copy
+   * cannot win on the next start. With a project .env (running from source)
+   * a key that file already sets is updated there, because it wins over the
+   * store. Everything else, and every key without secure storage, goes to
+   * .env as before. process.env is updated in every case.
    *
-   * @param {Object<string, string>} updates - keys to upsert
+   * @param {Object<string, string>} updates - keys to upsert ("" clears)
    * @returns {string[]} keys that were actually persisted
    */
   persistEnvUpdates(updates) {
     if (!updates || typeof updates !== "object") return [];
     const keys = Object.keys(updates);
     if (keys.length === 0) return [];
+    this.ensureSecrets();
 
+    // Update process.env so the running app picks up the new values
+    // immediately (and so the settings UI reads the same source of truth).
+    for (const key of keys) {
+      process.env[key] = String(updates[key]);
+    }
+
+    const envUpdates = {};
+    const storeUpdates = {};
+    let envRemovals = [];
+    const useStore = this._secretsInitialized && this.secretStore.isAvailable();
+    let envText = "";
+    if (useStore && keys.some((key) => SECRET_ENV_KEYS.includes(key))) {
+      try {
+        envText = fs.readFileSync(ENV_PATH, "utf8");
+      } catch (_) { /* no .env yet */ }
+    }
+    const fileValues = require("dotenv").parse(envText);
+    // Clears that cannot reach a store holding the key: the key would come
+    // back from secrets.bin on the next start, so they do not count as saved.
+    const unclearable = [];
+    const storeHoldsKeys = () => {
+      try { return fs.existsSync(this.secretStore.filePath); } catch (_) { return false; }
+    };
+    for (const key of keys) {
+      const value = String(updates[key]);
+      if (!SECRET_ENV_KEYS.includes(key)) {
+        envUpdates[key] = value;
+      } else if (!useStore) {
+        envUpdates[key] = value;
+        if (!value && this._secretsInitialized && storeHoldsKeys()) unclearable.push(key);
+      } else if (Object.prototype.hasOwnProperty.call(fileValues, key) &&
+        secretStore.singleLineValue(envText, key, fileValues) === null) {
+        // A value spanning lines cannot be removed line by line; it is
+        // replaced in .env as before.
+        envUpdates[key] = value;
+      } else if (!ENV_IS_USER_DATA && secretStore.isUsableSecret(fileValues[key])) {
+        // A project .env that sets this key wins over the store, so the
+        // new value goes there. Clearing it also clears the store's copy.
+        envUpdates[key] = value;
+        if (!value) storeUpdates[key] = "";
+      } else {
+        storeUpdates[key] = value;
+        if (ENV_IS_USER_DATA && Object.prototype.hasOwnProperty.call(fileValues, key)) envRemovals.push(key);
+      }
+    }
+
+    const storeKeys = Object.keys(storeUpdates);
+    if (storeKeys.length) {
+      try {
+        this.secretStore.setMany(storeUpdates);
+      } catch (e) {
+        // Never lose a key: keep it in .env instead.
+        logger.warn("Could not save API keys to secure storage; saving them in .env instead", {
+          keys: storeKeys, error: e.message,
+        });
+        for (const key of storeKeys) {
+          if (!Object.prototype.hasOwnProperty.call(envUpdates, key)) envUpdates[key] = storeUpdates[key];
+          if (!storeUpdates[key] && this.secretStore.get(key)) unclearable.push(key);
+        }
+        envRemovals = [];
+        storeKeys.length = 0;
+      }
+    }
+    if (storeKeys.length) logger.info("Saved API keys to secure storage", { keys: storeKeys });
+    if (Object.keys(envUpdates).length === 0 && envRemovals.length === 0) return storeKeys;
+    if (!this.writeEnvFile(envUpdates, envRemovals)) {
+      // A key whose old .env line could not be removed would come back on
+      // the next start, so it does not count as saved either.
+      return storeKeys.filter((key) => !envRemovals.includes(key));
+    }
+    if (unclearable.length) {
+      logger.warn("Removed API keys stay in secure storage, which cannot be changed now", { keys: unclearable });
+    }
+    return [...storeKeys, ...Object.keys(envUpdates)].filter((key) => !unclearable.includes(key));
+  }
+
+  /**
+   * Write key=value pairs to the .env file in use, and drop the lines of the
+   * keys in `removals`. Existing keys are replaced in-place; new keys are
+   * appended. Comments and unrelated lines are preserved. Uses an atomic
+   * write (temp file + rename) so a crash mid-write cannot corrupt .env.
+   * Returns false when the file could not be written.
+   */
+  writeEnvFile(updates, removals = []) {
+    const keys = Object.keys(updates);
     const fs = require("fs");
     // Single source of truth — the same file dotenv loaded at startup and that
     // FirstRunManager reads/writes (userData in packaged builds, project .env
@@ -3637,6 +3838,7 @@ class ApplicationController {
       // .env doesn't exist yet — we'll create one from scratch
       existing = "";
     }
+    if (removals.length) existing = secretStore.removeEnvKeys(existing, removals);
 
     const existingLines = existing.length > 0 ? existing.split(/\r?\n/) : [];
     const updated = new Set();
@@ -3662,12 +3864,6 @@ class ApplicationController {
       }
     }
 
-    // Update process.env so the running app picks up the new values
-    // immediately (and so the settings UI reads the same source of truth).
-    for (const key of keys) {
-      process.env[key] = String(updates[key]);
-    }
-
     const newContent = outLines.join("\n");
     try {
       const tmpPath = envPath + ".tmp";
@@ -3680,9 +3876,9 @@ class ApplicationController {
     } catch (e) {
       logger.error("Failed to persist .env updates", {
         error: e.message,
-        keys
+        keys: [...keys, ...removals],
       });
-      return [];
+      return false;
     }
     try {
       fs.chmodSync(envPath, 0o600);
@@ -3690,8 +3886,8 @@ class ApplicationController {
       logger.warn("Could not restrict .env permissions", { error: e.message });
     }
 
-    logger.info("Persisted .env updates", { keys: Array.from(updated) });
-    return Array.from(updated);
+    logger.info("Persisted .env updates", { keys: Array.from(updated), removed: removals });
+    return true;
   }
 
   updateAppIcon(iconKey) {

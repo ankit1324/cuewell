@@ -195,16 +195,33 @@ Pick a provider in Settings or during onboarding.
 | DeepSeek | No, text only | `DEEPSEEK_API_KEY` |
 | Ollama | Yes, with a vision model (default `llama3.2-vision`) | None; runs on your machine |
 
-Keys are stored in a `.env` file:
+### Where keys are stored
 
-- Installed builds use `.env` in the app data folder (`~/Library/Application Support/<app>` on macOS, `%APPDATA%\<app>` on Windows, `~/.config/<app>` on Linux).
-- When you run from source, a `.env` in the project folder (the one `setup.sh` creates) is used if the app data folder has none.
+API keys (the AI provider keys and the Azure Speech key) are encrypted with your system's secure storage (Electron `safeStorage`) and saved in `secrets.bin` in the app data folder (`~/Library/Application Support/<app>` on macOS, `%APPDATA%\<app>` on Windows, `~/.config/<app>` on Linux), readable by your user only. Every other setting stays in a `.env` file next to it.
 
-On macOS and Linux the app makes this file readable by your user only (mode 0600). Keys entered in Settings take effect right away; direct edits to `.env` apply on the next start.
+| System | Keys are encrypted with |
+|---|---|
+| macOS | The macOS Keychain |
+| Windows | Windows Data Protection (DPAPI), tied to your Windows account |
+| Linux | The Secret Service (GNOME Keyring and others) or KWallet |
+
+Settings > Privacy & appearance > **API key storage** shows which one is in use. When the system has no secure storage, for example Linux without a keyring (Electron reports the `basic_text` backend), Cuewell does not pretend to encrypt: keys stay in `.env`, which only your user can read (mode 0600 on macOS and Linux), and Settings says "Your system has no secure key storage, so keys are saved in a file only your user can read". Install and unlock a keyring, then restart Cuewell, to encrypt them.
+
+Keys typed into Settings or onboarding take effect right away. A key you add to the app data folder's `.env` by hand is moved into `secrets.bin` the next time Cuewell starts: Cuewell saves it, reads it back, and removes its line from `.env` only when the two match. Comments and all other lines stay. If anything fails, the key stays in `.env` and the log says which key (never its value).
+
+When the same key is set in more than one place, the first one wins:
+
+1. An environment variable set in the shell that started Cuewell.
+2. The `.env` file in use.
+3. `secrets.bin`.
+
+An empty value or a template value such as `your_gemini_api_key_here` counts as not set.
+
+**Running from source.** A `.env` in the project folder (the one `setup.sh` creates) is used when the app data folder has no `.env`. Cuewell never rewrites that file to move keys out of it, so keys in it keep working as written, in plain text, and win over `secrets.bin`. A key saved in Settings goes to `secrets.bin`, unless the project `.env` already sets that key, in which case its line there is updated.
 
 ## Configuration
 
-Settings writes provider, voice, mode, answer length, coding language, app icon and window gap values to `.env` for you. The main keys:
+Settings writes provider, voice, mode, answer length, coding language, app icon and window gap values to `.env` for you, and API keys to `secrets.bin` where the system has secure storage (see [Where keys are stored](#where-keys-are-stored)). The main keys:
 
 ```bash
 # AI provider: gemini | anthropic | openai | openrouter | groq | deepseek | ollama
@@ -261,7 +278,7 @@ Cuewell has no server and no account, and sends no telemetry or analytics. Your 
 | Interview context (role, company, job description, resume, notes) | `profile.json` in the app data folder (owner-only on macOS and Linux) | Your AI provider, with every question (typed, voice and screenshot) |
 | Microphone audio, local voice | In memory, or briefly in a temporary WAV file in the system temp folder that is deleted after transcription | Nowhere. The local engine listens only on `127.0.0.1`. Only the text transcript goes to the AI provider. |
 | Microphone audio, Azure Speech | Not saved by the app | Microsoft (Azure Speech) |
-| API keys | `.env` (owner-only on macOS and Linux) | Only the provider each key belongs to |
+| API keys | `secrets.bin` in the app data folder, encrypted with the system keychain. Without secure storage, `.env` (owner-only on macOS and Linux). See [Where keys are stored](#where-keys-are-stored) | Only the provider each key belongs to |
 | Conversation history | In memory only. Cleared on restart or with `Cmd/Ctrl + Shift + \`. The chat window's clear button clears only the messages it shows. | Recent part, as above |
 | App logs | `~/.Cuewell/logs`: app events and errors, kept 14 days (error logs 30) | Nowhere |
 
@@ -288,7 +305,7 @@ Cuewell is made for practice, mock interviews and conversations where AI help is
 
 - **Sandboxed pages.** Every window runs with `sandbox`, `contextIsolation` and no Node integration.
 - **Minimal per-window APIs.** Each window gets a preload that exposes only the calls that page uses. The main process checks the sender of every IPC message against a per-channel allowlist, and limits which settings fields each window may save.
-- **Keys stay in the main process.** Settings shows masked keys; full keys are never sent to any window.
+- **Keys stay in the main process.** Settings shows masked keys; full keys are never sent to any window. On disk they are encrypted with the system keychain where one exists.
 - **Strict Content Security Policy.** Pages load only local scripts and cannot make network requests (`connect-src 'none'`). AI output is sanitized with DOMPurify before it is rendered.
 - **Locked-down navigation and permissions.** Links open in your browser, windows cannot navigate away from their own page, and only microphone and screen capture permissions are granted to the app's own pages.
 - **Electron 45 with fuses in packaged builds.** `runAsNode`, `NODE_OPTIONS` and the inspector flags are disabled, and the app loads only from its asar archive, with an integrity check on macOS and Windows. Packaged builds also drop the Reload and Developer Tools menu items.
@@ -311,6 +328,9 @@ It opens when the selected provider has no usable key. Finish onboarding, or ope
 
 **"Cannot reach Ollama (local) ... Make sure it is running."**
 Start Ollama (the app, or `ollama serve`) and check the server URL in Settings. If the model is missing, run `ollama pull llama3.2-vision` or pick a model you have.
+
+**Settings says keys are not encrypted, or keys saved earlier could not be read.**
+On Linux, encryption needs a running, unlocked keyring (GNOME Keyring or another Secret Service, or KWallet). Without one, keys are kept in `.env` instead. If the keyring is locked or missing, Cuewell cannot read `secrets.bin`. It never replaces that file then: keys you enter go to `.env`, and the saved keys work again once the keyring is unlocked and Cuewell restarts. On macOS, builds are not signed, so after an update macOS may ask whether the app may use its "Safe Storage" keychain item; choose **Always Allow**, or the saved keys cannot be read.
 
 **"Groq does not support screenshots."**
 Groq and DeepSeek accept text only. Switch to Gemini, Claude, OpenAI, OpenRouter or Ollama for screenshots.
@@ -356,7 +376,7 @@ settings.html             Settings
 onboarding.html/.js       First-run wizard
 prompt-loader.js          Builds the system prompt: mode, answer format, length, context
 prompts/                  Mode prompts (auto, dsa, technical, system-design, behavioral, hr)
-src/core/                 Config, logging, first run, profile store, menus, tray icon, updates, speech models, whisper.cpp binary lookup, Python Whisper installer
+src/core/                 Config, logging, first run, profile store, encrypted key store, menus, tray icon, updates, speech models, whisper.cpp binary lookup, Python Whisper installer
 src/managers/             Window and session (conversation history) managers
 src/services/             Screen capture, LLM, speech, whisper.cpp engine and Python Whisper worker services
 src/services/providers/   Claude and OpenAI-compatible provider adapters
