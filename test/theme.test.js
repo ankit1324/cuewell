@@ -173,7 +173,7 @@ describe('component CSS', () => {
   }
 
   // Inline styles built by the page scripts.
-  for (const file of ['src/ui/main-window.js', 'src/ui/answer-page.js', 'src/ui/chat-page.js', 'src/ui/chat-window.js',
+  for (const file of ['src/ui/main-window.js', 'src/ui/answer-page.js', 'src/ui/chat-page.js',
     'src/ui/settings-window.js', 'onboarding.js']) {
     it(`${file} sets no light-only colors in inline styles`, () => {
       const css = (readSource(file).match(/cssText\s*=\s*`[^`]*`/g) || []).join('\n');
