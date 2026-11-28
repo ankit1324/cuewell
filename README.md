@@ -269,18 +269,19 @@ If no speech provider is available, the mic buttons are hidden.
 
 ## Where your data goes
 
-Cuewell has no server and no account, and sends no telemetry or analytics. Your questions, screenshots and interview context go only to the AI provider you picked. Audio leaves your computer only if you choose Azure Speech, and then it goes to Microsoft.
+Cuewell has no server and no account, and sends no telemetry or analytics. Your questions, screenshots and interview context go only to the AI provider you picked. Audio leaves your computer only if you choose Azure Speech, and then it goes to Microsoft. [PRIVACY.md](PRIVACY.md) has the full list of what is sent where and which files Cuewell keeps.
 
 | Data | Stored | Sent to |
 |---|---|---|
 | Screenshot (the whole display under the mouse pointer, including anything else on it) | In memory while the request runs | Your AI provider. Sent without conversation history. |
 | Typed question or voice transcript | In memory for the session | Your AI provider, with recent history: up to 14 earlier messages for typed questions, up to 8 for voice |
 | Interview context (role, company, job description, resume, notes) | `profile.json` in the app data folder (owner-only on macOS and Linux) | Your AI provider, with every question (typed, voice and screenshot) |
-| Microphone audio, local voice | In memory, or briefly in a temporary WAV file in the system temp folder that is deleted after transcription | Nowhere. The local engine listens only on `127.0.0.1`. Only the text transcript goes to the AI provider. |
+| Microphone audio, local voice | In memory, or briefly in a temporary WAV file in the system temp folder that is deleted after transcription | Nowhere. The local engine can only be reached from this computer: a private socket on macOS and Linux, `127.0.0.1` on Windows. Only the text transcript goes to the AI provider. |
 | Microphone audio, Azure Speech | Not saved by the app | Microsoft (Azure Speech) |
 | API keys | `secrets.bin` in the app data folder, encrypted with the system keychain. Without secure storage, `.env` (owner-only on macOS and Linux). See [Where keys are stored](#where-keys-are-stored) | Only the provider each key belongs to |
 | Conversation history | In memory only. Cleared on restart or with `Cmd/Ctrl + Shift + \`. The chat window's clear button clears only the messages it shows. | Recent part, as above |
 | App logs | `~/.Cuewell/logs`: app events and errors, kept 14 days (error logs 30) | Nowhere |
+| Crash record | `last-crash.json` in the app data folder, only after a crash: error name, message and stack, with your home folder, user name and anything like a key removed. Deleted on the next launch. | Nowhere. The next launch offers once to open a GitHub issue with it, which you read and submit yourself. |
 
 With Ollama on `localhost`, AI requests stay on your machine. The built-in endpoints for the cloud providers use HTTPS.
 
@@ -359,6 +360,7 @@ Install Node.js 22.12 or newer and retry. Exit code 130 means Ctrl+C was pressed
 ## Reporting problems
 
 - **Help > Report a Problem…** opens a new GitHub issue with your Cuewell version and operating system already filled in. Nothing else is sent.
+- If Cuewell crashed last time, it offers once, with a notification, to report it. The issue it opens also has the error message and stack trace, with your home folder, user name and anything like a key removed. Nothing is sent until you submit the issue.
 - **Help > View Logs Folder** opens `~/.Cuewell/logs`. Log files are kept 14 days (error logs 30), each file is capped at 20 MB, and the oldest are deleted once all logs together pass 100 MB. Logs can contain parts of your session, so read a log and remove anything private before you attach it to an issue.
 
 On Windows and Linux, both items are in the app menu on the toolbar. For security issues, follow [SECURITY.md](SECURITY.md) instead of opening a public issue.
@@ -376,7 +378,7 @@ settings.html             Settings
 onboarding.html/.js       First-run wizard
 prompt-loader.js          Builds the system prompt: mode, answer format, length, context
 prompts/                  Mode prompts (auto, dsa, technical, system-design, behavioral, hr)
-src/core/                 Config, logging, first run, profile store, encrypted key store, menus, tray icon, updates, speech models, whisper.cpp binary lookup, Python Whisper installer
+src/core/                 Config, logging, first run, profile store, encrypted key store, menus, tray icon, updates, crash records, speech models, whisper.cpp binary lookup, Python Whisper installer
 src/managers/             Window and session (conversation history) managers
 src/services/             Screen capture, LLM, speech, whisper.cpp engine and Python Whisper worker services
 src/services/providers/   Claude and OpenAI-compatible provider adapters

@@ -6,6 +6,10 @@
  */
 
 const { isRepoConfigured } = require('./update-checker');
+const { scrubText, safeSlice } = require('./crash-report');
+
+// GitHub rejects much longer issues/new links, and some browsers cut them.
+const MAX_REPORT_URL_LENGTH = 8000;
 
 const GENERIC_SPEECH = 'Voice input stopped because of an error. Try again.';
 const GENERIC_AI = 'The AI request failed. Try again.';
@@ -99,12 +103,27 @@ function friendlyLlmError(raw) {
   return message;
 }
 
+/** The crash's error text: the stack, with the message first when the stack lacks it. */
+function crashText(crash) {
+  const message = scrubText(crash.message).trim();
+  const stack = scrubText(crash.stack).trim();
+  const name = scrubText(crash.name).trim() || 'Error';
+  if (stack && (!message || stack.includes(message))) return stack;
+  return [`${name}: ${message}`, stack].filter(Boolean).join('\n');
+}
+
+function crashSection(text) {
+  return ['**Crash details**', '```', text, '```', ''];
+}
+
 /**
  * Prefilled https://github.com/<repo>/issues/new link, or null while the repo
  * is the TODO placeholder. Only the app version and OS go in the body: no
- * logs, keys, questions or interview context.
+ * logs, keys, questions or interview context. With `crash` (a record from
+ * src/core/crash-report.js) the error message and stack are added, scrubbed
+ * again and cut from the bottom so the link stays under MAX_REPORT_URL_LENGTH.
  */
-function buildProblemReportUrl(repo, { appVersion, platform, osVersion, arch, electronVersion } = {}) {
+function buildProblemReportUrl(repo, { appVersion, platform, osVersion, arch, electronVersion, crash } = {}) {
   if (!isRepoConfigured(repo)) return null;
   const os = [OS_NAMES[platform] || platform || 'Unknown OS', osVersion].filter(Boolean).join(' ');
   const system = [
@@ -112,22 +131,48 @@ function buildProblemReportUrl(repo, { appVersion, platform, osVersion, arch, el
     arch ? `${os} (${arch})` : os,
     electronVersion ? `Electron ${electronVersion}` : null,
   ].filter(Boolean).join(' · ');
-  const body = [
-    '**What happened?**',
-    '',
-    '',
-    '**What did you expect to happen?**',
-    '',
-    '',
-    '**Steps to reproduce**',
-    '1. ',
-    '',
-    '---',
-    system,
-    '',
-    'Logs can help: in Cuewell, choose Help > View Logs Folder. Remove anything private before you attach a log.',
-  ].join('\n');
-  return `https://github.com/${repo}/issues/new?body=${encodeURIComponent(body)}`;
+  const urlFor = (crashLines) => {
+    const body = [
+      '**What happened?**',
+      '',
+      '',
+      '**What did you expect to happen?**',
+      '',
+      '',
+      '**Steps to reproduce**',
+      '1. ',
+      '',
+      ...crashLines,
+      '---',
+      system,
+      '',
+      'Logs can help: in Cuewell, choose Help > View Logs Folder. Remove anything private before you attach a log.',
+    ].join('\n');
+    return `https://github.com/${repo}/issues/new?body=${encodeURIComponent(body)}`;
+  };
+
+  if (!crash || typeof crash !== 'object') return urlFor([]);
+  const lines = crashText(crash).split('\n');
+  let url = urlFor(crashSection(lines.join('\n')));
+  if (url.length <= MAX_REPORT_URL_LENGTH) return url;
+
+  // Drop frames from the bottom; the top of the stack matters most.
+  const marker = '(stack truncated)';
+  let keep = lines.length - 1;
+  while (keep > 1) {
+    url = urlFor(crashSection([...lines.slice(0, keep), marker].join('\n')));
+    if (url.length <= MAX_REPORT_URL_LENGTH) return url;
+    keep -= 1;
+  }
+  // Still too long: one huge line. Cut it to the longest prefix that fits.
+  let low = 0;
+  let high = lines[0].length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (urlFor(crashSection(`${safeSlice(lines[0], mid)}\n${marker}`)).length <= MAX_REPORT_URL_LENGTH) low = mid;
+    else high = mid - 1;
+  }
+  return urlFor(crashSection(`${safeSlice(lines[0], low)}\n${marker}`));
 }
 
 module.exports = {
@@ -137,4 +182,5 @@ module.exports = {
   microphoneBlockedMessage,
   isMediaAccessBlocked,
   buildProblemReportUrl,
+  MAX_REPORT_URL_LENGTH,
 };

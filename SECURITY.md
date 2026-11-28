@@ -4,8 +4,7 @@
 
 Please report security problems privately. Do not open a public issue, pull request or discussion for them.
 
-- Email: <!-- TODO(owner): add a private security contact address -->
-- Or, if it is enabled for this repository, use GitHub's **Report a vulnerability** button on the Security tab (private vulnerability reporting).
+Use GitHub's private vulnerability reporting: open [Report a vulnerability](https://github.com/ankit1324/cuewell/security/advisories/new), or choose **Report a vulnerability** on the repository's Security tab. Only you and the maintainer can see the report.
 
 Include:
 
