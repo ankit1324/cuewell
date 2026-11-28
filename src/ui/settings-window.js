@@ -1763,12 +1763,44 @@
             text = `Not available on this computer, so Cuewell windows show in screen shares and recordings. Hide them with ${isMac() ? '⌘⇧V' : 'Ctrl+Shift+V'} before you share your screen.`;
         }
         $('protectionText').textContent = text;
+        renderKeyStorage();
         document.querySelectorAll('[data-platform-row]').forEach((row) => {
             const first = row.firstElementChild;
             const existing = first.querySelector('.sw-here');
             if (existing) existing.remove();
             if (row.dataset.platformRow === p) first.append(el('span', { class: 'oc-chip sw-here' }, 'This computer'));
         });
+    }
+
+    // Where API keys are kept: main sends booleans and labels only, never a key.
+    function renderKeyStorage() {
+        const storage = state.info && state.info.keyStorage;
+        const chip = $('keyStorageChip');
+        if (!storage) {
+            chip.hidden = true;
+            return;
+        }
+        chip.hidden = false;
+        chip.className = `oc-chip ${storage.encrypted ? 'oc-chip--accent' : 'oc-chip--live'}`;
+        chip.textContent = storage.encrypted ? 'Encrypted' : 'Not encrypted';
+        const parts = [storage.encrypted && storage.label ? `${storage.message} (${storage.label}).` : `${storage.message}.`];
+        if (storage.unreadable) {
+            parts.push('Keys saved earlier with secure storage cannot be read right now, so new keys go to the settings file. The saved keys are kept and work again once they can be read, for example after you unlock your keyring and restart Cuewell.');
+        }
+        if (storage.plainTextKeys) {
+            parts.push(storage.projectEnv
+                ? 'Running from source: keys set in the project .env file are used as written there, in plain text.'
+                : storage.encrypted
+                    ? 'Some keys are still in the settings file. Cuewell moves them into the keychain when it starts.'
+                    : '');
+        }
+        if (!storage.encrypted && platform() === 'linux') {
+            parts.push('To encrypt them, install and unlock a keyring such as GNOME Keyring or KWallet, then restart Cuewell.');
+        }
+        $('keyStorageText').textContent = parts.filter(Boolean).join(' ');
+        $('keysWhereText').textContent = storage.encrypted
+            ? 'are encrypted with your system keychain'
+            : 'are saved in a file only your user can read';
     }
 
     // ---------- App icon ----------

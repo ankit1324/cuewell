@@ -207,3 +207,53 @@ describe('ensureEnv', () => {
     assert.equal(manager.needsOnboarding(), true);
   });
 });
+
+describe('keys in the encrypted store', () => {
+  const ANTHROPIC_KEY = 'sk-ant-test-0000000000';
+
+  it('counts a key that is only in the store', (t) => {
+    const { manager } = setup(t, {
+      env: 'LLM_PROVIDER=gemini\nGEMINI_API_KEY=your_gemini_api_key_here\n',
+      markers: [MARKER],
+      options: { readSecrets: () => ({ GEMINI_API_KEY: GEMINI_KEY }) },
+    });
+    assert.equal(manager.needsOnboarding(), false);
+    const status = manager.getStatus();
+    assert.equal(status.llmConfigured, true);
+    assert.equal(status.geminiConfigured, true);
+    assert.ok(!JSON.stringify(status).includes(GEMINI_KEY));
+  });
+
+  it('checks the selected provider, and counts a stored Azure key', (t) => {
+    const { manager } = setup(t, {
+      env: 'LLM_PROVIDER=anthropic\nAZURE_SPEECH_REGION=eastus\n',
+      markers: [MARKER],
+      options: { readSecrets: () => ({ GEMINI_API_KEY: GEMINI_KEY, AZURE_SPEECH_KEY: 'azurestored123' }) },
+    });
+    assert.equal(manager.needsOnboarding(), true, 'a Gemini key does not configure Claude');
+    assert.equal(manager.getStatus().azureConfigured, true);
+  });
+
+  it('a real key in .env wins over the store, and empty or template values do not count', (t) => {
+    const { manager } = setup(t, {
+      env: `LLM_PROVIDER=anthropic\nANTHROPIC_API_KEY=${ANTHROPIC_KEY}\n`,
+      markers: [MARKER],
+      options: { readSecrets: () => ({ ANTHROPIC_API_KEY: '', GROQ_API_KEY: 'your_groq_api_key_here' }) },
+    });
+    assert.equal(manager.needsOnboarding(), false);
+  });
+
+  it('treats a store that cannot be read as empty', (t) => {
+    const warnings = [];
+    const { manager } = setup(t, {
+      env: '',
+      markers: [MARKER],
+      options: {
+        readSecrets: () => { throw new Error('locked'); },
+        logger: { ...silentLogger, warn: (...args) => warnings.push(args) },
+      },
+    });
+    assert.equal(manager.needsOnboarding(), true);
+    assert.ok(warnings.length > 0);
+  });
+});

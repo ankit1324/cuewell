@@ -25,6 +25,9 @@ async function run(request) {
   fs.mkdirSync(userData, { recursive: true });
   fs.mkdirSync(appData, { recursive: true });
   process.chdir(root); // main.js prefers a .env in the launch folder when run from source
+  // request.platform: run main.js as if on that system (key storage
+  // differs per system). Set before any app module loads.
+  if (request.platform) Object.defineProperty(process, 'platform', { value: request.platform });
 
   // Silent logger that records what main.js reports.
   const logs = [];
@@ -66,7 +69,16 @@ async function run(request) {
   };
 
   const { createElectronMock, installElectronMock } = require('./electron-mock');
-  const { electron, handlers, listeners } = createElectronMock({ userData, appData, appPath: ROOT });
+  // request.safeStorage: options for the fake safeStorage (see
+  // fake-safe-storage.js); absent means no secure storage. request.ready:
+  // app.isReady() is true, so main.js loads and migrates the saved keys on
+  // the first IPC call that needs them.
+  const { createFakeSafeStorage } = require('./fake-safe-storage');
+  const { electron, handlers, listeners } = createElectronMock({
+    userData, appData, appPath: ROOT,
+    safeStorage: request.safeStorage ? createFakeSafeStorage(request.safeStorage) : undefined,
+    isReady: !!request.ready,
+  });
   installElectronMock(electron);
 
   require(path.join(ROOT, 'main.js'));
@@ -133,8 +145,14 @@ async function run(request) {
       ? { mode: fs.statSync(file).mode & 0o777, text: fs.readFileSync(file, 'utf8') }
       : null;
   };
+  const secretsFile = path.join(userData, 'secrets.bin');
   return {
     userDataFiles: fs.readdirSync(userData).sort(),
+    secretsFile: fs.existsSync(secretsFile)
+      ? { mode: fs.statSync(secretsFile).mode & 0o777, text: fs.readFileSync(secretsFile, 'latin1') }
+      : null,
+    processEnvKeys: Object.fromEntries(['GEMINI_API_KEY', 'AZURE_SPEECH_KEY', 'GROQ_API_KEY', 'OPENAI_API_KEY']
+      .map((key) => [key, process.env[key] || ''])),
     profileFile: readFile('profile.json'),
     handleChannels: [...handlers.keys()].sort(),
     onChannels: [...listeners.keys()].sort(),

@@ -5,6 +5,7 @@
 // with fake senders. Unknown members are no-op stubs.
 const Module = require('node:module');
 const path = require('node:path');
+const { createFakeSafeStorage } = require('./fake-safe-storage');
 
 /** A callable that returns itself for any call or property, e.g. app.dock.hide(). */
 function stub(name = 'stub') {
@@ -34,7 +35,10 @@ function withStubs(object, name) {
   });
 }
 
-function createElectronMock({ userData, appData, appPath, isPackaged = false }) {
+// safeStorage: a fake from ./fake-safe-storage.js. Without one, encryption is
+// unavailable, so keys stay in .env as on a system without secure storage.
+// isReady: what app.isReady() returns (main.js loads saved keys only then).
+function createElectronMock({ userData, appData, appPath, isPackaged = false, safeStorage, isReady = false }) {
   const handlers = new Map();
   const listeners = new Map();
   const paths = { userData, appData, home: path.dirname(userData), temp: path.dirname(userData), logs: userData };
@@ -50,7 +54,7 @@ function createElectronMock({ userData, appData, appPath, isPackaged = false }) 
     setName: () => {},
     getVersion: () => '0.0.0-test',
     whenReady: () => new Promise(() => {}),
-    isReady: () => false,
+    isReady: () => isReady,
     on: () => app,
     once: () => app,
     quit: () => {},
@@ -90,6 +94,7 @@ function createElectronMock({ userData, appData, appPath, isPackaged = false }) 
     desktopCapturer: stub('desktopCapturer'),
     shell: stub('shell'),
     clipboard: withStubs({ writeText: () => {}, readText: () => '' }, 'clipboard'),
+    safeStorage: safeStorage || createFakeSafeStorage({ available: false }),
   }, 'electron');
 
   return { electron, handlers, listeners };
