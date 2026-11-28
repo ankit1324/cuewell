@@ -13,6 +13,14 @@ const {
 } = require('./providers');
 const { fromGeminiRequest } = require('./providers/convert');
 const { MAX_TOKENS_NO_TEXT } = require('./providers/errors');
+const {
+  cancelledError,
+  isCancelledError,
+  isAborted,
+  throwIfCancelled,
+  raceCancel,
+  cancellableDelay
+} = require('./cancellation');
 
 class LLMService {
   constructor() {
@@ -214,9 +222,11 @@ class LLMService {
    * @param {string} activeSkill - current skill (e.g. 'dsa')
    * @param {Array} _sessionMemory - unused: images are sent without history
    * @param {string|null} programmingLanguage - optional language context for skills that need it
+   * @param {{signal?: AbortSignal}} options - `signal` stops the request (see ./cancellation.js)
    * @returns {Promise<{response: string, metadata: object}>}
    */
-  async processImageWithSkill(imageBuffer, mimeType, activeSkill, _sessionMemory = [], programmingLanguage = null) {
+  async processImageWithSkill(imageBuffer, mimeType, activeSkill, _sessionMemory = [], programmingLanguage = null, options = {}) {
+    const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
     }
@@ -262,18 +272,20 @@ class LLMService {
       try {
         if (preferAlternative) {
           logger.debug('Attempting alternative HTTPS method first for reliability');
-          responseText = await this.executeAlternativeRequest(request);
+          responseText = await this.executeAlternativeRequest(request, signal);
         } else {
-          responseText = await this.executeRequest(request);
+          responseText = await this.executeRequest(request, signal);
         }
       } catch (error) {
+        this._rethrowIfCancelled(error, signal);
         const secondaryLabel = preferAlternative ? 'primary SDK method' : 'alternative HTTPS method';
         logger.warn(`${preferAlternative ? 'Alternative' : 'Primary'} method failed, trying ${secondaryLabel}`, { error: error.message });
         const secondaryFn = preferAlternative ? this.executeRequest.bind(this) : this.executeAlternativeRequest.bind(this);
 
         try {
-          responseText = await secondaryFn(request);
+          responseText = await secondaryFn(request, signal);
         } catch (secondaryError) {
+          this._rethrowIfCancelled(secondaryError, signal);
           logger.error('Both Gemini request methods failed', {
             firstError: error.message,
             secondError: secondaryError.message
@@ -308,6 +320,7 @@ class LLMService {
         }
       };
     } catch (error) {
+      this._rethrowIfCancelled(error, signal);
       this.errorCount++;
       logger.error('LLM image processing failed', {
         error: error.message,
@@ -319,7 +332,8 @@ class LLMService {
     }
   }
 
-  async processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null) {
+  async processImageWithSkillStream(imageBuffer, mimeType, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
+    const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
     }
@@ -354,7 +368,7 @@ class LLMService {
         geminiRequest.systemInstruction = { parts: [{ text: skillPrompt }] };
       }
 
-      const fullText = await this.executeStreamingRequest(geminiRequest, live.onDelta, live.onAttemptStart);
+      const fullText = await this.executeStreamingRequest(geminiRequest, live.onDelta, live.onAttemptStart, signal);
 
       const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
@@ -381,12 +395,14 @@ class LLMService {
         }
       };
     } catch (error) {
+      // A stopped answer keeps the text shown so far: no reset, no fallback.
+      this._rethrowIfCancelled(error, signal);
       logger.warn('Streaming image analysis failed, falling back to non-streaming', {
         error: error.message,
         requestId: this.requestCount
       });
       live.onAttemptStart();
-      return this.processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory, programmingLanguage);
+      return this.processImageWithSkill(imageBuffer, mimeType, activeSkill, sessionMemory, programmingLanguage, { signal });
     }
   }
 
@@ -394,7 +410,8 @@ class LLMService {
     return promptLoader.getImageInstruction(activeSkill, programmingLanguage);
   }
 
-  async processTextWithSkill(text, activeSkill, sessionMemory = [], programmingLanguage = null) {
+  async processTextWithSkill(text, activeSkill, sessionMemory = [], programmingLanguage = null, options = {}) {
+    const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
     }
@@ -418,11 +435,12 @@ class LLMService {
       try {
         if (preferAlternative) {
           logger.debug('Attempting alternative HTTPS method first for text processing');
-          response = await this.executeAlternativeRequest(geminiRequest);
+          response = await this.executeAlternativeRequest(geminiRequest, signal);
         } else {
-          response = await this.executeRequest(geminiRequest);
+          response = await this.executeRequest(geminiRequest, signal);
         }
       } catch (error) {
+        this._rethrowIfCancelled(error, signal);
         const secondaryLabel = preferAlternative ? 'primary SDK method' : 'alternative HTTPS method';
         logger.warn(`${preferAlternative ? 'Alternative' : 'Primary'} method failed, trying ${secondaryLabel}`, {
           error: error.message,
@@ -430,8 +448,9 @@ class LLMService {
         });
         const secondaryFn = preferAlternative ? this.executeRequest.bind(this) : this.executeAlternativeRequest.bind(this);
         try {
-          response = await secondaryFn(geminiRequest);
+          response = await secondaryFn(geminiRequest, signal);
         } catch (secondaryError) {
+          this._rethrowIfCancelled(secondaryError, signal);
           logger.error('Both Gemini request methods failed for text processing', {
             firstError: error.message,
             secondError: secondaryError.message,
@@ -465,6 +484,7 @@ class LLMService {
         }
       };
     } catch (error) {
+      this._rethrowIfCancelled(error, signal);
       this.errorCount++;
       logger.error('LLM processing failed', {
         error: error.message,
@@ -477,7 +497,8 @@ class LLMService {
     }
   }
 
-  async processTextWithSkillStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null) {
+  async processTextWithSkillStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
+    const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
     }
@@ -489,7 +510,7 @@ class LLMService {
     try {
       const geminiRequest = this.buildGeminiRequest(text, activeSkill, sessionMemory, programmingLanguage);
 
-      const fullText = await this.executeStreamingRequest(geminiRequest, live.onDelta, live.onAttemptStart);
+      const fullText = await this.executeStreamingRequest(geminiRequest, live.onDelta, live.onAttemptStart, signal);
 
       const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
@@ -514,16 +535,19 @@ class LLMService {
         }
       };
     } catch (error) {
+      // A stopped answer keeps the text shown so far: no reset, no fallback.
+      this._rethrowIfCancelled(error, signal);
       logger.warn('Streaming text failed, falling back to non-streaming', {
         error: error.message,
         requestId: this.requestCount
       });
       live.onAttemptStart();
-      return this.processTextWithSkill(text, activeSkill, sessionMemory, programmingLanguage);
+      return this.processTextWithSkill(text, activeSkill, sessionMemory, programmingLanguage, { signal });
     }
   }
 
-  async processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory = [], programmingLanguage = null) {
+  async processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory = [], programmingLanguage = null, options = {}) {
+    const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
     }
@@ -547,11 +571,12 @@ class LLMService {
       try {
         if (preferAlternative) {
           logger.debug('Attempting alternative HTTPS method first for transcription processing');
-          response = await this.executeAlternativeRequest(geminiRequest);
+          response = await this.executeAlternativeRequest(geminiRequest, signal);
         } else {
-          response = await this.executeRequest(geminiRequest);
+          response = await this.executeRequest(geminiRequest, signal);
         }
       } catch (error) {
+        this._rethrowIfCancelled(error, signal);
         const secondaryLabel = preferAlternative ? 'primary SDK method' : 'alternative HTTPS method';
         logger.warn(`${preferAlternative ? 'Alternative' : 'Primary'} method failed, trying ${secondaryLabel}`, {
           error: error.message,
@@ -559,8 +584,9 @@ class LLMService {
         });
         const secondaryFn = preferAlternative ? this.executeRequest.bind(this) : this.executeAlternativeRequest.bind(this);
         try {
-          response = await secondaryFn(geminiRequest);
+          response = await secondaryFn(geminiRequest, signal);
         } catch (secondaryError) {
+          this._rethrowIfCancelled(secondaryError, signal);
           logger.error('Both Gemini request methods failed for transcription processing', {
             firstError: error.message,
             secondError: secondaryError.message,
@@ -595,6 +621,7 @@ class LLMService {
         }
       };
     } catch (error) {
+      this._rethrowIfCancelled(error, signal);
       this.errorCount++;
       logger.error('LLM transcription processing failed', {
         error: error.message,
@@ -932,9 +959,14 @@ class LLMService {
     return `Interview mode: ${promptLoader.getModeLabel(activeSkill)}\n\nQuestion:\n${text}`;
   }
 
-  async executeRequest(geminiRequest) {
+  /**
+   * One Gemini answer through the SDK, with retries and fallback models.
+   * `signal` (optional AbortSignal) stops it at once, including during a
+   * retry wait, and no further attempt or model is tried.
+   */
+  async executeRequest(geminiRequest, signal = null) {
     if (this.providerId !== 'gemini') {
-      return this.executeProviderRequest(geminiRequest, null);
+      return this.executeProviderRequest(geminiRequest, null, { signal });
     }
 
     const maxRetries = config.get('llm.gemini.maxRetries');
@@ -958,10 +990,12 @@ class LLMService {
 
     for (const modelName of modelsToTry) {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        throwIfCancelled(signal);
         try {
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Request timeout')), timeout)
-          );
+          let timeoutTimer = null;
+          const timeoutPromise = new Promise((_, reject) => {
+            timeoutTimer = setTimeout(() => reject(new Error('Request timeout')), timeout);
+          });
 
           logger.debug(`Gemini API attempt ${attempt} starting with model ${modelName}`, {
             timestamp: new Date().toISOString(),
@@ -972,10 +1006,15 @@ class LLMService {
           const requestPromise = this.client.models.generateContent({
             model: modelName,
             contents: geminiRequest.contents,
-            config: geminiRequest.generationConfig,
+            config: signal
+              ? { ...geminiRequest.generationConfig, abortSignal: signal }
+              : geminiRequest.generationConfig,
             systemInstruction: geminiRequest.systemInstruction
           });
-          const result = await Promise.race([requestPromise, timeoutPromise]);
+          // The timer is cleared once the call settles, so a stopped or
+          // finished request leaves nothing running.
+          const result = await raceCancel(Promise.race([requestPromise, timeoutPromise]), signal)
+            .finally(() => clearTimeout(timeoutTimer));
 
           if (!result) {
             throw new Error('Empty response from Gemini API');
@@ -1000,6 +1039,7 @@ class LLMService {
 
           return text;
         } catch (error) {
+          this._rethrowIfCancelled(error, signal);
           const errorInfo = this.analyzeError(error);
           lastError = error;
 
@@ -1057,7 +1097,7 @@ class LLMService {
             model: modelName
           });
 
-          await this.delay(delay);
+          await this.delay(delay, signal);
         }
       }
     }
@@ -1076,7 +1116,8 @@ class LLMService {
    * {response, metadata} shape. Falls back to the non-streaming path on any
    * streaming failure so reliability is never worse than before.
    */
-  async processTranscriptionWithIntelligentResponseStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null) {
+  async processTranscriptionWithIntelligentResponseStream(text, activeSkill, sessionMemory = [], programmingLanguage = null, onDelta = null, onReset = null, options = {}) {
+    const signal = (options && options.signal) || null;
     if (!this.isInitialized) {
       throw new Error(this._providerCopy().notInitialized);
     }
@@ -1088,7 +1129,7 @@ class LLMService {
     try {
       const geminiRequest = this.buildIntelligentTranscriptionRequest(text, activeSkill, sessionMemory, programmingLanguage);
 
-      const fullText = await this.executeStreamingRequest(geminiRequest, live.onDelta, live.onAttemptStart);
+      const fullText = await this.executeStreamingRequest(geminiRequest, live.onDelta, live.onAttemptStart, signal);
 
       const finalResponse = this.shouldRetagCode(activeSkill, programmingLanguage)
         ? this.enforceProgrammingLanguage(fullText, programmingLanguage)
@@ -1114,6 +1155,8 @@ class LLMService {
         }
       };
     } catch (error) {
+      // A stopped answer keeps the text shown so far: no reset, no fallback.
+      this._rethrowIfCancelled(error, signal);
       logger.warn('Streaming transcription failed, falling back to non-streaming', {
         error: error.message,
         requestId: this.requestCount
@@ -1122,7 +1165,7 @@ class LLMService {
       // single final response. The partial text of the failed stream is
       // cleared first so it does not stay on screen while this runs.
       live.onAttemptStart();
-      return this.processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory, programmingLanguage);
+      return this.processTranscriptionWithIntelligentResponse(text, activeSkill, sessionMemory, programmingLanguage, { signal });
     }
   }
 
@@ -1177,10 +1220,12 @@ class LLMService {
    * Run a streaming Gemini request with the same model-fallback + retry policy
    * as executeRequest. Accumulates and returns the full text; invokes onDelta
    * for each chunk and onAttemptStart (optional) before every attempt.
+   * `signal` (optional AbortSignal) stops it: the open stream is closed, no
+   * chunk reaches onDelta after that, and no retry or fallback model runs.
    */
-  async executeStreamingRequest(geminiRequest, onDelta, onAttemptStart = null) {
+  async executeStreamingRequest(geminiRequest, onDelta, onAttemptStart = null, signal = null) {
     if (this.providerId !== 'gemini') {
-      return this.executeProviderRequest(geminiRequest, onDelta, { onAttemptStart });
+      return this.executeProviderRequest(geminiRequest, onDelta, { onAttemptStart, signal });
     }
 
     const maxRetries = config.get('llm.gemini.maxRetries');
@@ -1193,9 +1238,10 @@ class LLMService {
 
     for (const modelName of modelsToTry) {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        throwIfCancelled(signal);
         if (typeof onAttemptStart === 'function') onAttemptStart();
         try {
-          const fullText = await this._streamRequestForModel(geminiRequest, modelName, apiKey, onDelta);
+          const fullText = await this._streamRequestForModel(geminiRequest, modelName, apiKey, onDelta, signal);
 
           if (!fullText) {
             throw new Error('Empty streamed response from Gemini API');
@@ -1209,6 +1255,7 @@ class LLMService {
 
           return fullText;
         } catch (error) {
+          this._rethrowIfCancelled(error, signal);
           const errorInfo = this.analyzeError(error);
           lastError = error;
 
@@ -1234,7 +1281,7 @@ class LLMService {
 
           const baseDelay = errorInfo.isNetworkError ? 2500 : 1500;
           const delay = baseDelay * attempt + Math.random() * 1000;
-          await this.delay(delay);
+          await this.delay(delay, signal);
         }
       }
     }
@@ -1242,7 +1289,8 @@ class LLMService {
     throw lastError || new Error('Gemini streaming request failed');
   }
 
-  _streamRequestForModel(geminiRequest, modelName, apiKey, onDelta) {
+  _streamRequestForModel(geminiRequest, modelName, apiKey, onDelta, signal = null) {
+    if (isAborted(signal)) return Promise.reject(cancelledError());
     const https = require('https');
     const timeout = config.get('llm.gemini.timeout');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse`;
@@ -1262,6 +1310,13 @@ class LLMService {
     };
 
     return new Promise((resolve, reject) => {
+      // A stop closes the connection; chunks already read are dropped.
+      let cancelled = false;
+      const onAbort = () => {
+        cancelled = true;
+        reject(cancelledError());
+        req.destroy();
+      };
       const req = https.request(url, options, (res) => {
         if (res.statusCode !== 200) {
           let errBody = '';
@@ -1275,6 +1330,7 @@ class LLMService {
 
         res.setEncoding('utf8');
         res.on('data', (chunk) => {
+          if (cancelled) return;
           buffer += chunk;
           let idx;
           while ((idx = buffer.indexOf('\n')) !== -1) {
@@ -1290,7 +1346,7 @@ class LLMService {
             try {
               const json = JSON.parse(payload);
               const piece = this._extractChunkText(json);
-              if (piece) {
+              if (piece && !cancelled) {
                 fullText += piece;
                 if (typeof onDelta === 'function') {
                   onDelta(piece);
@@ -1312,6 +1368,10 @@ class LLMService {
         req.destroy();
         reject(new Error('Streaming request timeout'));
       });
+      req.on('close', () => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+      });
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
 
       req.write(postData);
       req.end();
@@ -1669,7 +1729,9 @@ class LLMService {
    * with the same backoff as the Gemini paths; a stream that already showed
    * text is not replayed, because the caller's non-streaming fallback replaces
    * the partial answer instead of appending a second copy. options.onAttemptStart
-   * (optional) runs before every attempt.
+   * (optional) runs before every attempt. options.signal (optional
+   * AbortSignal) stops the request, a retry wait and any further attempt;
+   * no onDelta call follows the stop.
    */
   async executeProviderRequest(geminiRequest, onDelta = null, options = {}) {
     const providerConfig = getProviderConfig(this.providerId);
@@ -1691,19 +1753,23 @@ class LLMService {
 
     const streaming = typeof onDelta === 'function';
     const maxAttempts = Math.max(1, Number(options.maxAttempts) || config.get('llm.gemini.maxRetries') || 1);
+    const signal = options.signal || null;
     let lastError = null;
 
     const onAttemptStart = typeof options.onAttemptStart === 'function' ? options.onAttemptStart : null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      throwIfCancelled(signal);
       let emittedText = false;
       if (onAttemptStart) onAttemptStart();
       try {
         const text = streaming
-          ? await provider.stream(neutral, model, (delta) => {
+          ? await raceCancel(provider.stream(neutral, model, (delta) => {
+            if (isAborted(signal)) return;
             emittedText = true;
             onDelta(delta);
-          })
-          : await provider.generate(neutral, model);
+          }, { signal }), signal)
+          : await raceCancel(provider.generate(neutral, model, { signal }), signal);
+        throwIfCancelled(signal);
 
         const trimmed = typeof text === 'string' ? text.trim() : '';
         if (!trimmed) {
@@ -1719,6 +1785,7 @@ class LLMService {
         });
         return trimmed;
       } catch (error) {
+        this._rethrowIfCancelled(error, signal);
         lastError = error instanceof Error ? error : new Error(String(error));
         const errorInfo = this.analyzeError(lastError);
         const status = Number(lastError.status) || 0;
@@ -1741,7 +1808,7 @@ class LLMService {
         }
 
         const baseDelay = errorInfo.isNetworkError ? 2500 : 1500;
-        await this.delay(baseDelay * attempt + Math.random() * 1000);
+        await this.delay(baseDelay * attempt + Math.random() * 1000, signal);
       }
     }
 
@@ -1828,13 +1895,24 @@ class LLMService {
     };
   }
 
-  delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  /** Wait `ms`; with `signal`, a stop ends the wait with the cancelled error. */
+  delay(ms, signal = null) {
+    return cancellableDelay(ms, signal);
   }
 
-  async executeAlternativeRequest(geminiRequest) {
+  /**
+   * Rethrow the cancelled error when `error` is one or `signal` has fired,
+   * so a stopped answer skips retries, fallbacks and the error message.
+   */
+  _rethrowIfCancelled(error, signal) {
+    if (isCancelledError(error) || isAborted(signal)) {
+      throw isCancelledError(error) ? error : cancelledError();
+    }
+  }
+
+  async executeAlternativeRequest(geminiRequest, signal = null) {
     if (this.providerId !== 'gemini') {
-      return this.executeProviderRequest(geminiRequest, null);
+      return this.executeProviderRequest(geminiRequest, null, { signal });
     }
 
     const apiKey = config.getApiKey('GEMINI');
@@ -1849,10 +1927,12 @@ class LLMService {
     let lastError = null;
 
     for (const modelName of modelsToTry) {
+      throwIfCancelled(signal);
       try {
-        const result = await this._executeAlternativeRequestForModel(geminiRequest, modelName, apiKey);
+        const result = await this._executeAlternativeRequestForModel(geminiRequest, modelName, apiKey, signal);
         return result;
       } catch (error) {
+        this._rethrowIfCancelled(error, signal);
         lastError = error;
         logger.warn(`Alternative HTTPS request failed for model ${modelName}`, {
           error: error.message,
@@ -1872,7 +1952,8 @@ class LLMService {
     throw lastError || new Error('Alternative HTTPS request failed for all models');
   }
 
-  async _executeAlternativeRequestForModel(geminiRequest, modelName, apiKey) {
+  async _executeAlternativeRequestForModel(geminiRequest, modelName, apiKey, signal = null) {
+    throwIfCancelled(signal);
     const https = require('https');
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
@@ -1952,6 +2033,16 @@ class LLMService {
         req.destroy();
         reject(new Error('Alternative request timeout'));
       });
+
+      // A stop closes the connection; whatever arrives later is ignored.
+      if (signal) {
+        const onAbort = () => {
+          reject(cancelledError());
+          req.destroy();
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        req.on('close', () => signal.removeEventListener('abort', onAbort));
+      }
       
       req.write(postData);
       req.end();

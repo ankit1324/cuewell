@@ -110,6 +110,18 @@ body {
 
 .answer-status.is-off { opacity: 0; }
 
+/* "Stopped": the answer was stopped and keeps the text received so far.
+   A still square in ink instead of the live dot. */
+.answer-status.is-stopped.oc-label { color: var(--ink-2); }
+.answer-status.is-stopped::before {
+  width: 8px;
+  height: 8px;
+  margin: 0 2px;
+  border-radius: var(--r-1);
+  background: var(--ink-2);
+  animation: none;
+}
+
 .window-controls {
   display: flex;
   align-items: center;
@@ -118,6 +130,17 @@ body {
 }
 
 .window-controls svg { display: block; }
+
+/* Stop: a compact ghost button next to Close, shown only while an answer
+   is being written. */
+.answer-stop.oc-btn {
+  height: 28px;
+  gap: 6px;
+  padding: 0 var(--s-2);
+  font-size: var(--fs-12);
+}
+.answer-stop.oc-btn:hover { color: var(--red-ink); }
+.answer-stop[hidden] { display: none; }
 
 /* ---------- Views ----------
    The empty, loading and answer views (and, inside the answer, the split
@@ -463,9 +486,9 @@ body {
    shown. It takes no width (2 px box, -2 px margin) and is shorter than the
    line, so it never pushes text or changes a height; the inserted text is
    not animated. */
-.main-container:has(.answer-status:not(.is-off)):has(#response-content:not(.is-off)) .markdown-content:not(.answer-error) > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
-.main-container:has(.answer-status:not(.is-off)):has(#response-content:not(.is-off)) .markdown-content:not(.answer-error) > :is(ul, ol):last-child > li:last-child:not(:has(> :is(p, ul, ol)))::after,
-.main-container:has(.answer-status:not(.is-off)):has(#response-content:not(.is-off)) .markdown-content:not(.answer-error) > :is(ul, ol):last-child > li:last-child > p:last-child::after {
+.main-container:has(.answer-status:not(.is-off):not(.is-stopped)):has(#response-content:not(.is-off)) .markdown-content:not(.answer-error) > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.main-container:has(.answer-status:not(.is-off):not(.is-stopped)):has(#response-content:not(.is-off)) .markdown-content:not(.answer-error) > :is(ul, ol):last-child > li:last-child:not(:has(> :is(p, ul, ol)))::after,
+.main-container:has(.answer-status:not(.is-off):not(.is-stopped)):has(#response-content:not(.is-off)) .markdown-content:not(.answer-error) > :is(ul, ol):last-child > li:last-child > p:last-child::after {
   content: '';
   display: inline-block;
   width: 0;

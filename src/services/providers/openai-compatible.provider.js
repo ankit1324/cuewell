@@ -1,6 +1,7 @@
 const OpenAI = require('openai');
 const { normalizeSdkError, noTextAtLimitError } = require('./errors');
 const { resolveIdleTimeoutMs, startIdleTimeout } = require('./idle-timeout');
+const { cancelledError, isAborted, throwIfCancelled, raceCancel, anySignal } = require('../cancellation');
 
 // Per-request fetch option that hands a stream's idle-timer reset to the
 // client fetch below. A symbol, so it cannot clash with a RequestInit field.
@@ -87,32 +88,53 @@ class OpenAICompatibleProvider {
     return text;
   }
 
-  async generate(neutral, model) {
+  /**
+   * One answer, not streamed. `options.signal` (an AbortSignal) stops the
+   * request; it then rejects with the cancelled error from ../cancellation.
+   */
+  async generate(neutral, model, options = {}) {
+    const signal = (options && options.signal) || null;
+    throwIfCancelled(signal);
     let completion;
     try {
-      completion = await this.client.chat.completions.create(this._params(neutral, model));
+      completion = await this.client.chat.completions.create(
+        this._params(neutral, model),
+        signal ? { signal } : undefined
+      );
     } catch (error) {
+      if (isAborted(signal)) throw cancelledError();
       throw normalizeSdkError(OpenAI, error, this.label);
     }
+    throwIfCancelled(signal);
     const choice = completion && Array.isArray(completion.choices) ? completion.choices[0] : null;
     const content = choice && choice.message ? choice.message.content : null;
     return this._finish(typeof content === 'string' ? content : '', choice && choice.finish_reason, neutral.maxTokens);
   }
 
-  async stream(neutral, model, onDelta) {
+  /**
+   * Stream one answer, calling onDelta for each piece of text.
+   * `options.signal` stops it: the request is aborted, no onDelta call
+   * follows, and it rejects with the cancelled error.
+   */
+  async stream(neutral, model, onDelta, options = {}) {
+    const signal = (options && options.signal) || null;
+    throwIfCancelled(signal);
     const idle = startIdleTimeout(this.idleTimeoutMs, this.label, this.requestTimeoutMs);
+    const requestSignal = anySignal(idle.signal, signal);
     let text = '';
     let finishReason = null;
     try {
       // The SDK's stream iterator ends quietly when aborted, so the timeout
-      // has to reject through idle.run() rather than through the loop.
-      await idle.run(async () => {
+      // has to reject through idle.run() and a stop through raceCancel()
+      // rather than through the loop.
+      await raceCancel(idle.run(async () => {
         const stream = await this.client.chat.completions.create(
           { ...this._params(neutral, model), stream: true },
-          { signal: idle.signal, fetchOptions: { [ON_RESPONSE_DATA]: idle.reset } }
+          { signal: requestSignal, fetchOptions: { [ON_RESPONSE_DATA]: idle.reset } }
         );
         idle.reset();
         for await (const chunk of stream) {
+          if (isAborted(signal)) break;
           idle.reset();
           const choice = chunk && Array.isArray(chunk.choices) ? chunk.choices[0] : null;
           if (!choice) continue;
@@ -125,8 +147,10 @@ class OpenAICompatibleProvider {
             finishReason = choice.finish_reason;
           }
         }
-      });
+      }), signal);
+      throwIfCancelled(signal);
     } catch (error) {
+      if (isAborted(signal)) throw cancelledError();
       throw idle.timedOut ? idle.error : normalizeSdkError(OpenAI, error, this.label);
     } finally {
       idle.clear();

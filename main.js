@@ -311,6 +311,8 @@ const { createElectronHttpGet } = require("./src/core/electron-http-get");
 // resolved against the folder of the .env loaded above.
 speechService.setEnvPath(ENV_PATH);
 const llmService = require("./src/services/llm.service");
+const { isCancelledError } = require("./src/services/cancellation");
+const { ActiveAnswer } = require("./src/core/active-answer");
 const { promptLoader } = require("./prompt-loader");
 const profileStore = require("./src/core/profile-store");
 const secretStore = require("./src/core/secret-store");
@@ -399,6 +401,7 @@ const SHORTCUT_ACTIONS = Object.freeze({
   "Alt+A": "Turn click-through on or off",
   "CommandOrControl+Shift+C": "Show or hide the chat window",
   "CommandOrControl+Shift+\\": "Clear the conversation history",
+  "CommandOrControl+Shift+X": "Stop the answer that is being written",
   "CommandOrControl+,": "Open Settings",
   "CommandOrControl+Up": "Previous interview mode, or move the windows up when click-through is on",
   "CommandOrControl+Down": "Next interview mode, or move the windows down when click-through is on",
@@ -453,6 +456,8 @@ const IPC_ALLOWED_WINDOWS = Object.freeze({
   "quit-app": ["main", "settings"],
   // Chat (chat.html) and answer (llm-response.html)
   "send-chat-message": ["chat"],
+  // The Stop button in both windows; the toolbar uses the global shortcut
+  "stop-answer": ["chat", "llmResponse"],
   "copy-to-clipboard": ["chat", "llmResponse"],
   "close-window": ["llmResponse"],
   "resize-llm-window-for-content": ["llmResponse"],
@@ -504,6 +509,12 @@ class SettingsValidationError extends Error {
 const MAX_MAIN_WINDOW_HEIGHT = 800;
 const MAX_MOVE_DELTA = 200;
 const MAX_CHAT_MESSAGE_LENGTH = 100000;
+// Answer ids main.js makes: chat-, tr- (voice) or img- (screenshot), then
+// Date.now() and a sequence number.
+const ANSWER_ID_RE = /^(?:chat|tr|img)-\d{1,16}-\d{1,9}$/;
+// Ends a stopped answer's partial text in session memory, so the next
+// question's history shows the AI that this answer was cut off.
+const STOPPED_ANSWER_NOTE = "[This answer was stopped before it was finished.]";
 // Onboarding's Test connection; a cold local Ollama model can take a while.
 const PROVIDER_TEST_TIMEOUT_MS = 60000;
 
@@ -632,6 +643,11 @@ class ApplicationController {
       logger,
     });
     this._secretsInitialized = false;
+    // The answer being written now (src/core/active-answer.js). A new
+    // question stops it first; so do the Stop buttons and shortcut.
+    this.answers = new ActiveAnswer({
+      onStop: (answer, reason) => this.onAnswerStopped(answer, reason),
+    });
 
     // First-run onboarding: detects missing .env / API key and triggers
     // a settings-window prompt on first launch so users don't have to
@@ -1484,6 +1500,7 @@ class ApplicationController {
       "CommandOrControl+Shift+I": () => windowManager.toggleInteraction(),
       "CommandOrControl+Shift+C": () => windowManager.switchToWindow("chat"),
       "CommandOrControl+Shift+\\": () => this.clearSessionMemory(),
+      "CommandOrControl+Shift+X": () => this.stopActiveAnswer("user"),
       "Alt+A": () => windowManager.toggleInteraction(),
       "Alt+R": () => this.toggleSpeechRecognition(),
     };
@@ -1828,6 +1845,9 @@ class ApplicationController {
       if (text.length > MAX_CHAT_MESSAGE_LENGTH) {
         return { success: false, error: "Message is too long" };
       }
+      // A new question stops the answer still being written, which stores
+      // its partial text first, so session memory keeps the asked order.
+      this.stopActiveAnswer("replaced", null, ["chat", "llmResponse"]);
       // Add chat message to session memory
       sessionManager.addUserInput(text, 'chat');
       logger.debug('Chat message added to session memory', { textLength: text.length });
@@ -1852,6 +1872,16 @@ class ApplicationController {
       })();
 
       return { success: true };
+    });
+
+    // Stop button. With an answer id, only that answer stops, so a Stop
+    // pressed as one answer ends cannot stop the next one.
+    this.handleIpc("stop-answer", (_event, messageId) => {
+      if (messageId !== undefined && messageId !== null &&
+          (typeof messageId !== "string" || !ANSWER_ID_RE.test(messageId))) {
+        return { success: false, error: "Invalid answer id" };
+      }
+      return { success: true, stopped: this.stopActiveAnswer("user", messageId ?? null) };
     });
 
     this.handleIpc("get-window-stats", () => {
@@ -2262,6 +2292,7 @@ class ApplicationController {
     const startTime = Date.now();
     // Hoisted so the catch block can end the stream the start event opened.
     let messageId = null;
+    let answer = null;
 
     try {
       // Capture first: on Linux windows can't be hidden from capture, so a
@@ -2278,6 +2309,10 @@ class ApplicationController {
         throw captureError;
       }
 
+      // A new question: stop the answer still being written first, so its
+      // partial text is in the history read below.
+      this.stopActiveAnswer("replaced", null, ["chat", "llmResponse"]);
+
       // Use image directly with LLM and active skill; do not send chat messages here
       const sessionHistory = sessionManager.getOptimizedHistory();
 
@@ -2289,6 +2324,13 @@ class ApplicationController {
       // for before any chunk can arrive.
       this._responseSeq = (this._responseSeq || 0) + 1;
       messageId = `img-${Date.now()}-${this._responseSeq}`;
+      // Stops the answer still being written before this one starts.
+      answer = this.beginAnswer(messageId, {
+        source: "screenshot",
+        targets: ["chat", "llmResponse"],
+        overlay: true,
+        programmingLanguage: needsProgrammingLanguage ? this.codingLanguage : null,
+      });
       this.sendToAnswerWindows("transcription-llm-response-start", {
         messageId,
         source: "screenshot",
@@ -2303,6 +2345,7 @@ class ApplicationController {
         sessionHistory.recent,
         needsProgrammingLanguage ? this.codingLanguage : null,
         (delta) => {
+          if (!this.answers.append(answer, delta)) return;
           this.sendToAnswerWindows("transcription-llm-response-chunk", {
             messageId,
             delta
@@ -2310,12 +2353,17 @@ class ApplicationController {
         },
         // A retry or fallback starts over: clear this answer's live text.
         () => {
+          if (!this.answers.reset(answer)) return;
           this.sendToAnswerWindows("transcription-llm-response-chunk", {
             messageId,
             reset: true
           });
-        }
+        },
+        { signal: answer.signal }
       );
+      // Stopped as the last text arrived: the stop already showed and
+      // stored what was on screen, so this late result is dropped.
+      if (answer.stopped) return;
       llmResult.metadata = { ...llmResult.metadata, messageId };
 
       sessionManager.addModelResponse(llmResult.response, {
@@ -2335,6 +2383,7 @@ class ApplicationController {
         messageId
       });
     } catch (error) {
+      if (this.isStoppedAnswer(answer, error)) return;
       logger.error("Screenshot OCR process failed", {
         error: error.message,
         capture: !!error.isCaptureError,
@@ -2368,6 +2417,8 @@ class ApplicationController {
           error: error.message
         }
       });
+    } finally {
+      this.answers.finish(answer);
     }
   }
 
@@ -2398,6 +2449,7 @@ class ApplicationController {
   async processWithLLM(text, sessionHistory) {
     // Hoisted so the catch block can tell chat which request failed.
     let messageId = null;
+    let answer = null;
     try {
       // The send-chat-message handler has already stored `text` in session memory.
 
@@ -2407,6 +2459,13 @@ class ApplicationController {
 
       this._responseSeq = (this._responseSeq || 0) + 1;
       messageId = `chat-${Date.now()}-${this._responseSeq}`;
+      // Stops the answer still being written before this one starts.
+      answer = this.beginAnswer(messageId, {
+        source: "chat",
+        targets: ["chat", "llmResponse"],
+        overlay: true,
+        programmingLanguage: needsProgrammingLanguage ? this.codingLanguage : null,
+      });
       this.sendToAnswerWindows("transcription-llm-response-start", {
         messageId,
         source: "chat",
@@ -2420,6 +2479,7 @@ class ApplicationController {
         sessionHistory.recent,
         needsProgrammingLanguage ? this.codingLanguage : null,
         (delta) => {
+          if (!this.answers.append(answer, delta)) return;
           this.sendToAnswerWindows("transcription-llm-response-chunk", {
             messageId,
             delta
@@ -2427,12 +2487,17 @@ class ApplicationController {
         },
         // A retry or fallback starts over: clear this answer's live text.
         () => {
+          if (!this.answers.reset(answer)) return;
           this.sendToAnswerWindows("transcription-llm-response-chunk", {
             messageId,
             reset: true
           });
-        }
+        },
+        { signal: answer.signal }
       );
+      // Stopped as the last text arrived: the stop already showed and
+      // stored what was on screen, so this late result is dropped.
+      if (answer.stopped) return;
       llmResult.metadata = { ...llmResult.metadata, messageId };
 
       logger.info("LLM processing completed, showing response", {
@@ -2458,6 +2523,7 @@ class ApplicationController {
         messageId,
       });
     } catch (error) {
+      if (this.isStoppedAnswer(answer, error)) return;
       logger.error("LLM processing failed", {
         error: error.message,
         skill: this.activeSkill,
@@ -2481,6 +2547,8 @@ class ApplicationController {
       });
 
       this.broadcastLLMError(message, messageId);
+    } finally {
+      this.answers.finish(answer);
     }
   }
 
@@ -2524,11 +2592,17 @@ class ApplicationController {
 
   /**
    * Send the coalesced utterance to the LLM. If a previous dispatch is still
-   * running, leave the buffer intact and let that dispatch's completion pick it
-   * up — so we never pile up overlapping requests for the same person talking.
+   * running, its answer is stopped (a new question replaces it) and the
+   * buffer is left intact for that dispatch's completion to pick up, so
+   * requests never overlap.
    */
   async dispatchCoalescedUtterance() {
     if (this._utteranceDispatchInFlight) {
+      // Shorter utterances get no answer (processTranscriptionWithLLM), so
+      // they do not stop one either.
+      if (this._utteranceBuffer.trim().length >= 2) {
+        this.stopActiveAnswer("replaced", null, this.voiceTargetWindows());
+      }
       return;
     }
     const combined = this._utteranceBuffer.trim();
@@ -2542,6 +2616,8 @@ class ApplicationController {
       // Stored here rather than per fragment: the history then holds what was
       // actually asked, once, after any answer that was still streaming, and
       // the request builder can drop it as the trailing copy of this message.
+      // That answer is stopped first, so its partial text is stored before it.
+      if (combined.length >= 2) this.stopActiveAnswer("replaced", null, this.voiceTargetWindows());
       sessionManager.addUserInput(combined, 'speech');
       const sessionHistory = sessionManager.getOptimizedHistory();
       await this.processTranscriptionWithLLM(combined, sessionHistory);
@@ -2570,6 +2646,7 @@ class ApplicationController {
     // Hoisted so the catch block can tie the error to the same request the
     // streaming start event announced.
     let messageId = null;
+    let answer = null;
     // Read once so start, chunks and the final answer or error all go to the
     // same windows even if the setting changes mid-answer.
     const voiceTarget = this.getVoiceResponseTarget();
@@ -2605,6 +2682,13 @@ class ApplicationController {
       // the UI never duplicates or interleaves concurrent responses.
       this._responseSeq = (this._responseSeq || 0) + 1;
       messageId = `tr-${Date.now()}-${this._responseSeq}`;
+      // Stops the answer still being written before this one starts.
+      answer = this.beginAnswer(messageId, {
+        source: "voice",
+        targets: this.voiceTargetWindows(voiceTarget),
+        overlay: this.shouldShowVoiceOverlay(voiceTarget),
+        programmingLanguage: needsProgrammingLanguage ? this.codingLanguage : null,
+      });
       this.sendToVoiceResponseWindows("transcription-llm-response-start", {
         messageId,
         source: "voice",
@@ -2619,6 +2703,7 @@ class ApplicationController {
         sessionHistory.recent,
         needsProgrammingLanguage ? this.codingLanguage : null,
         (delta) => {
+          if (!this.answers.append(answer, delta)) return;
           this.sendToVoiceResponseWindows("transcription-llm-response-chunk", {
             messageId,
             delta
@@ -2626,12 +2711,17 @@ class ApplicationController {
         },
         // A retry or fallback starts over: clear this answer's live text.
         () => {
+          if (!this.answers.reset(answer)) return;
           this.sendToVoiceResponseWindows("transcription-llm-response-chunk", {
             messageId,
             reset: true
           }, voiceTarget);
-        }
+        },
+        { signal: answer.signal }
       );
+      // Stopped as the last text arrived: the stop already showed and
+      // stored what was on screen, so this late result is dropped.
+      if (answer.stopped) return;
       llmResult.metadata = { ...llmResult.metadata, messageId };
 
       // Add LLM response to session memory
@@ -2661,6 +2751,7 @@ class ApplicationController {
       });
 
     } catch (error) {
+      if (this.isStoppedAnswer(answer, error)) return;
       logger.error("Transcription LLM processing failed", {
         error: error.message,
         errorStack: error.stack,
@@ -2694,6 +2785,103 @@ class ApplicationController {
           skill: this.activeSkill
         }
       });
+    } finally {
+      this.answers.finish(answer);
+    }
+  }
+
+  /**
+   * Start the answer `messageId` and stop the one still being written.
+   * `targets` are the windows its stream goes to ("chat", "llmResponse");
+   * `overlay` is whether the answer window shows it.
+   */
+  beginAnswer(messageId, { source, targets, overlay, programmingLanguage = null }) {
+    this.stopActiveAnswer("replaced", null, targets);
+    return this.answers.begin(messageId, {
+      source,
+      targets: Array.isArray(targets) ? targets.slice() : [],
+      overlay: !!overlay,
+      skill: this.activeSkill,
+      programmingLanguage,
+    });
+  }
+
+  /**
+   * Stop the answer being written. reason "user" (Stop button or shortcut)
+   * or "replaced" (a new question, whose answer goes to the windows in
+   * `nextTargets`). With `messageId`, only that answer. Returns whether an
+   * answer was stopped.
+   */
+  stopActiveAnswer(reason = "user", messageId = null, nextTargets = null) {
+    this._replacingTargets = Array.isArray(nextTargets) ? nextTargets : null;
+    try {
+      return !!this.answers.stop(reason, messageId);
+    } finally {
+      this._replacingTargets = null;
+    }
+  }
+
+  /** True when `error` ended `answer` because it was stopped: nothing more to show. */
+  isStoppedAnswer(answer, error) {
+    if (!(answer && answer.stopped) && !isCancelledError(error)) return false;
+    logger.debug("Stopped answer ended", { messageId: answer && answer.id });
+    return true;
+  }
+
+  /**
+   * An answer was stopped (ActiveAnswer's onStop, called once per answer).
+   * The text received so far stays: it is stored in session memory once,
+   * marked as stopped, and shown marked "Stopped" where it was streaming.
+   * When the question that replaced it is answered in the answer window
+   * too, that window moves straight on to the new answer, so only chat
+   * gets the stopped one.
+   */
+  onAnswerStopped(answer, reason) {
+    try {
+      const raw = typeof answer.text === "string" ? answer.text : "";
+      const text = raw.trim() && llmService.shouldRetagCode(answer.skill, answer.programmingLanguage)
+        ? llmService.enforceProgrammingLanguage(raw, answer.programmingLanguage)
+        : raw;
+      if (text.trim()) {
+        sessionManager.addModelResponse(`${text.trim()}\n\n${STOPPED_ANSWER_NOTE}`, {
+          skill: answer.skill,
+          stopped: true,
+          stopReason: reason,
+          ...(answer.source === "voice" ? { isTranscriptionResponse: true } : {}),
+          ...(answer.source === "screenshot" ? { isImageAnalysis: true } : {}),
+        });
+      }
+      logger.info("Answer stopped", {
+        messageId: answer.id,
+        source: answer.source,
+        reason,
+        partialLength: text.length,
+      });
+
+      const data = {
+        response: text,
+        metadata: { messageId: answer.id, stopped: true, stopReason: reason },
+        messageId: answer.id,
+        skill: answer.skill,
+        isTranscriptionResponse: true,
+        stopped: true,
+      };
+      const overlayMovesOn = reason === "replaced" &&
+        Array.isArray(this._replacingTargets) && this._replacingTargets.includes("llmResponse");
+      for (const type of answer.targets || []) {
+        if (overlayMovesOn && type === "llmResponse") continue;
+        const win = windowManager.getWindow(type);
+        if (win && !win.isDestroyed()) win.webContents.send("transcription-llm-response", data);
+      }
+      if (!overlayMovesOn && answer.overlay) {
+        windowManager.showLLMResponse(text, {
+          skill: answer.skill,
+          messageId: answer.id,
+          stopped: true,
+        });
+      }
+    } catch (error) {
+      logger.error("Could not show the stopped answer", { error: error.message });
     }
   }
 
@@ -2759,6 +2947,13 @@ class ApplicationController {
 
   shouldShowVoiceOverlay(target = this.getVoiceResponseTarget()) {
     return ['overlay', 'both'].includes(target);
+  }
+
+  /** Window types a voice answer streams to for `target`. */
+  voiceTargetWindows(target = this.getVoiceResponseTarget()) {
+    if (target === 'chat') return ['chat'];
+    if (target === 'overlay') return ['llmResponse'];
+    return ['chat', 'llmResponse'];
   }
 
   sendToVoiceResponseWindows(channel, data, target = this.getVoiceResponseTarget()) {
