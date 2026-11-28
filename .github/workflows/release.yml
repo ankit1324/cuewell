@@ -181,7 +181,10 @@ jobs:
           # the requirement's certificate hash, not trust.
           sudo security authorizationdb write com.apple.trust-settings.admin allow
           sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$cert"
-          if ! security find-identity -v -p codesigning "$keychain" | grep -qF "\"$IDENTITY\""; then
+          # Captured first: under pipefail, `grep -q` exiting at the first match
+          # can SIGPIPE the writer and fail the pipeline although it matched.
+          identities="$(security find-identity -v -p codesigning "$keychain")"
+          if ! grep -qF "\"$IDENTITY\"" <<<"$identities"; then
             security find-identity -p codesigning "$keychain" || true
             echo "::error::\"$IDENTITY\" is not a valid code-signing identity on this runner"
             exit 1
@@ -248,7 +251,8 @@ jobs:
             codesign --verify --deep --strict --verbose=2 "$app"
             server="$app/Contents/Resources/whisper/whisper-server"
             codesign --verify --strict "$server"
-            codesign -d -r- "$server" 2>&1 | grep -qF "H\"$sha1\"" \
+            server_req="$(codesign -d -r- "$server" 2>&1)"
+            grep -qF "H\"$sha1\"" <<<"$server_req" \
               || { echo "::error::$server is not signed with the certificate"; exit 1; }
           done < <(find dist -maxdepth 2 -type d -name Cuewell.app)
           if [ "$count" -eq 0 ]; then
