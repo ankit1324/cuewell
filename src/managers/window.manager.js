@@ -628,8 +628,10 @@ class WindowManager {
     // resizes. On Windows and Linux they stay transparent: the card's
     // rounded corners are the only see-through part. The toolbar is
     // transparent everywhere: its tab has a margin for the shadow, and the
-    // shortcuts popover and notice hang below it.
-    if (this.isOpaqueWindowType(type)) {
+    // shortcuts popover and notice hang below it. Decided once per window:
+    // the native window keeps the opacity it was created with.
+    const opaque = this.isOpaqueWindowType(type);
+    if (opaque) {
       browserWindowOptions = {
         ...browserWindowOptions,
         transparent: false,
@@ -673,7 +675,7 @@ class WindowManager {
     window.webContents.on('dom-ready', () => {
       if (window.isDestroyed()) return;
       window.webContents.send('theme-changed', { theme: this.theme });
-      if (this.isOpaqueWindowType(type)) window.setBackgroundColor(this.getPaperColor(type));
+      if (opaque) window.setBackgroundColor(this.getPaperColor(type));
     });
     window.webContents.once('destroyed', () => {
       if (this.webContentsTypes.get(webContentsId) === type) {
