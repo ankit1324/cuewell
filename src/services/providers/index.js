@@ -3,8 +3,10 @@
  *
  * Gemini stays on LLMService's original code path (createProvider returns
  * null for it). Every other provider gets an object with
- * `generate(neutral, model)` and `stream(neutral, model, onDelta)`, where
- * `neutral` is the output of convert.fromGeminiRequest().
+ * `generate(neutral, model, { signal })` and
+ * `stream(neutral, model, onDelta, { signal })`, where `neutral` is the
+ * output of convert.fromGeminiRequest() and `signal` (optional) stops the
+ * request (see ../cancellation.js).
  *
  * Settings live in process.env (persisted to .env). Each helper takes an
  * optional `env` so callers that read the .env file directly (first-run)

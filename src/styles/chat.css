@@ -558,6 +558,39 @@ body {
 }
 .input-hint .oc-kbd { color: var(--ink-2); }
 
+/* Stop: shown only while an answer is being written. */
+.stop-button.oc-btn {
+  height: 28px;
+  gap: 6px;
+  padding: 0 var(--s-2);
+  font-size: var(--fs-12);
+}
+.stop-button.oc-btn:hover { color: var(--red-ink); }
+.stop-button svg { display: block; }
+.stop-button[hidden] { display: none; }
+
+/* An answer that was stopped: "Stopped" after the time in its head row. */
+.chat-messages .message-head .message-stopped {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 var(--fs-11) / var(--lh-16) var(--font-ui);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.chat-messages .message-head .message-stopped::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-1);
+  background: currentColor;
+}
+.chat-messages .message.stopped-empty .message-text {
+  font-size: var(--fs-13);
+  color: var(--ink-3);
+}
+
 .mic-button.recording,
 .mic-button.recording:hover {
   color: var(--red-ink);

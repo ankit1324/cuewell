@@ -57,6 +57,9 @@ const listen = (channel) => (callback) => {
 }
 
 const copyToClipboard = (text) => ipcRenderer.invoke('copy-to-clipboard', String(text ?? ''))
+// Stop button: stops the answer with this id (main checks it is the one
+// being written). Anything but a string id is sent as "the current answer".
+const stopAnswer = (messageId) => ipcRenderer.invoke('stop-answer', typeof messageId === 'string' ? messageId : undefined)
 
 const PAGES = {
   // chat.html
@@ -65,6 +68,7 @@ const PAGES = {
     startSpeechRecognition: invoke('start-speech-recognition'),
     stopSpeechRecognition: invoke('stop-speech-recognition'),
     sendChatMessage: (text) => ipcRenderer.invoke('send-chat-message', text),
+    stopAnswer,
     copyToClipboard,
     onTranscriptionReceived: listen('transcription-received'),
     onInterimTranscription: listen('interim-transcription'),
@@ -84,6 +88,7 @@ const PAGES = {
   // llm-response.html
   llmResponse: () => ({
     closeWindow: invoke('close-window'),
+    stopAnswer,
     copyToClipboard,
     resizeLlmWindowForContent: (contentMetrics) => ipcRenderer.invoke('resize-llm-window-for-content', contentMetrics),
     onDisplayLlmResponse: listen('display-llm-response'),

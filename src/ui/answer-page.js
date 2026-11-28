@@ -45,6 +45,8 @@ let slowTimer = null;
 
 const EMPTY_ANSWER_MESSAGE = 'No answer came back from the AI provider. Try asking again.';
 const FAILED_REQUEST_MESSAGE = 'The AI request failed. Try asking again.';
+// A stopped answer keeps its text; this shows when none had arrived yet.
+const STOPPED_EMPTY_MESSAGE = 'Stopped before any text arrived.';
 
 window.addEventListener('error', (event) => {
     console.error('[LLM-RESPONSE] Page error:', event.message, 'at line', event.lineno);
@@ -79,7 +81,7 @@ function initAnswerWindow() {
     api.onTranscriptionLlmResponse((_event, data) => {
         if (!data || !isOpenStream(data.messageId)) return;
         const response = typeof data.response === 'string' ? data.response : '';
-        if (showFinal(response, false)) reportDrawn('final');
+        if (showFinal(response, false, { stopped: data.stopped === true })) reportDrawn('final');
     });
     api.onLlmError((_event, data) => {
         if (!data || !isOpenStream(data.messageId)) return;
@@ -105,7 +107,11 @@ function initAnswerWindow() {
             // started) the message is shown, but an answer still
             // streaming keeps going and replaces it.
             const endsStream = !!metadata.messageId || !stream || stream.finished;
-            showFinal(response, !!metadata.isError, { endsStream, instant: info.appearing });
+            showFinal(response, !!metadata.isError, {
+                endsStream,
+                instant: info.appearing,
+                stopped: metadata.stopped === true
+            });
             settled = endsStream;
         } catch (err) {
             console.error('[LLM-RESPONSE] Could not show the answer:', err && err.message);
@@ -192,13 +198,65 @@ function setLoadingText(slow) {
 }
 
 // Header status label: "Thinking" while loading, "Writing" while an answer
-// streams, faded out otherwise (the last text stays so it can fade).
-function setStatusLabel(text) {
+// streams, "Stopped" on an answer that was stopped, faded out otherwise
+// (the last text stays so it can fade).
+function setStatusLabel(text, { stopped = false } = {}) {
     const status = document.getElementById('answer-status');
     if (!status) return;
     if (text) status.textContent = text;
     status.classList.toggle('is-off', !text);
+    status.classList.toggle('is-stopped', !!text && stopped);
 }
+
+// ---------- Stop ----------
+
+// The Stop button shows while the request on screen is still running
+// ("Thinking…" or "Writing"), and hides once it ends in any way.
+function syncStopButton() {
+    const btn = document.getElementById('stop-answer-btn');
+    if (!btn) return;
+    const running = !!(stream && !stream.finished);
+    if (btn.hidden === running) {
+        // Keyboard focus on the button moves to the answer once it hides
+        // (not to Close, where the next Enter would close the window).
+        if (!running && document.activeElement === btn) {
+            const region = document.querySelector(layout === 'split'
+                ? '.text-panel .panel-content'
+                : '.full-content-inner');
+            if (region) region.focus(); else btn.blur();
+        }
+        btn.hidden = !running;
+    }
+    if (!running) btn.disabled = false;
+}
+
+function stopCurrentAnswer() {
+    const btn = document.getElementById('stop-answer-btn');
+    const api = window.electronAPI;
+    if (!stream || stream.finished || !api || typeof api.stopAnswer !== 'function') return;
+    // Main answers with the stopped answer's final text, which hides the button.
+    if (btn) btn.disabled = true;
+    Promise.resolve()
+        .then(() => api.stopAnswer(stream.id))
+        .then(result => {
+            if (!result || result.stopped !== true) {
+                if (btn) btn.disabled = false;
+                syncStopButton();
+            }
+        })
+        .catch(error => {
+            console.error('[LLM-RESPONSE] Could not stop the answer:', error && error.message);
+            if (btn) btn.disabled = false;
+        });
+}
+
+(function () {
+    const btn = document.getElementById('stop-answer-btn');
+    if (!btn) return;
+    const mac = document.documentElement.dataset.platform === 'darwin';
+    btn.title = 'Stop the answer (' + (mac ? '\u2318\u21e7X' : 'Ctrl+Shift+X') + ')';
+    btn.addEventListener('click', stopCurrentAnswer);
+})();
 
 // ---------- Window appear ----------
 
@@ -296,6 +354,7 @@ function cancelStreamRender() {
 function endStream() {
     cancelStreamRender();
     if (stream) stream.finished = true;
+    syncStopButton();
 }
 
 // A new loading state: whatever the previous request still had queued must
@@ -314,6 +373,7 @@ function onStreamStart(data) {
     resetStreamDisplay();
     stream = { id, text: '', rendered: false, finished: false };
     shownFinalKey = null;
+    syncStopButton();
 }
 
 function onStreamChunk(data) {
@@ -324,7 +384,10 @@ function onStreamChunk(data) {
     if (!data || typeof data.delta !== 'string' || !data.delta) return;
     const id = typeof data.messageId === 'string' ? data.messageId : '';
     // No start seen (e.g. the page loaded mid-answer): follow this stream.
-    if (!stream && id) stream = { id, text: '', rendered: false, finished: false };
+    if (!stream && id) {
+        stream = { id, text: '', rendered: false, finished: false };
+        syncStopButton();
+    }
     if (!isOpenStream(id)) return;
     stream.text += data.delta;
     if (streamRenderTimer) return;
@@ -361,26 +424,30 @@ function renderStreamNow() {
 
 // Show the final answer or error. Replaces whatever is on screen: the
 // streamed text, "Thinking…" (a request that sent no chunks) or an older
-// answer. Returns false when it was already on screen.
-function showFinal(text, isError, { endsStream = true, instant = false } = {}) {
+// answer. A stopped answer (`stopped`) keeps the text received so far and
+// is marked "Stopped" in the header. Returns false when it was already on
+// screen.
+function showFinal(text, isError, { endsStream = true, instant = false, stopped = false } = {}) {
     const streamed = !!(stream && !stream.finished && stream.rendered);
     if (endsStream) endStream();
     stopSlowHint();
     let body = typeof text === 'string' ? text : '';
+    if (stopped) isError = false;
     if (!body.trim()) {
-        body = EMPTY_ANSWER_MESSAGE;
-        isError = true;
+        body = stopped ? STOPPED_EMPTY_MESSAGE : EMPTY_ANSWER_MESSAGE;
+        isError = !stopped;
     }
-    const key = (isError ? 'error:' : 'answer:') + body;
+    const status = stopped ? 'Stopped' : null;
+    const key = (stopped ? 'stopped:' : isError ? 'error:' : 'answer:') + body;
     if (key === shownFinalKey && view === 'answer') {
-        setStatusLabel(null);
+        setStatusLabel(status, { stopped });
         return false;
     }
     shownFinalKey = key;
     // A streamed answer keeps the reader's scroll position; a new one starts at the top.
     renderAnswer(body, { isError, final: true, fresh: !streamed, instant });
     setView('answer', { instant });
-    setStatusLabel(null);
+    setStatusLabel(status, { stopped });
     return true;
 }
 

@@ -45,6 +45,11 @@
             <button class="mic-button oc-btn oc-btn--ghost oc-icon-btn" id="micButton" type="button" title="Voice input (Alt+R)" aria-label="Start or stop voice input">
               <i class="fa-solid fa-microphone" aria-hidden="true"></i>
             </button>
+            <!-- Shown while an answer is being written (chat-page.js) -->
+            <button class="stop-button oc-btn oc-btn--ghost" id="stopButton" type="button" title="Stop the answer" aria-label="Stop the answer" hidden>
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" focusable="false"><rect x="1" y="1" width="8" height="8" rx="1.5" fill="currentColor"/></svg>
+              <span>Stop</span>
+            </button>
             <button class="send-button oc-send" id="sendButton" type="button" title="Send" aria-label="Send message">
               <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
             </button>

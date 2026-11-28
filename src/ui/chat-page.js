@@ -5,6 +5,7 @@ const chatMessages = document.getElementById('chatMessages');
 const recordingIndicator = document.getElementById('recordingIndicator');
 const messageInput = document.getElementById('messageInput');
 const sendButton = document.getElementById('sendButton');
+const stopButton = document.getElementById('stopButton');
 const micButton = document.getElementById('micButton');
 const listeningIndicator = document.getElementById('listeningIndicator');
 const listeningDuration = document.getElementById('listeningDuration');
@@ -39,6 +40,8 @@ const finishedStreamIds = new Set();
 const FINISHED_ID_LIMIT = 100;
 
 const EMPTY_ANSWER_MESSAGE = 'No answer came back from the AI provider. Try asking again.';
+// A stopped answer keeps its text; this shows when none had arrived yet.
+const STOPPED_EMPTY_MESSAGE = 'Stopped before any text arrived.';
 
 function hashString(str) {
   try {
@@ -76,6 +79,7 @@ function clearChatHistory(skipConfirm = false) {
   // Answers still streaming continue in a new row if more text arrives.
   streams.forEach(entry => { if (entry.timer) clearTimeout(entry.timer); });
   streams.clear();
+  syncStopButton();
   // Clear DOM
   if (chatMessages) chatMessages.innerHTML = '';
 }
@@ -291,6 +295,7 @@ function openStream(messageId, source) {
   el.removeAttribute('id');
   const entry = { el, text: '', timer: null, lastRenderAt: 0, live: false, cards: [] };
   streams.set(messageId, entry);
+  syncStopButton();
   return entry;
 }
 
@@ -301,7 +306,58 @@ function closeStream(messageId) {
   if (entry.timer) clearTimeout(entry.timer);
   streams.delete(messageId);
   rememberFinished(messageId);
+  syncStopButton();
   return entry;
+}
+
+// ---------- Stop ----------
+
+// The Stop button shows while an answer in this list is still running
+// ("Thinking…" or streaming) and hides once every one has ended.
+function syncStopButton() {
+  if (!stopButton) return;
+  const running = streams.size > 0;
+  if (stopButton.hidden === running) {
+    // Keyboard focus on the button goes back to the message box once it hides.
+    if (!running && document.activeElement === stopButton && messageInput) messageInput.focus();
+    stopButton.hidden = !running;
+  }
+  if (!running) stopButton.disabled = false;
+}
+
+// The newest running answer: main writes one answer at a time, so that is
+// the one to stop.
+function latestStreamId() {
+  let last = null;
+  streams.forEach((_entry, id) => { last = id; });
+  return last;
+}
+
+async function stopCurrentAnswer() {
+  const id = latestStreamId();
+  if (!id || !whysperAPI || typeof whysperAPI.stopAnswer !== 'function') return;
+  // Main answers with the stopped answer's final text, which hides the button.
+  if (stopButton) stopButton.disabled = true;
+  try {
+    const result = await whysperAPI.stopAnswer(id);
+    if (!result || result.stopped !== true) {
+      if (stopButton) stopButton.disabled = false;
+      syncStopButton();
+    }
+  } catch (error) {
+    console.error('Failed to stop the answer:', error);
+    if (stopButton) stopButton.disabled = false;
+  }
+}
+
+// "Stopped" after the time in an answer row's head.
+function markStopped(row) {
+  const head = row && row.querySelector('.message-head');
+  if (!head || head.querySelector('.message-stopped')) return;
+  const mark = document.createElement('span');
+  mark.className = 'message-stopped';
+  mark.textContent = 'Stopped';
+  head.appendChild(mark);
 }
 
 function appendStreamDelta(messageId, delta) {
@@ -419,7 +475,9 @@ function patchChildren(target, html, { math = false } = {}) {
 
 // The final answer for messageId: the row keeps its place and becomes the
 // answer's prose, and its snippet cards get copy buttons and highlighting.
-function finishStream(messageId, response) {
+// A stopped answer (`stopped`) keeps the text received so far and is
+// marked "Stopped".
+function finishStream(messageId, response, { stopped = false } = {}) {
   const entry = closeStream(messageId);
   if (!entry) {
     // No row for this request (e.g. the page loaded mid-answer).
@@ -436,6 +494,23 @@ function finishStream(messageId, response) {
 
   const follow = isNearBottom();
   const { text: prose, blocks } = splitCodeBlocks(text);
+  if (stopped && !(prose && prose.trim()) && !blocks.length) {
+    // Stopped before any text: the row says so, marked "Stopped".
+    removeCards(entry);
+    makeRowLive(entry);
+    entry.el.classList.remove('streaming', 'no-text');
+    entry.el.classList.add('stopped-empty');
+    const textDiv = entry.el.querySelector('.message-text');
+    if (textDiv) {
+      textDiv.classList.remove('oc-prose');
+      textDiv.textContent = STOPPED_EMPTY_MESSAGE;
+    }
+    markStopped(entry.el);
+    chatHistory.push({ kind: 'message', type: 'system', text: STOPPED_EMPTY_MESSAGE });
+    saveHistory();
+    if (follow) chatMessages.scrollTop = chatMessages.scrollHeight;
+    return;
+  }
   if (!(prose && prose.trim()) && !blocks.length) {
     // Nothing came back: say so instead of leaving an empty row.
     removeCards(entry);
@@ -449,6 +524,7 @@ function finishStream(messageId, response) {
   entry.el.classList.remove('streaming');
   showRowProse(entry, prose, blocks.length > 0);
   syncCards(entry, blocks);
+  if (stopped) markStopped(entry.el);
   if (prose && prose.trim()) {
     chatHistory.push({ kind: 'message', type: 'assistant', text: prose });
   }
@@ -851,7 +927,7 @@ if (whysperAPI) {
   whysperAPI.onTranscriptionLlmResponse((event, data) => {
     if (!data) return;
     if (typeof data.messageId === 'string' && data.messageId) {
-      finishStream(data.messageId, data.response);
+      finishStream(data.messageId, data.response, { stopped: data.stopped === true });
     } else if (data.response) {
       try { hideThinkingIndicator(); } catch (_) {}
       renderAssistantResponse(data.response);
@@ -862,6 +938,12 @@ if (whysperAPI) {
 // UI Event Listeners
 if (clearHistoryBtn) {
   clearHistoryBtn.addEventListener('click', () => clearChatHistory());
+}
+
+if (stopButton) {
+  const mac = document.documentElement.dataset.platform === 'darwin';
+  stopButton.title = `Stop the answer (${mac ? '\u2318\u21e7X' : 'Ctrl+Shift+X'}, or Esc)`;
+  stopButton.addEventListener('click', () => stopCurrentAnswer());
 }
 
 if (micButton) {
@@ -956,6 +1038,12 @@ if (messageInput) {
 
 // Global keyboard shortcuts
 document.addEventListener('keydown', (e) => {
+  // Esc stops the answer being written, from anywhere in the window.
+  if (e.key === 'Escape' && !e.defaultPrevented && !e.isComposing && streams.size > 0) {
+    e.preventDefault();
+    stopCurrentAnswer();
+    return;
+  }
   if (e.altKey && e.key === 'r') {
     e.preventDefault();
     if (!isInteractive || !speechAvailable) return;

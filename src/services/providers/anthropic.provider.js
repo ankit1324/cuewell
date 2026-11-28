@@ -2,6 +2,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const logger = require('../../core/logger').createServiceLogger('LLM');
 const { normalizeSdkError, noTextAtLimitError } = require('./errors');
 const { resolveIdleTimeoutMs, startIdleTimeout } = require('./idle-timeout');
+const { cancelledError, isAborted, throwIfCancelled, raceCancel, anySignal } = require('../cancellation');
 
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -126,25 +127,51 @@ class AnthropicProvider {
     return text;
   }
 
-  async generate(neutral, model) {
-    const message = await this._send(this._params(neutral, model), (api, params) => api.create(params));
+  /**
+   * One answer, not streamed. `options.signal` (an AbortSignal) stops the
+   * request; it then rejects with the cancelled error from ../cancellation.
+   */
+  async generate(neutral, model, options = {}) {
+    const signal = (options && options.signal) || null;
+    throwIfCancelled(signal);
+    let message;
+    try {
+      message = await raceCancel(
+        this._send(this._params(neutral, model), (api, params) => api.create(params, signal ? { signal } : undefined)),
+        signal
+      );
+    } catch (error) {
+      if (isAborted(signal)) throw cancelledError();
+      throw error;
+    }
+    throwIfCancelled(signal);
     return this._finish(message, neutral.maxTokens);
   }
 
-  async stream(neutral, model, onDelta) {
+  /**
+   * Stream one answer, calling onDelta for each piece of text.
+   * `options.signal` stops it: the request is aborted, no onDelta call
+   * follows, and it rejects with the cancelled error.
+   */
+  async stream(neutral, model, onDelta, options = {}) {
+    const signal = (options && options.signal) || null;
+    throwIfCancelled(signal);
     const idle = startIdleTimeout(this.idleTimeoutMs, this.label, this.requestTimeoutMs);
+    const requestSignal = anySignal(idle.signal, signal);
     try {
-      const message = await idle.run(() => this._send(this._params(neutral, model), (api, params) => {
-        const stream = api.stream(params, { signal: idle.signal, middleware: [onResponseData(idle.reset)] });
+      const message = await raceCancel(idle.run(() => this._send(this._params(neutral, model), (api, params) => {
+        const stream = api.stream(params, { signal: requestSignal, middleware: [onResponseData(idle.reset)] });
         // Backup for the middleware: every parsed event except `ping`.
         stream.on('streamEvent', idle.reset);
         stream.on('text', (delta) => {
-          if (delta) onDelta(delta);
+          if (delta && !isAborted(signal)) onDelta(delta);
         });
         return stream.finalMessage();
-      }));
+      })), signal);
+      throwIfCancelled(signal);
       return this._finish(message, neutral.maxTokens);
     } catch (error) {
+      if (isAborted(signal)) throw cancelledError();
       throw idle.timedOut ? idle.error : error;
     } finally {
       idle.clear();
